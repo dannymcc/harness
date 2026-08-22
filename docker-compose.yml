@@ -1,6 +1,6 @@
 services:
   wilman:
-    image: ghcr.io/dannymcc/wilman:latest
+    image: ghcr.io/dannymcc/harness:latest
     build: .
     container_name: wilman
     restart: unless-stopped
