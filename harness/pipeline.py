@@ -347,12 +347,13 @@ def _state_digest(project) -> str:
             + (f" — error: {it['error'][:120]}" if it["error"] else ""))
     open_qs = db.open_questions(name)
     if open_qs:
-        lines.append("\nQuestions already waiting on Danny (do not re-ask):")
+        lines.append("\nQuestions already filed and pending (do not re-ask):")
         lines += [f"- ({q['asked_by']}) {q['question'][:150]}" for q in open_qs]
     answered = db.recent_answers(name)
     if answered:
         lines.append("\nDanny's recent decisions:")
-        lines += [f"- Q ({q['asked_by']}): {q['question'][:120]}\n  A: {q['answer'][:200]}"
+        lines += [f"- Q ({q['asked_by']}): {q['question'][:120]}\n"
+                  f"  A ({q['answered_by'] or 'Danny'}): {q['answer'][:200]}"
                   for q in answered]
     queued = db.items_by_status(name, "queued")
     lines.append(f"\nQueued for next release: {len(queued)} change(s). "
@@ -482,6 +483,7 @@ def _unstick_working() -> list[str]:
 
 def _standup_digest() -> str:
     now_ts = datetime.now(timezone.utc)
+    inbox = db.harry_inbox()
 
     def age_days(ts: str) -> str:
         try:
@@ -492,6 +494,11 @@ def _standup_digest() -> str:
             return "?"
 
     sections = []
+    if inbox:
+        sections.append("Open questions awaiting your ruling:\n" + "\n".join(
+            f"- id={q['id']} [{q['project'] or 'section'}] from {q['asked_by']}"
+            f"{' re ' + q['item_key'] if q['item_key'] else ''}: {q['question'][:200]}"
+            for q in inbox))
     if db.paused_until():
         sections.append(f"NOTE: agent work is paused for API limits until "
                         f"{db.paused_until()}.")
@@ -564,9 +571,26 @@ async def run_standup() -> None:
     for b in out.get("blockers", []):
         db.log_event(f"Stand-up blocker: {b['message']}", "warn",
                      project=b.get("project", ""))
+    _apply_decisions(out.get("decisions", []))
     _apply_staffing(out.get("staffing", []))
     if out["all_clear"]:
         db.log_event("Stand-up: all clear")
+
+
+def _apply_decisions(decisions: list) -> None:
+    valid = {q["id"]: q for q in db.harry_inbox()}
+    for d in decisions:
+        q = valid.get(d.get("question_id"))
+        if not q:
+            continue
+        if d["action"] == "answer" and d.get("answer", "").strip():
+            db.answer_question(q["id"], d["answer"].strip(), by="Harry")
+            db.log_event(f"Harry ruled on {q['asked_by']}'s question: "
+                         f"{d['answer'][:150]}", project=q["project"])
+        elif d["action"] == "escalate":
+            db.escalate_question(q["id"])
+            db.log_event(f"Harry escalated {q['asked_by']}'s question to Danny",
+                         "warn", project=q["project"])
 
 
 def _apply_staffing(actions: list) -> None:

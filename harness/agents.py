@@ -47,11 +47,11 @@ Ground rules, non-negotiable:
   a wrong "success" is far worse than a "needs a human".
 - British English, plain and understated, in anything user-facing.
 - Never invent facts about the project. Read the code before concluding.
-- Every schema has an optional question_for_danny field. Use it when a
-  decision genuinely belongs to Danny, the maintainer (product direction,
-  breaking changes, anything you were told to check first). One short,
-  specific question; empty string otherwise. Never re-ask something listed
-  as already waiting on him.
+- Every schema has an optional question_for_danny field. Use it when you
+  need a decision you cannot make yourself. It goes to Harry first, who
+  either decides or escalates to Danny, the maintainer. One short, specific
+  question; empty string otherwise. Never re-ask something already listed
+  as waiting.
 """
 
 
@@ -314,6 +314,22 @@ STANDUP_SCHEMA = {
                 "properties": {
                     "project": {"type": "string"},
                     "message": {"type": "string"},
+                },
+            },
+        },
+        "decisions": {
+            "type": "array",
+            "description": "Rulings on the open questions listed in the digest.",
+            "items": {
+                "type": "object",
+                "additionalProperties": False,
+                "required": ["question_id", "action", "answer"],
+                "properties": {
+                    "question_id": {"type": "integer"},
+                    "action": {"type": "string",
+                               "enum": ["answer", "escalate"]},
+                    "answer": {"type": "string",
+                               "description": "Your ruling (empty when escalating)."},
                 },
             },
         },
@@ -629,6 +645,13 @@ progress, what's blocked and why, how long things have been waiting, and
 recent failures and spend.
 
 {digest}
+
+You make the decisions. The digest lists open questions from your people,
+each with an id. Rule on each: answer it yourself when it is within the
+section's remit (engineering judgement, priorities, process). Escalate to
+Danny only what is genuinely his — product direction, breaking changes,
+anything with consequences outside the codebase. Your answers reach the
+team automatically.
 
 You also run staffing. The utilisation figures show how busy each desk's
 people are. If a desk has a backlog of fixable work, hire an extra engineer

@@ -212,6 +212,16 @@ def project_page(request: Request, name: str):
         cost=db.total_cost(name))
 
 
+@app.get("/p/{name}/settings")
+def project_settings(request: Request, name: str):
+    p = db.get_project(name)
+    if not p:
+        return RedirectResponse("/", status_code=303)
+    return render(request, "settings.html", p=p,
+                  policies=db.all_policies(name),
+                  staff=db.staff_get(name))
+
+
 @app.get("/p/{name}/{kind}/{number}")
 def item_page(request: Request, name: str, kind: str, number: int):
     p = db.get_project(name)
@@ -284,7 +294,7 @@ def set_policy(name: str, key: str, value: str = Form(...)):
     if key in config.POLICY_DEFAULTS:
         db.set_policy(name, key, value)
         db.log_event(f"Policy {key} -> {value}", project=name)
-    return RedirectResponse(f"/p/{name}", status_code=303)
+    return RedirectResponse(f"/p/{name}/settings", status_code=303)
 
 
 @app.post("/p/{name}/question/{qid}/answer")
@@ -302,6 +312,15 @@ def dismiss_question(name: str, qid: int):
     db.dismiss_question(qid)
     return RedirectResponse(f"/p/{name}" if name != "-" else "/",
                             status_code=303)
+
+
+@app.post("/p/{name}/tell")
+def tell_team(name: str, text: str = Form(...), item_key: str = Form("")):
+    if db.get_project(name):
+        db.add_direction(name, text, item_key)
+        worker.trigger()
+    target = f"/p/{name}/{item_key.replace('#', '/')}" if item_key else f"/p/{name}"
+    return RedirectResponse(target, status_code=303)
 
 
 @app.post("/p/{name}/security-review")

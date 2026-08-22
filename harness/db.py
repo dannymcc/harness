@@ -118,6 +118,7 @@ def now() -> str:
 
 MIGRATIONS = [
     "ALTER TABLE runs ADD COLUMN agent TEXT NOT NULL DEFAULT ''",
+    "ALTER TABLE questions ADD COLUMN answered_by TEXT NOT NULL DEFAULT ''",
 ]
 
 
@@ -441,8 +442,9 @@ def ask_question(project: str, asked_by: str, item_key: str,
         return
     with conn() as c:
         dup = c.execute(
-            "SELECT id FROM questions WHERE project = ? AND status = 'open' "
-            "AND question = ?", (project, question)).fetchone()
+            "SELECT id FROM questions WHERE project = ? AND status IN "
+            "('open', 'escalated') AND question = ?",
+            (project, question)).fetchone()
         if dup:
             return
         c.execute(
@@ -453,10 +455,17 @@ def ask_question(project: str, asked_by: str, item_key: str,
               "warn", project=project)
 
 
-def answer_question(qid: int, answer: str) -> None:
+def answer_question(qid: int, answer: str, by: str = "Danny") -> None:
     with conn() as c:
         c.execute("UPDATE questions SET status = 'answered', answer = ?, "
-                  "answered_at = ? WHERE id = ?", (answer, now(), qid))
+                  "answered_by = ?, answered_at = ? WHERE id = ?",
+                  (answer, by, now(), qid))
+
+
+def escalate_question(qid: int) -> None:
+    with conn() as c:
+        c.execute("UPDATE questions SET status = 'escalated' WHERE id = ? "
+                  "AND status = 'open'", (qid,))
 
 
 def dismiss_question(qid: int) -> None:
@@ -466,14 +475,22 @@ def dismiss_question(qid: int) -> None:
 
 
 def open_questions(project: str | None = None):
+    """Questions still pending: escalated (for Danny) first, then those
+    sitting with Harry."""
+    q = ("SELECT * FROM questions WHERE status IN ('open', 'escalated') "
+         "ORDER BY status = 'escalated' DESC, id DESC")
     with conn() as c:
         if project is None:
-            return c.execute(
-                "SELECT * FROM questions WHERE status = 'open' "
-                "ORDER BY id DESC").fetchall()
+            return c.execute(q).fetchall()
+        return c.execute(q.replace("WHERE", "WHERE project = ? AND"),
+                         (project,)).fetchall()
+
+
+def harry_inbox():
+    with conn() as c:
         return c.execute(
-            "SELECT * FROM questions WHERE status = 'open' AND project = ? "
-            "ORDER BY id DESC", (project,)).fetchall()
+            "SELECT * FROM questions WHERE status = 'open' ORDER BY id"
+        ).fetchall()
 
 
 def recent_answers(project: str, limit: int = 8):
@@ -481,6 +498,21 @@ def recent_answers(project: str, limit: int = 8):
         return c.execute(
             "SELECT * FROM questions WHERE status = 'answered' AND project = ? "
             "ORDER BY answered_at DESC LIMIT ?", (project, limit)).fetchall()
+
+
+def add_direction(project: str, text: str, item_key: str = "") -> None:
+    """A standing direction from Danny — stored as a pre-answered question so
+    it flows into prompts exactly like answered questions do."""
+    text = text.strip()
+    if not text:
+        return
+    with conn() as c:
+        c.execute(
+            "INSERT INTO questions (project, asked_by, item_key, question, "
+            "status, answer, answered_by, created_at, answered_at) VALUES "
+            "(?, 'Danny', ?, '(standing direction)', 'answered', ?, 'Danny', ?, ?)",
+            (project, item_key, text, now(), now()))
+    log_event(f"Danny directed the team: {text[:120]}", project=project)
 
 
 def answers_for(project: str, item_key: str):
