@@ -1,0 +1,445 @@
+"""Claude Agent SDK sessions.
+
+Three roles:
+  * ICs        - task runs: triage an issue, fix a bug, review a PR, draft a
+                 release. They work inside wilman's clone of the project.
+  * Team Lead  - one per project: reads the project's state and produces the
+                 work plan for the cycle (what to do, in what order, and what
+                 to skip).
+  * CTO        - one across all projects: reviews every harness, escalates
+                 stuck work, and writes the status report for the overview
+                 dashboard.
+
+Safety model: agents never push, merge, comment on GitHub, or tag. They only
+read, edit files in wilman's clone, and run tests. All outward actions are
+performed deterministically by pipeline.py, subject to the per-project policy
+gates. Enforced belt-and-braces: prompts say so, and disallowed_tools blocks
+git push / gh / network use inside sessions.
+"""
+import json
+import re
+import time
+from datetime import datetime, timezone, timedelta
+
+from claude_agent_sdk import (
+    query,
+    ClaudeAgentOptions,
+    AssistantMessage,
+    ResultMessage,
+)
+
+from . import config, db
+
+IC_TOOLS = ["Read", "Glob", "Grep", "Edit", "Write", "Bash", "TodoWrite"]
+READONLY_TOOLS = ["Read", "Glob", "Grep", "Bash", "TodoWrite"]
+BLOCKED = [
+    "Bash(git push*)", "Bash(gh *)", "Bash(git remote*)",
+    "WebFetch", "WebSearch", "Task",
+]
+
+BASE_RULES = """
+You are part of Wilman, an automated maintainer for open-source projects.
+Ground rules, non-negotiable:
+- You work only inside the provided checkout. NEVER run `git push`, `gh`,
+  or anything that talks to GitHub or the network. The harness handles all
+  of that after you finish.
+- Be honest in your structured output. If you are not confident, say so;
+  a wrong "success" is far worse than a "needs a human".
+- British English, plain and understated, in anything user-facing.
+- Never invent facts about the project. Read the code before concluding.
+"""
+
+
+# --- stall detection ---------------------------------------------------------
+
+STALL_MARKERS = (
+    "rate limit", "rate_limit", "usage limit", "usage_limit", "overloaded",
+    "429", "insufficient credit", "credit balance", "quota", "529",
+)
+
+
+def _stall_reset_time(text: str) -> str:
+    """Return an ISO time to resume at, parsed from the error if possible."""
+    # Claude usage-limit errors often carry a unix reset timestamp.
+    m = re.search(r"(?:resets? at\D*|\|)(\d{10})", text)
+    if m:
+        ts = datetime.fromtimestamp(int(m.group(1)), tz=timezone.utc)
+        if ts > datetime.now(timezone.utc):
+            return ts.strftime("%Y-%m-%dT%H:%M:%SZ")
+    # Otherwise exponential backoff: 15m, 30m, 1h, 2h, 4h (cap).
+    count = int(db.get_setting("backoff_count", "0"))
+    delay = min(15 * (2 ** count), 240)
+    db.set_setting("backoff_count", str(count + 1))
+    ts = datetime.now(timezone.utc) + timedelta(minutes=delay)
+    return ts.strftime("%Y-%m-%dT%H:%M:%SZ")
+
+
+def _check_stall(text: str) -> bool:
+    low = (text or "").lower()
+    return any(marker in low for marker in STALL_MARKERS)
+
+
+class AgentStalled(RuntimeError):
+    """API rate/usage limit hit; work is paused and will resume later."""
+
+
+# --- core runner -------------------------------------------------------------
+
+async def run_agent(*, project_name: str, role: str, item_key: str, task: str,
+                    prompt: str, cwd: str | None, schema: dict,
+                    readonly: bool = False, resume: str | None = None) -> dict:
+    """Run one agent session, log it, and return its structured output.
+
+    Returns {"ok": bool, "output": dict|None, "session_id": str, "error": str}.
+    Raises AgentStalled after registering a global pause on rate/usage limits.
+    """
+    if db.paused_until():
+        raise AgentStalled("paused for API limits")
+
+    run_id = db.start_run(project_name, role, item_key, task, config.MODEL)
+    options = ClaudeAgentOptions(
+        model=config.MODEL,
+        cwd=cwd,
+        allowed_tools=READONLY_TOOLS if readonly else IC_TOOLS,
+        disallowed_tools=BLOCKED,
+        permission_mode="dontAsk",
+        system_prompt=BASE_RULES,
+        max_turns=config.MAX_TURNS,
+        max_budget_usd=config.MAX_BUDGET_USD_PER_RUN,
+        output_format={"type": "json_schema", "schema": schema},
+        setting_sources=[],
+        resume=resume,
+    )
+
+    config.LOG_DIR.mkdir(parents=True, exist_ok=True)
+    log_path = config.LOG_DIR / f"run-{run_id}.log"
+    session_id, cost, turns, result = "", 0.0, 0, None
+    try:
+        with open(log_path, "w") as log:
+            log.write(f"# {task} {item_key} ({role})\n\n{prompt}\n\n---\n\n")
+            async for message in query(prompt=prompt, options=options):
+                if isinstance(message, AssistantMessage):
+                    turns += 1
+                    for block in message.content:
+                        text = getattr(block, "text", None)
+                        if text:
+                            log.write(text + "\n")
+                elif isinstance(message, ResultMessage):
+                    result = message
+                    session_id = getattr(message, "session_id", "") or ""
+                    cost = message.total_cost_usd or 0.0
+    except Exception as e:  # SDK/process/transport failures
+        err = f"{type(e).__name__}: {e}"
+        db.finish_run(run_id, False, cost, turns, err, str(log_path))
+        if _check_stall(err):
+            db.pause_until(_stall_reset_time(err), err[:300])
+            raise AgentStalled(err) from e
+        return {"ok": False, "output": None, "session_id": session_id, "error": err}
+
+    if result is None:
+        db.finish_run(run_id, False, cost, turns, "no result message", str(log_path))
+        return {"ok": False, "output": None, "session_id": session_id,
+                "error": "session produced no result"}
+
+    err_text = getattr(result, "result", "") or ""
+    if result.subtype != "success":
+        summary = f"{result.subtype}: {err_text[:200]}"
+        db.finish_run(run_id, False, cost, turns, summary, str(log_path))
+        if _check_stall(err_text):
+            db.pause_until(_stall_reset_time(err_text), err_text[:300])
+            raise AgentStalled(err_text)
+        return {"ok": False, "output": None, "session_id": session_id,
+                "error": summary}
+
+    db.set_setting("backoff_count", "0")  # healthy run resets the backoff
+    output = result.structured_output
+    summary = ""
+    if isinstance(output, dict):
+        summary = str(output.get("summary", ""))[:300]
+    db.finish_run(run_id, True, cost, turns, summary, str(log_path))
+    return {"ok": True, "output": output, "session_id": session_id, "error": ""}
+
+
+# --- IC schemas & prompts ----------------------------------------------------
+
+TRIAGE_SCHEMA = {
+    "type": "object",
+    "additionalProperties": False,
+    "required": ["verdict", "valid", "fixable", "summary", "plan",
+                 "draft_comment"],
+    "properties": {
+        "verdict": {"type": "string",
+                    "enum": ["bug", "feature", "question", "duplicate",
+                             "invalid", "spam"]},
+        "valid": {"type": "boolean",
+                  "description": "Is this a genuine, reproducible/actionable report?"},
+        "fixable": {"type": "boolean",
+                    "description": "Could an automated fix be attempted safely?"},
+        "summary": {"type": "string",
+                    "description": "2-3 sentences: what this is and your assessment."},
+        "plan": {"type": "string",
+                 "description": "If fixable: concrete fix plan with files. Else empty."},
+        "draft_comment": {"type": "string",
+                          "description": "Reply to post on the issue (may be empty)."},
+    },
+}
+
+FIX_SCHEMA = {
+    "type": "object",
+    "additionalProperties": False,
+    "required": ["success", "summary", "docs_updated", "commit_message", "notes"],
+    "properties": {
+        "success": {"type": "boolean",
+                    "description": "True only if the fix is complete and tests pass."},
+        "summary": {"type": "string"},
+        "docs_updated": {"type": "boolean",
+                         "description": "Whether README/docs needed and got updates."},
+        "commit_message": {"type": "string",
+                           "description": "Conventional commit message for the change."},
+        "notes": {"type": "string",
+                  "description": "Anything a human reviewer should know."},
+    },
+}
+
+REVIEW_SCHEMA = {
+    "type": "object",
+    "additionalProperties": False,
+    "required": ["verdict", "valuable", "summary", "risks", "draft_review"],
+    "properties": {
+        "verdict": {"type": "string", "enum": ["merge", "needs_work", "reject"]},
+        "valuable": {"type": "boolean",
+                     "description": "Is this a worthwhile addition to the product?"},
+        "summary": {"type": "string"},
+        "risks": {"type": "string"},
+        "draft_review": {"type": "string",
+                         "description": "Polite review comment for the author."},
+    },
+}
+
+RELEASE_SCHEMA = {
+    "type": "object",
+    "additionalProperties": False,
+    "required": ["version", "notes_markdown", "summary"],
+    "properties": {
+        "version": {"type": "string",
+                    "description": "New semver, e.g. 0.28.0 (no leading v)."},
+        "notes_markdown": {"type": "string",
+                           "description": "Release notes / changelog markdown."},
+        "summary": {"type": "string"},
+    },
+}
+
+PLAN_SCHEMA = {
+    "type": "object",
+    "additionalProperties": False,
+    "required": ["tasks", "summary"],
+    "properties": {
+        "summary": {"type": "string",
+                    "description": "Team lead's read on the project this cycle."},
+        "tasks": {
+            "type": "array",
+            "maxItems": 10,
+            "items": {
+                "type": "object",
+                "additionalProperties": False,
+                "required": ["action", "kind", "number", "reason"],
+                "properties": {
+                    "action": {"type": "string",
+                               "enum": ["triage", "fix", "review", "skip"]},
+                    "kind": {"type": "string", "enum": ["issue", "pr"]},
+                    "number": {"type": "integer"},
+                    "reason": {"type": "string"},
+                },
+            },
+        },
+    },
+}
+
+CTO_SCHEMA = {
+    "type": "object",
+    "additionalProperties": False,
+    "required": ["report_markdown", "escalations", "summary"],
+    "properties": {
+        "summary": {"type": "string"},
+        "report_markdown": {"type": "string",
+                            "description": "Concise cross-project status report."},
+        "escalations": {
+            "type": "array",
+            "items": {
+                "type": "object",
+                "additionalProperties": False,
+                "required": ["project", "message"],
+                "properties": {
+                    "project": {"type": "string"},
+                    "message": {"type": "string"},
+                },
+            },
+        },
+    },
+}
+
+
+async def triage_issue(project, issue: dict, cwd: str) -> dict:
+    prompt = f"""Triage this GitHub issue for {project['repo']}. You are in a
+clean checkout of the {project['dev_branch']} branch. Investigate properly:
+read the relevant code, try to reproduce the claim where practical.
+
+Issue #{issue['number']}: {issue['title']}
+Author: {issue['author']['login'] if isinstance(issue.get('author'), dict) else issue.get('author', '')}
+
+{issue.get('body', '')}
+
+Comments:
+{json.dumps([{'author': c.get('author', {}).get('login', ''), 'body': c.get('body', '')} for c in issue.get('comments', [])], indent=2)[:6000]}
+
+Assess: is it valid? A bug or a feature request? Could Wilman fix it safely
+(small, well-understood change with test coverage)? Feature requests are only
+"fixable" when they are small, clearly specified, and an obvious product fit —
+otherwise leave them for the maintainer. Write a draft reply for the issue
+where a reply would help (asking for missing info, explaining a
+misunderstanding, or confirming the plan). Do not modify any files."""
+    return await run_agent(
+        project_name=project["name"], role="ic",
+        item_key=f"issue#{issue['number']}", task="triage",
+        prompt=prompt, cwd=cwd, schema=TRIAGE_SCHEMA, readonly=True)
+
+
+async def fix_issue(project, issue: dict, plan: str, cwd: str,
+                    resume: str | None = None) -> dict:
+    prompt = f"""Fix this issue in {project['repo']}. You are on a work branch
+off {project['dev_branch']} in wilman's checkout. The triage plan is below —
+verify it against the code before following it.
+
+Issue #{issue['number']}: {issue['title']}
+
+{issue.get('body', '')}
+
+Triage plan:
+{plan}
+
+Requirements:
+- Follow the project's existing style and conventions (read CLAUDE.md if present).
+- Add or update tests that cover the fix.
+- Run the test suite ({project['test_command']}) and make it pass.
+- Update README/docs if behaviour visible to users changed.
+- Do NOT commit, push, or touch git config — leave changes in the working tree.
+- If the fix is riskier or larger than the plan suggested, stop and report
+  success=false with an explanation rather than forcing it."""
+    return await run_agent(
+        project_name=project["name"], role="ic",
+        item_key=f"issue#{issue['number']}", task="fix",
+        prompt=prompt, cwd=cwd, schema=FIX_SCHEMA, resume=resume)
+
+
+async def review_pr(project, pr: dict, diff: str, test_result: str,
+                    cwd: str) -> dict:
+    checks = json.dumps(pr.get("statusCheckRollup") or [], indent=2)[:3000]
+    prompt = f"""Review this pull request to {project['repo']} as a careful
+maintainer. You are in a checkout with the PR already merged onto
+{project['dev_branch']} so you can read the combined result.
+
+PR #{pr['number']}: {pr['title']}
+Author: {pr['author']['login'] if isinstance(pr.get('author'), dict) else ''}
+Base: {pr.get('baseRefName')} | +{pr.get('additions')} -{pr.get('deletions')} in {pr.get('changedFiles')} files
+
+Description:
+{pr.get('body', '')[:4000]}
+
+Diff:
+{diff}
+
+Local test run of the merged result:
+{test_result[-4000:]}
+
+CI checks: {checks}
+
+Judge two things separately:
+1. Value: is this a worthwhile addition to the product — coherent with its
+   direction, not bloat, not something better done differently? Being
+   well-written does not make a change worth merging.
+2. Quality: correctness, tests, migrations, security, style, docs. Check the
+   diff against the actual codebase, not just on its own.
+
+Verdict "merge" only when you'd stake the release on it. "needs_work" with a
+courteous, specific draft_review when the idea is good but the execution
+isn't there. "reject" when it doesn't belong, with a kind explanation. Do not
+modify any files."""
+    return await run_agent(
+        project_name=project["name"], role="ic",
+        item_key=f"pr#{pr['number']}", task="review",
+        prompt=prompt, cwd=cwd, schema=REVIEW_SCHEMA, readonly=True)
+
+
+async def draft_release(project, queued_items: list, current_version: str,
+                        commit_log: str, cwd: str) -> dict:
+    items_txt = "\n".join(
+        f"- {i['kind']}#{i['number']}: {i['title']} ({i['verdict']})"
+        for i in queued_items)
+    prompt = f"""Prepare a release of {project['repo']}. You are on the
+{project['dev_branch']} branch in wilman's checkout.
+
+Current version: {current_version}
+Changes queued for this release:
+{items_txt}
+
+Commits on {project['dev_branch']} since the last release:
+{commit_log[:6000]}
+
+Tasks:
+1. Choose the next version (semver: features -> minor bump, fixes only ->
+   patch bump).
+2. Update the version in {project['version_file']} (pattern:
+   {project['version_pattern']}).
+3. Check README and docs are accurate for everything in this release; fix
+   anything stale.
+4. Write clear, understated release notes grouped by features / fixes /
+   other, crediting community contributors by GitHub handle where PRs are
+   included.
+Do NOT commit, push or tag — leave the working tree changes in place."""
+    return await run_agent(
+        project_name=project["name"], role="ic",
+        item_key="release", task="release",
+        prompt=prompt, cwd=cwd, schema=RELEASE_SCHEMA)
+
+
+# --- Team Lead ---------------------------------------------------------------
+
+async def lead_plan(project, state_digest: str, cwd: str) -> dict:
+    prompt = f"""You are the Team Lead for {project['repo']} in the Wilman
+harness. Your ICs can: triage issues, fix triaged bugs, and review PRs. The
+harness (not you) handles merges, comments and releases behind policy gates.
+
+Current project state:
+{state_digest}
+
+Produce this cycle's work plan: up to 10 tasks, most important first.
+Prioritise: regressions and data-loss bugs, then community PRs waiting on
+review (contributors deserve timely answers), then ordinary bugs, then small
+feature requests. Use "skip" with a reason for open items deliberately not
+worth agent time this cycle. Only reference issue/PR numbers from the state
+digest above."""
+    return await run_agent(
+        project_name=project["name"], role="lead",
+        item_key="", task="plan",
+        prompt=prompt, cwd=cwd, schema=PLAN_SCHEMA, readonly=True)
+
+
+# --- CTO ---------------------------------------------------------------------
+
+async def cto_review(digest: str) -> dict:
+    prompt = f"""You are the CTO overseeing all Wilman harnesses (one per
+project). Below is the state of every project: queues, blocked items, recent
+failures, costs, and pending human approvals.
+
+{digest}
+
+Write a concise status report (markdown) for the maintainer's overview
+dashboard: what shipped, what's blocked and why, what needs their decision,
+notable community activity, and spend. Raise an escalation for anything
+stuck more than a few days, repeatedly failing, or burning unusual cost.
+Keep it short and plain — a busy person should get the picture in twenty
+seconds."""
+    return await run_agent(
+        project_name="", role="cto",
+        item_key="", task="cto_review",
+        prompt=prompt, cwd=None, schema=CTO_SCHEMA, readonly=True)

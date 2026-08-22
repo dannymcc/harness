@@ -1,0 +1,18 @@
+services:
+  wilman:
+    image: ghcr.io/dannymcc/wilman:latest
+    build: .
+    container_name: wilman
+    restart: unless-stopped
+    ports:
+      - "8300:8300"
+    environment:
+      # Claude account auth: generate once with `claude setup-token`
+      - CLAUDE_CODE_OAUTH_TOKEN=${CLAUDE_CODE_OAUTH_TOKEN}
+      # GitHub: a PAT with repo scope (or mount your gh config instead)
+      - GH_TOKEN=${GH_TOKEN}
+      - WILMAN_MODEL=${WILMAN_MODEL:-claude-opus-5}
+      - WILMAN_POLL_INTERVAL_MINUTES=${WILMAN_POLL_INTERVAL_MINUTES:-30}
+      - WILMAN_MAX_BUDGET_USD_PER_RUN=${WILMAN_MAX_BUDGET_USD_PER_RUN:-5.0}
+    volumes:
+      - ./data:/data

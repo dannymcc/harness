@@ -1,0 +1,44 @@
+{% extends "base.html" %}
+{% block title %}Wilman · overview{% endblock %}
+{% block content %}
+
+<h1>All harnesses</h1>
+
+<div class="cards">
+{% for c in cards %}
+  <a class="card project-card {% if not c.project.enabled %}dim{% endif %}" href="/p/{{ c.project.name }}">
+    <h2>{{ c.project.name }}</h2>
+    <p class="repo">{{ c.project.repo }}</p>
+    <div class="stats">
+      {% if c.waiting %}<span class="pill warn">{{ c.waiting }} awaiting you</span>{% endif %}
+      {% if c.queued %}<span class="pill ok">{{ c.queued }} queued for release</span>{% endif %}
+      {% if c.release %}<span class="pill accent">release v{{ c.release.version }} proposed</span>{% endif %}
+      {% if not c.waiting and not c.queued and not c.release %}<span class="pill">all quiet</span>{% endif %}
+    </div>
+    {% if c.lead_report %}<p class="report-snippet">{{ c.lead_report.content[:180] }}</p>{% endif %}
+    <p class="cost">${{ "%.2f"|format(c.cost) }} spent</p>
+  </a>
+{% endfor %}
+{% if not cards %}
+  <div class="card"><p>No harnesses yet. <a href="/add">Add the first one</a>.</p></div>
+{% endif %}
+</div>
+
+{% if cto_report %}
+<section class="card">
+  <h2>CTO report <span class="ts">{{ cto_report.created_at }}</span></h2>
+  <div class="md">{{ cto_report.content }}</div>
+</section>
+{% endif %}
+
+<section class="card">
+  <h2>Recent activity · ${{ "%.2f"|format(total_cost) }} total spend</h2>
+  <ul class="events">
+  {% for e in events %}
+    <li class="{{ e.level }}"><span class="ts">{{ e.ts }}</span>
+      {% if e.project %}<b>[{{ e.project }}]</b>{% endif %} {{ e.message }}</li>
+  {% endfor %}
+  </ul>
+</section>
+
+{% endblock %}

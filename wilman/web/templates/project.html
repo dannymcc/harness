@@ -1,0 +1,136 @@
+{% extends "base.html" %}
+{% block title %}Wilman · {{ p.name }}{% endblock %}
+{% block content %}
+
+<h1>{{ p.name }} <span class="repo">{{ p.repo }}</span>
+  {% if not p.enabled %}<span class="pill">disabled</span>{% endif %}</h1>
+
+{% if lead_report %}
+<section class="card">
+  <h2>Team lead <span class="ts">{{ lead_report.created_at }}</span></h2>
+  <div class="md">{{ lead_report.content }}</div>
+</section>
+{% endif %}
+
+{% if release %}
+<section class="card accent-border">
+  <h2>Release v{{ release.version }} proposed
+    {% if release.pr_number %}· <a href="https://github.com/{{ p.repo }}/pull/{{ release.pr_number }}" target="_blank">PR #{{ release.pr_number }}</a>{% endif %}</h2>
+  <div class="md">{{ release.notes }}</div>
+  <div class="actions">
+    <form method="post" action="/p/{{ p.name }}/release/{{ release.id }}/approve">
+      <button class="primary">Merge &amp; tag v{{ release.version }}</button></form>
+    <form method="post" action="/p/{{ p.name }}/release/{{ release.id }}/abandon">
+      <button class="danger">Abandon</button></form>
+  </div>
+</section>
+{% endif %}
+
+{% if waiting %}
+<section class="card">
+  <h2>Awaiting your decision ({{ waiting|length }})</h2>
+  {% for i in waiting %}
+  <div class="item-row">
+    <a href="/p/{{ p.name }}/{{ i.kind }}/{{ i.number }}">
+      <b>{{ i.kind }}#{{ i.number }}</b> {{ i.title }}</a>
+    <span class="pill {{ 'ok' if i.verdict == 'merge' else '' }}">{{ i.verdict or '—' }}</span>
+    <p class="snippet">{{ i.verdict_summary[:200] }}</p>
+    <div class="actions">
+      <form method="post" action="/p/{{ p.name }}/{{ i.kind }}/{{ i.number }}/approve">
+        <button class="primary">{{ 'Merge' if i.kind == 'pr' else 'Fix it' }}</button></form>
+      <form method="post" action="/p/{{ p.name }}/{{ i.kind }}/{{ i.number }}/reject">
+        <button class="danger">Reject</button></form>
+    </div>
+  </div>
+  {% endfor %}
+</section>
+{% endif %}
+
+{% if blocked %}
+<section class="card">
+  <h2>Blocked ({{ blocked|length }})</h2>
+  {% for i in blocked %}
+  <div class="item-row">
+    <a href="/p/{{ p.name }}/{{ i.kind }}/{{ i.number }}"><b>{{ i.kind }}#{{ i.number }}</b> {{ i.title }}</a>
+    <p class="snippet err">{{ i.error[:200] }}</p>
+  </div>
+  {% endfor %}
+</section>
+{% endif %}
+
+{% if queued %}
+<section class="card">
+  <h2>Queued for next release ({{ queued|length }})</h2>
+  <ul>{% for i in queued %}
+    <li><a href="/p/{{ p.name }}/{{ i.kind }}/{{ i.number }}">{{ i.kind }}#{{ i.number }}</a>
+        {{ i.title }} <span class="ts">since {{ i.queued_at }}</span></li>
+  {% endfor %}</ul>
+  <p class="hint">Releases batch at {{ policies.release_min_changes }} changes
+     or {{ policies.release_max_age_days }} days, whichever comes first.</p>
+</section>
+{% endif %}
+
+<section class="card">
+  <h2>Open items</h2>
+  {% for i in open_items %}
+  <div class="item-row">
+    <a href="/p/{{ p.name }}/{{ i.kind }}/{{ i.number }}"><b>{{ i.kind }}#{{ i.number }}</b> {{ i.title }}</a>
+    <span class="pill">{{ i.status }}</span>
+    {% if i.verdict %}<span class="pill">{{ i.verdict }}</span>{% endif %}
+  </div>
+  {% else %}<p>Nothing open.</p>{% endfor %}
+</section>
+
+<section class="card">
+  <h2>Policies</h2>
+  <div class="policies">
+  {% for key, value in policies.items() %}
+    <form method="post" action="/p/{{ p.name }}/policy/{{ key }}" class="policy-row">
+      <label>{{ key.replace('_', ' ') }}</label>
+      {% if value in ('auto', 'approve') %}
+        <select name="value" onchange="this.form.submit()">
+          <option value="auto" {% if value == 'auto' %}selected{% endif %}>auto</option>
+          <option value="approve" {% if value == 'approve' %}selected{% endif %}>approve</option>
+        </select>
+      {% else %}
+        <input name="value" value="{{ value }}" size="4">
+        <button>set</button>
+      {% endif %}
+    </form>
+  {% endfor %}
+  </div>
+  <form method="post" action="/p/{{ p.name }}/toggle">
+    <button>{{ 'Disable' if p.enabled else 'Enable' }} this harness</button>
+  </form>
+</section>
+
+<section class="card">
+  <h2>Agent runs · ${{ "%.2f"|format(cost) }}</h2>
+  <ul class="events">
+  {% for r in runs %}
+    <li class="{{ 'info' if r.ok else 'error' }}">
+      <span class="ts">{{ r.started_at }}</span>
+      <span class="pill">{{ r.role }}</span> {{ r.task }} {{ r.item_key }}
+      {% if r.ok is not none %}{{ '✓' if r.ok else '✗' }}{% endif %}
+      ${{ "%.2f"|format(r.cost_usd) }} {{ r.summary[:120] }}</li>
+  {% endfor %}
+  </ul>
+</section>
+
+<section class="card">
+  <h2>Past releases</h2>
+  <ul>{% for r in releases if r.status != 'proposed' %}
+    <li>v{{ r.version }} — {{ r.status }} {{ r.released_at or r.created_at }}</li>
+  {% else %}<li>None yet.</li>{% endfor %}</ul>
+</section>
+
+<section class="card">
+  <h2>Events</h2>
+  <ul class="events">
+  {% for e in events %}
+    <li class="{{ e.level }}"><span class="ts">{{ e.ts }}</span> {{ e.message }}</li>
+  {% endfor %}
+  </ul>
+</section>
+
+{% endblock %}

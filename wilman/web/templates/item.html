@@ -1,0 +1,52 @@
+{% extends "base.html" %}
+{% block title %}{{ item.kind }}#{{ item.number }} · {{ p.name }}{% endblock %}
+{% block content %}
+
+<p><a href="/p/{{ p.name }}">← {{ p.name }}</a></p>
+<h1>{{ item.kind }}#{{ item.number }}: {{ item.title }}</h1>
+<p>
+  <span class="pill">{{ item.status }}</span>
+  {% if item.verdict %}<span class="pill">{{ item.verdict }}</span>{% endif %}
+  by {{ item.author }} · <a href="{{ gh_url }}" target="_blank">view on GitHub ↗</a>
+</p>
+
+{% if item.verdict_summary %}
+<section class="card"><h2>Assessment</h2>
+  <div class="md">{{ item.verdict_summary }}</div></section>
+{% endif %}
+
+{% if item.plan %}
+<section class="card"><h2>{{ 'Risks' if item.kind == 'pr' else 'Plan' }}</h2>
+  <div class="md">{{ item.plan }}</div></section>
+{% endif %}
+
+{% if item.error %}
+<section class="card"><h2>Problem</h2>
+  <pre class="err">{{ item.error }}</pre></section>
+{% endif %}
+
+{% if item.draft_comment %}
+<section class="card"><h2>Drafted reply</h2>
+  <div class="md">{{ item.draft_comment }}</div>
+  <form method="post" action="/p/{{ p.name }}/{{ item.kind }}/{{ item.number }}/post-comment">
+    <button>Post this comment to GitHub</button></form>
+</section>
+{% endif %}
+
+{% if item.diff %}
+<section class="card"><h2>Diff</h2>
+  <pre class="diff">{{ item.diff }}</pre></section>
+{% endif %}
+
+<div class="actions">
+  {% if item.status in ('waiting_human', 'triaged', 'blocked') %}
+  <form method="post" action="/p/{{ p.name }}/{{ item.kind }}/{{ item.number }}/approve">
+    <button class="primary">{{ 'Merge' if item.kind == 'pr' else 'Fix it' }}</button></form>
+  <form method="post" action="/p/{{ p.name }}/{{ item.kind }}/{{ item.number }}/reject">
+    <button class="danger">Reject</button></form>
+  {% endif %}
+  <form method="post" action="/p/{{ p.name }}/{{ item.kind }}/{{ item.number }}/retry">
+    <button>Re-run from scratch</button></form>
+</div>
+
+{% endblock %}

@@ -1,0 +1,37 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>{% block title %}Wilman{% endblock %}</title>
+<link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+<nav>
+  <a class="brand" href="/">Wilman</a>
+  <div class="navlinks">
+    {% for pr in projects %}
+      <a href="/p/{{ pr.name }}" {% if not pr.enabled %}class="dim"{% endif %}>{{ pr.name }}</a>
+    {% endfor %}
+    <a href="/add">+ add</a>
+  </div>
+  {% if who %}<span class="who">{{ who }}</span>{% endif %}
+</nav>
+
+{% if paused %}
+<div class="banner warn">
+  ⏸ Agent work paused until {{ paused }} — {{ paused_reason }}
+  <form method="post" action="/resume"><button>Resume now</button></form>
+</div>
+{% endif %}
+
+<main>
+{% block content %}{% endblock %}
+</main>
+
+<footer>
+  worker: {{ "running" if worker.running else "idle" }}{% if worker.last_cycle %} · last cycle {{ worker.last_cycle }}{% endif %}
+  <form method="post" action="/run-now"><button>Run cycle now</button></form>
+</footer>
+</body>
+</html>
