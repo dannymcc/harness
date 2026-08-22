@@ -295,6 +295,12 @@ def finalize_release(project, release) -> None:
     except CmdError as e:
         db.log_event(f"Release v{version} failed: {e}", "error", project=name)
         return
+    try:
+        gh.publish_release(project["repo"], f"v{version}", f"v{version}",
+                           release["notes"])
+    except CmdError as e:
+        db.log_event(f"Tag pushed but GitHub release publish failed: {e}",
+                     "warn", project=name)
     db.update_release(release["id"], status="released", released_at=db.now())
     for key in json.loads(release["items_json"]):
         kind, number = key.split("#")

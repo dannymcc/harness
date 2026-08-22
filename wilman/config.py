@@ -17,11 +17,15 @@ LOG_DIR = DATA_DIR / "logs"           # per-run agent transcripts
 # The Agent SDK inherits credentials from the environment
 # (ANTHROPIC_API_KEY or CLAUDE_CODE_OAUTH_TOKEN via `claude setup-token`).
 MODEL = os.environ.get("WILMAN_MODEL", "claude-opus-5")
+# Housekeeping/compaction runs are summarisation, not engineering — a cheap
+# model keeps the housekeeper from eating the budget it exists to protect.
+ADMIN_MODEL = os.environ.get("WILMAN_ADMIN_MODEL", "claude-haiku-4-5")
 MAX_TURNS = int(os.environ.get("WILMAN_MAX_TURNS", "80"))
 MAX_BUDGET_USD_PER_RUN = float(os.environ.get("WILMAN_MAX_BUDGET_USD_PER_RUN", "5.0"))
 
 # --- Worker -----------------------------------------------------------------
 POLL_INTERVAL_MINUTES = int(os.environ.get("WILMAN_POLL_INTERVAL_MINUTES", "30"))
+ADMIN_INTERVAL_MINUTES = int(os.environ.get("WILMAN_ADMIN_INTERVAL_MINUTES", "60"))
 
 # --- Web --------------------------------------------------------------------
 BIND_HOST = os.environ.get("WILMAN_BIND_HOST", "0.0.0.0")
@@ -31,6 +35,7 @@ BIND_PORT = int(os.environ.get("WILMAN_BIND_PORT", "8300"))
 # Harry runs the section. Each harness gets a senior officer as team lead;
 # the ICs are the specialists.
 CTO_NAME = "Harry"
+ADMIN_NAME = "Tariq"      # housekeeping: prunes state, compacts history
 LEAD_ROSTER = ["Tom", "Adam", "Ros", "Lucas", "Zoe", "Jo", "Danny", "Fiona"]
 IC_NAMES = {
     "triage": "Ruth",     # analysis

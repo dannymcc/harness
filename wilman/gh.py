@@ -103,6 +103,11 @@ def close_pr(repo: str, number: int, comment: str = "") -> None:
     run(["gh", "pr", "close", str(number), "-R", repo])
 
 
+def publish_release(repo: str, tag: str, title: str, notes: str) -> None:
+    run(["gh", "release", "create", tag, "-R", repo, "--verify-tag",
+         "--title", title, "--notes", notes])
+
+
 def create_pr(repo: str, base: str, head: str, title: str, body: str) -> int:
     out = run(["gh", "pr", "create", "-R", repo, "--base", base, "--head", head,
                "--title", title, "--body", body])

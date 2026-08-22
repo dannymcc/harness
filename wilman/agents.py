@@ -395,9 +395,11 @@ Tasks:
    {project['version_pattern']}).
 3. Check README and docs are accurate for everything in this release; fix
    anything stale.
-4. Write clear, understated release notes grouped by features / fixes /
-   other, crediting community contributors by GitHub handle where PRs are
-   included.
+4. Update CHANGELOG.md (create it in Keep-a-Changelog style if the project
+   doesn't have one): add this version's section with today's date.
+5. Write clear, understated release notes grouped by features / fixes /
+   other, crediting community contributors by GitHub handle where their
+   PRs or reports are included (e.g. "thanks @user").
 Do NOT commit, push or tag — leave the working tree changes in place."""
     return await run_agent(
         project_name=project["name"], role="ic",
