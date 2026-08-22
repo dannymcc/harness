@@ -29,4 +29,7 @@ RUN git config --system user.name "Harness" \
     && git config --system user.email "harness@localhost" \
     && git config --system --add safe.directory '*'
 
+HEALTHCHECK --interval=60s --timeout=10s --start-period=30s --retries=3 \
+    CMD ["python", "-c", "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:8300/health', timeout=5).status==200 else 1)"]
+
 CMD ["python", "run.py"]
