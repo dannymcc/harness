@@ -30,6 +30,18 @@ def agent_name(role: str, task: str, lead_name: str = "") -> str:
 
 
 templates.env.globals["agent_name"] = agent_name
+templates.env.filters["money"] = lambda v: f"US${(v or 0):,.2f}"
+
+
+@app.get("/health")
+def health():
+    st = worker.status()
+    ok = st["alive"] and not st["stale"]
+    from fastapi.responses import JSONResponse
+    return JSONResponse(
+        {"ok": ok, "worker_alive": st["alive"],
+         "heartbeat_age_s": st["heartbeat_age"], "stale": st["stale"]},
+        status_code=200 if ok else 503)
 
 
 def render(request: Request, template: str, **ctx):
@@ -66,6 +78,8 @@ def overview(request: Request):
         })
     return render(request, "overview.html",
                   cards=cards,
+                  questions=db.open_questions(),
+                  staff=_staff_board(),
                   cto_report=db.latest_report("cto"),
                   events=db.recent_events(20),
                   total_cost=db.total_cost())
@@ -73,28 +87,127 @@ def overview(request: Request):
 
 # --- project pages ----------------------------------------------------------
 
+KANBAN_COLUMNS = [
+    ("Inbox", "Ruth", ("new",)),
+    ("Assessed", "Ruth", ("triaged",)),
+    ("In progress", "Malcolm", ("approved", "working")),
+    ("Your decision", "you", ("waiting_human",)),
+    ("Blocked", "—", ("blocked",)),
+    ("Release queue", "Colin", ("queued",)),
+    ("Done", "", ("released", "closed", "rejected")),
+]
+
+AGENT_ROSTER = [
+    ("lead", ("plan",)),
+    ("ic", ("triage", "review")),      # Ruth
+    ("ic", ("fix",)),                  # Malcolm
+    ("ic", ("release",)),              # Colin
+    ("ic", ("security",)),             # Zaf
+    ("admin", ("notes",)),             # Tariq
+]
+
+
+def _member_status(display, runs, match):
+    last = next((r for r in runs if match(r)), None)
+    if not last:
+        return {"name": display, "state": "idle", "detail": "no runs yet"}
+    if last["finished_at"] is None:
+        return {"name": display, "state": "working",
+                "detail": f"{last['task']} {last['item_key']}".strip()}
+    return {"name": display, "state": "ok" if last["ok"] else "failed",
+            "detail": (f"{last['task']} {last['item_key']}".strip()
+                       + f" · {last['started_at']}")}
+
+
+def _staff_board():
+    """Everyone in the section, grouped, with live status."""
+    runs = db.recent_runs(300)
+    groups = [{
+        "group": "Section",
+        "members": [
+            _member_status(config.CTO_NAME, runs, lambda r: r["role"] == "cto"),
+            _member_status(config.ADMIN_NAME, runs, lambda r: r["role"] == "admin"),
+        ],
+    }]
+    for p in db.all_projects(enabled_only=True):
+        name = p["name"]
+        staff = db.staff_get(name)
+        members = [_member_status(
+            f"{p['lead_name']} (lead)", runs,
+            lambda r, n=name: r["project"] == n and r["role"] == "lead")]
+        for tasks, display in ((("triage", "review"), "Ruth"),
+                               (("fix",), "Malcolm"),
+                               (("release",), "Colin"),
+                               (("security",), "Zaf")):
+            m = _member_status(
+                display, runs,
+                lambda r, n=name, t=tasks, d=display: r["project"] == n
+                and r["role"] == "ic" and r["task"] in t
+                and (r["agent"] or d) == d)
+            if display in staff["benched"]:
+                m["state"] = "benched"
+                m["detail"] = "stood down by Harry"
+            members.append(m)
+        for extra in staff["extra"]:
+            members.append(_member_status(
+                f"{extra} (hired)", runs,
+                lambda r, n=name, e=extra: r["project"] == n
+                and r["agent"] == e))
+        groups.append({"group": name, "members": members})
+    return groups
+
+
+def _agent_roster(p, runs):
+    """Latest activity per persona, from the run history."""
+    roster = []
+    for role, tasks in AGENT_ROSTER:
+        display = agent_name(role, tasks[0], p["lead_name"])
+        last = next((r for r in runs
+                     if r["role"] == role and r["task"] in tasks), None)
+        state = "idle"
+        detail = "no runs yet"
+        if last:
+            if last["finished_at"] is None:
+                state = "working"
+                detail = f"{last['task']} {last['item_key']}".strip()
+            else:
+                state = "ok" if last["ok"] else "failed"
+                detail = f"{last['task']} {last['item_key']}".strip() +                          f" · {last['started_at']}"
+        roster.append({"name": display, "state": state, "detail": detail})
+    return roster
+
+
 @app.get("/p/{name}")
 def project_page(request: Request, name: str):
     p = db.get_project(name)
     if not p:
         return RedirectResponse("/", status_code=303)
     items = db.project_items(name)
+    recent = {"released", "closed", "rejected"}
+    board = []
+    for title, agent, statuses in KANBAN_COLUMNS:
+        cards = [i for i in items if i["status"] in statuses
+                 and (i["status"] not in recent or i["gh_state"] != "open")]
+        if statuses == ("released", "closed", "rejected"):
+            cards = cards[:10]
+        board.append({"title": title, "agent": agent, "cards": cards})
+    runs = db.recent_runs(50, name)
     return render(
-        request, "project.html", p=p, items=items,
+        request, "project.html", p=p, items=items, board=board,
+        harry_line=db.latest_report("harry", name),
+        harry_report=db.latest_report("cto"),
+        roster=_agent_roster(p, runs),
         waiting=[i for i in items if i["status"] == "waiting_human"
                  and i["gh_state"] == "open"],
-        blocked=[i for i in items if i["status"] == "blocked"],
-        queued=[i for i in items if i["status"] == "queued"],
-        open_items=[i for i in items if i["gh_state"] == "open"
-                    and i["status"] not in ("waiting_human", "blocked", "queued")],
         release=db.open_release(name),
         releases=db.project_releases(name),
         lead_report=db.latest_report("lead", name),
         desk_notes=db.latest_report("notes", name),
         security_report=db.latest_report("security", name),
         security_pending=db.get_setting(f"security_requested.{name}") == "1",
+        questions=db.open_questions(name),
         policies=db.all_policies(name),
-        runs=db.recent_runs(15, name),
+        runs=runs[:15],
         events=db.recent_events(30, name),
         cost=db.total_cost(name))
 
@@ -172,6 +285,23 @@ def set_policy(name: str, key: str, value: str = Form(...)):
         db.set_policy(name, key, value)
         db.log_event(f"Policy {key} -> {value}", project=name)
     return RedirectResponse(f"/p/{name}", status_code=303)
+
+
+@app.post("/p/{name}/question/{qid}/answer")
+def answer_question(name: str, qid: int, answer: str = Form(...)):
+    db.answer_question(qid, answer.strip())
+    db.log_event(f"Danny answered a question: {answer.strip()[:100]}",
+                 project=name)
+    worker.trigger()
+    return RedirectResponse(f"/p/{name}" if name != "-" else "/",
+                            status_code=303)
+
+
+@app.post("/p/{name}/question/{qid}/dismiss")
+def dismiss_question(name: str, qid: int):
+    db.dismiss_question(qid)
+    return RedirectResponse(f"/p/{name}" if name != "-" else "/",
+                            status_code=303)
 
 
 @app.post("/p/{name}/security-review")

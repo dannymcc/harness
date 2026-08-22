@@ -18,6 +18,12 @@
   {% if who %}<span class="who">{{ who }}</span>{% endif %}
 </nav>
 
+{% if worker.stale %}
+<div class="banner warn">⚠ The worker's heartbeat is stale — it may be hung. Check `docker logs harness`.</div>
+{% endif %}
+{% if not worker.alive %}
+<div class="banner warn">⚠ The worker thread is not running. Restart the container.</div>
+{% endif %}
 {% if paused %}
 <div class="banner warn">
   ⏸ Agent work paused until {{ paused }} — {{ paused_reason }}

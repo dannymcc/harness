@@ -94,6 +94,17 @@ CREATE TABLE IF NOT EXISTS events (
     level TEXT NOT NULL DEFAULT 'info',
     message TEXT NOT NULL
 );
+CREATE TABLE IF NOT EXISTS questions (
+    id INTEGER PRIMARY KEY,
+    project TEXT NOT NULL DEFAULT '',
+    asked_by TEXT NOT NULL,
+    item_key TEXT NOT NULL DEFAULT '',
+    question TEXT NOT NULL,
+    status TEXT NOT NULL DEFAULT 'open',   -- open | answered | dismissed
+    answer TEXT NOT NULL DEFAULT '',
+    created_at TEXT NOT NULL,
+    answered_at TEXT
+);
 CREATE TABLE IF NOT EXISTS settings (
     key TEXT PRIMARY KEY,
     value TEXT NOT NULL
@@ -105,12 +116,22 @@ def now() -> str:
     return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
+MIGRATIONS = [
+    "ALTER TABLE runs ADD COLUMN agent TEXT NOT NULL DEFAULT ''",
+]
+
+
 @contextmanager
 def conn():
     config.DATA_DIR.mkdir(parents=True, exist_ok=True)
     c = sqlite3.connect(config.DB_PATH, timeout=30)
     c.row_factory = sqlite3.Row
     c.executescript(SCHEMA)
+    for mig in MIGRATIONS:
+        try:
+            c.execute(mig)
+        except sqlite3.OperationalError:
+            pass  # already applied
     try:
         yield c
         c.commit()
@@ -297,12 +318,13 @@ def counts_by_status(project: str) -> dict:
 
 # --- runs -------------------------------------------------------------------
 
-def start_run(project: str, role: str, item_key: str, task: str, model: str) -> int:
+def start_run(project: str, role: str, item_key: str, task: str, model: str,
+              agent: str = "") -> int:
     with conn() as c:
         cur = c.execute(
-            "INSERT INTO runs (project, role, item_key, task, model, started_at) "
-            "VALUES (?, ?, ?, ?, ?, ?)",
-            (project, role, item_key, task, model, now()),
+            "INSERT INTO runs (project, role, item_key, task, model, agent, "
+            "started_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
+            (project, role, item_key, task, model, agent, now()),
         )
         return cur.lastrowid
 
@@ -408,3 +430,104 @@ def latest_report(scope: str, project: str = ""):
             "ORDER BY id DESC LIMIT 1",
             (scope, project),
         ).fetchone()
+
+
+# --- Danny-in-the-loop -------------------------------------------------------
+
+def ask_question(project: str, asked_by: str, item_key: str,
+                 question: str) -> None:
+    question = question.strip()
+    if not question:
+        return
+    with conn() as c:
+        dup = c.execute(
+            "SELECT id FROM questions WHERE project = ? AND status = 'open' "
+            "AND question = ?", (project, question)).fetchone()
+        if dup:
+            return
+        c.execute(
+            "INSERT INTO questions (project, asked_by, item_key, question, "
+            "created_at) VALUES (?, ?, ?, ?, ?)",
+            (project, asked_by, item_key, question, now()))
+    log_event(f"{asked_by} has a question for Danny: {question[:120]}",
+              "warn", project=project)
+
+
+def answer_question(qid: int, answer: str) -> None:
+    with conn() as c:
+        c.execute("UPDATE questions SET status = 'answered', answer = ?, "
+                  "answered_at = ? WHERE id = ?", (answer, now(), qid))
+
+
+def dismiss_question(qid: int) -> None:
+    with conn() as c:
+        c.execute("UPDATE questions SET status = 'dismissed', answered_at = ? "
+                  "WHERE id = ?", (now(), qid))
+
+
+def open_questions(project: str | None = None):
+    with conn() as c:
+        if project is None:
+            return c.execute(
+                "SELECT * FROM questions WHERE status = 'open' "
+                "ORDER BY id DESC").fetchall()
+        return c.execute(
+            "SELECT * FROM questions WHERE status = 'open' AND project = ? "
+            "ORDER BY id DESC", (project,)).fetchall()
+
+
+def recent_answers(project: str, limit: int = 8):
+    with conn() as c:
+        return c.execute(
+            "SELECT * FROM questions WHERE status = 'answered' AND project = ? "
+            "ORDER BY answered_at DESC LIMIT ?", (project, limit)).fetchall()
+
+
+def answers_for(project: str, item_key: str):
+    with conn() as c:
+        return c.execute(
+            "SELECT * FROM questions WHERE status = 'answered' "
+            "AND project = ? AND item_key = ? ORDER BY id", 
+            (project, item_key)).fetchall()
+
+
+# --- heartbeat ---------------------------------------------------------------
+
+_last_hb = 0.0
+HEARTBEAT_THROTTLE_S = 15
+
+
+def touch_heartbeat() -> None:
+    """Record worker liveness; throttled so streaming callers stay cheap."""
+    import time as _time
+    global _last_hb
+    if _time.time() - _last_hb < HEARTBEAT_THROTTLE_S:
+        return
+    _last_hb = _time.time()
+    set_setting("heartbeat", now())
+
+
+def heartbeat_age_seconds() -> float | None:
+    ts = get_setting("heartbeat")
+    if not ts:
+        return None
+    dt = datetime.strptime(ts, "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=timezone.utc)
+    return (datetime.now(timezone.utc) - dt).total_seconds()
+
+
+# --- staffing (Harry's hires and stand-downs) --------------------------------
+
+def staff_get(project: str) -> dict:
+    raw = get_setting(f"staff.{project}", "")
+    if raw:
+        try:
+            d = json.loads(raw)
+            return {"extra": list(d.get("extra", [])),
+                    "benched": list(d.get("benched", []))}
+        except ValueError:
+            pass
+    return {"extra": [], "benched": []}
+
+
+def staff_set(project: str, staff: dict) -> None:
+    set_setting(f"staff.{project}", json.dumps(staff))

@@ -37,6 +37,11 @@ BIND_PORT = int(os.environ.get("HARNESS_BIND_PORT", "8300"))
 CTO_NAME = "Harry"
 ADMIN_NAME = "Tariq"      # housekeeping: prunes state, compacts history
 LEAD_ROSTER = ["Tom", "Adam", "Ros", "Lucas", "Zoe", "Jo", "Danny", "Fiona"]
+# Harry can hire extra engineers onto a busy desk (max 2 per desk) or stand
+# down specialists that never see work. Benching is visibility only — benched
+# agents still respond when triggered.
+HIRE_POOL = ["Dimitri", "Beth", "Calum", "Erin", "Alec", "Will"]
+MAX_EXTRA_ENGINEERS = 2
 IC_NAMES = {
     "triage": "Ruth",     # analysis
     "review": "Ruth",

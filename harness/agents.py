@@ -47,6 +47,11 @@ Ground rules, non-negotiable:
   a wrong "success" is far worse than a "needs a human".
 - British English, plain and understated, in anything user-facing.
 - Never invent facts about the project. Read the code before concluding.
+- Every schema has an optional question_for_danny field. Use it when a
+  decision genuinely belongs to Danny, the maintainer (product direction,
+  breaking changes, anything you were told to check first). One short,
+  specific question; empty string otherwise. Never re-ask something listed
+  as already waiting on him.
 """
 
 
@@ -88,7 +93,7 @@ class AgentStalled(RuntimeError):
 async def run_agent(*, project_name: str, role: str, item_key: str, task: str,
                     prompt: str, cwd: str | None, schema: dict,
                     readonly: bool = False, resume: str | None = None,
-                    model: str | None = None) -> dict:
+                    model: str | None = None, persona: str = "") -> dict:
     """Run one agent session, log it, and return its structured output.
 
     Returns {"ok": bool, "output": dict|None, "session_id": str, "error": str}.
@@ -98,7 +103,11 @@ async def run_agent(*, project_name: str, role: str, item_key: str, task: str,
         raise AgentStalled("paused for API limits")
 
     mdl = model or config.MODEL
-    run_id = db.start_run(project_name, role, item_key, task, mdl)
+    if not persona:
+        persona = (config.CTO_NAME if role == "cto"
+                   else config.ADMIN_NAME if role == "admin"
+                   else config.IC_NAMES.get(task, ""))
+    run_id = db.start_run(project_name, role, item_key, task, mdl, persona)
     options = ClaudeAgentOptions(
         model=mdl,
         cwd=cwd,
@@ -120,6 +129,7 @@ async def run_agent(*, project_name: str, role: str, item_key: str, task: str,
         with open(log_path, "w") as log:
             log.write(f"# {task} {item_key} ({role})\n\n{prompt}\n\n---\n\n")
             async for message in query(prompt=prompt, options=options):
+                db.touch_heartbeat()
                 if isinstance(message, AssistantMessage):
                     turns += 1
                     for block in message.content:
@@ -179,6 +189,7 @@ TRIAGE_SCHEMA = {
                     "description": "Could an automated fix be attempted safely?"},
         "summary": {"type": "string",
                     "description": "2-3 sentences: what this is and your assessment."},
+        "question_for_danny": {"type": "string", "description": "Optional: one question needing Danny's decision, else empty."},
         "plan": {"type": "string",
                  "description": "If fixable: concrete fix plan with files. Else empty."},
         "draft_comment": {"type": "string",
@@ -194,6 +205,8 @@ FIX_SCHEMA = {
         "success": {"type": "boolean",
                     "description": "True only if the fix is complete and tests pass."},
         "summary": {"type": "string"},
+        "question_for_danny": {"type": "string",
+                               "description": "Optional: one question needing Danny's decision, else empty."},
         "docs_updated": {"type": "boolean",
                          "description": "Whether README/docs needed and got updates."},
         "commit_message": {"type": "string",
@@ -212,6 +225,8 @@ REVIEW_SCHEMA = {
         "valuable": {"type": "boolean",
                      "description": "Is this a worthwhile addition to the product?"},
         "summary": {"type": "string"},
+        "question_for_danny": {"type": "string",
+                               "description": "Optional: one question needing Danny's decision, else empty."},
         "risks": {"type": "string"},
         "draft_review": {"type": "string",
                          "description": "Polite review comment for the author."},
@@ -228,6 +243,8 @@ RELEASE_SCHEMA = {
         "notes_markdown": {"type": "string",
                            "description": "Release notes / changelog markdown."},
         "summary": {"type": "string"},
+        "question_for_danny": {"type": "string",
+                               "description": "Optional: one question needing Danny's decision, else empty."},
     },
 }
 
@@ -238,6 +255,8 @@ PLAN_SCHEMA = {
     "properties": {
         "summary": {"type": "string",
                     "description": "Team lead's read on the project this cycle."},
+        "question_for_danny": {"type": "string",
+                               "description": "Optional: one question needing Danny's decision, else empty."},
         "tasks": {
             "type": "array",
             "maxItems": 10,
@@ -260,9 +279,28 @@ PLAN_SCHEMA = {
 STANDUP_SCHEMA = {
     "type": "object",
     "additionalProperties": False,
-    "required": ["standup_markdown", "blockers", "all_clear", "summary"],
+    "required": ["standup_markdown", "blockers", "all_clear", "desks",
+                 "summary"],
     "properties": {
         "summary": {"type": "string"},
+        "question_for_danny": {"type": "string",
+                               "description": "Optional: one question needing Danny's decision, else empty."},
+        "desks": {
+            "type": "array",
+            "description": "One entry per project desk.",
+            "items": {
+                "type": "object",
+                "additionalProperties": False,
+                "required": ["project", "status_line", "moving"],
+                "properties": {
+                    "project": {"type": "string"},
+                    "status_line": {"type": "string",
+                                    "description": "Harry's one-line read on this desk right now."},
+                    "moving": {"type": "boolean",
+                               "description": "Is this desk making progress?"},
+                },
+            },
+        },
         "all_clear": {"type": "boolean",
                       "description": "True if every desk is moving and nothing needs the maintainer."},
         "standup_markdown": {"type": "string",
@@ -279,6 +317,22 @@ STANDUP_SCHEMA = {
                 },
             },
         },
+        "staffing": {
+            "type": "array",
+            "description": "Optional staffing changes based on utilisation.",
+            "items": {
+                "type": "object",
+                "additionalProperties": False,
+                "required": ["project", "action", "name", "reason"],
+                "properties": {
+                    "project": {"type": "string"},
+                    "action": {"type": "string",
+                               "enum": ["hire", "stand_down", "reinstate"]},
+                    "name": {"type": "string"},
+                    "reason": {"type": "string"},
+                },
+            },
+        },
     },
 }
 
@@ -288,6 +342,8 @@ CTO_SCHEMA = {
     "required": ["report_markdown", "escalations", "summary"],
     "properties": {
         "summary": {"type": "string"},
+        "question_for_danny": {"type": "string",
+                               "description": "Optional: one question needing Danny's decision, else empty."},
         "report_markdown": {"type": "string",
                             "description": "Concise cross-project status report."},
         "escalations": {
@@ -304,6 +360,15 @@ CTO_SCHEMA = {
         },
     },
 }
+
+
+def _danny_answers(project_name: str, item_key: str) -> str:
+    rows = db.answers_for(project_name, item_key)
+    if not rows:
+        return ""
+    lines = ["\nDanny has already decided the following about this item:"]
+    lines += [f"- Q: {r['question'][:150]}\n  A: {r['answer'][:250]}" for r in rows]
+    return "\n".join(lines) + "\n"
 
 
 async def triage_issue(project, issue: dict, cwd: str) -> dict:
@@ -325,7 +390,8 @@ Assess: is it valid? A bug or a feature request? Could Harness fix it safely
 "fixable" when they are small, clearly specified, and an obvious product fit —
 otherwise leave them for the maintainer. Write a draft reply for the issue
 where a reply would help (asking for missing info, explaining a
-misunderstanding, or confirming the plan). Do not modify any files."""
+misunderstanding, or confirming the plan). Do not modify any files.
+{_danny_answers(project["name"], f"issue#{issue['number']}")}"""
     return await run_agent(
         project_name=project["name"], role="ic",
         item_key=f"issue#{issue['number']}", task="triage",
@@ -333,8 +399,9 @@ misunderstanding, or confirming the plan). Do not modify any files."""
 
 
 async def fix_issue(project, issue: dict, plan: str, cwd: str,
-                    resume: str | None = None) -> dict:
-    prompt = f"""You are Malcolm, the section's technical specialist.
+                    resume: str | None = None,
+                    persona: str = "Malcolm") -> dict:
+    prompt = f"""You are {persona}, one of the section's engineers.
 Fix this issue in {project['repo']}. You are on a work branch
 off {project['dev_branch']} in harness's checkout. The triage plan is below —
 verify it against the code before following it.
@@ -353,11 +420,13 @@ Requirements:
 - Update README/docs if behaviour visible to users changed.
 - Do NOT commit, push, or touch git config — leave changes in the working tree.
 - If the fix is riskier or larger than the plan suggested, stop and report
-  success=false with an explanation rather than forcing it."""
+  success=false with an explanation rather than forcing it.
+{_danny_answers(project["name"], f"issue#{issue['number']}")}"""
     return await run_agent(
         project_name=project["name"], role="ic",
         item_key=f"issue#{issue['number']}", task="fix",
-        prompt=prompt, cwd=cwd, schema=FIX_SCHEMA, resume=resume)
+        prompt=prompt, cwd=cwd, schema=FIX_SCHEMA, resume=resume,
+        persona=persona)
 
 
 async def review_pr(project, pr: dict, diff: str, test_result: str,
@@ -392,7 +461,8 @@ Judge two things separately:
 Verdict "merge" only when you'd stake the release on it. "needs_work" with a
 courteous, specific draft_review when the idea is good but the execution
 isn't there. "reject" when it doesn't belong, with a kind explanation. Do not
-modify any files."""
+modify any files.
+{_danny_answers(project["name"], f"pr#{pr['number']}")}"""
     return await run_agent(
         project_name=project["name"], role="ic",
         item_key=f"pr#{pr['number']}", task="review",
@@ -442,6 +512,8 @@ NOTES_SCHEMA = {
         "notes_markdown": {"type": "string",
                            "description": "The updated rolling desk notes."},
         "summary": {"type": "string"},
+        "question_for_danny": {"type": "string",
+                               "description": "Optional: one question needing Danny's decision, else empty."},
     },
 }
 
@@ -477,6 +549,8 @@ SECURITY_SCHEMA = {
     "required": ["report_markdown", "findings", "summary"],
     "properties": {
         "summary": {"type": "string"},
+        "question_for_danny": {"type": "string",
+                               "description": "Optional: one question needing Danny's decision, else empty."},
         "report_markdown": {"type": "string",
                             "description": "Full security review report."},
         "findings": {
@@ -555,6 +629,13 @@ progress, what's blocked and why, how long things have been waiting, and
 recent failures and spend.
 
 {digest}
+
+You also run staffing. The utilisation figures show how busy each desk's
+people are. If a desk has a backlog of fixable work, hire an extra engineer
+onto it from the available pool (they genuinely increase how many fixes run
+per cycle; max {config.MAX_EXTRA_ENGINEERS} extra per desk). If someone has
+had no work for a week or more, stand them down — it keeps the board honest;
+they can be reinstated any time. Only make changes utilisation justifies.
 
 Run the stand-up: one line per desk on whether it's moving. Then call out
 anything genuinely stuck — an item blocked for a reason nobody is acting on,

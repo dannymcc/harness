@@ -5,17 +5,55 @@
 <h1>{{ p.name }} <span class="repo">{{ p.repo }}</span>
   {% if not p.enabled %}<span class="pill">disabled</span>{% endif %}</h1>
 
+<section class="card harry-card">
+  <div class="harry-head">
+    <span class="avatar">H</span>
+    <div>
+      <h2>Harry — head of section</h2>
+      {% if harry_line %}
+        <p class="harry-line">{{ harry_line.content }}</p>
+        <p class="ts">as of {{ harry_line.created_at }}</p>
+      {% elif harry_report %}
+        <p class="harry-line">{{ harry_report.content[:220] }}</p>
+        <p class="ts">from the section stand-up, {{ harry_report.created_at }}</p>
+      {% else %}
+        <p class="harry-line">Awaiting the first stand-up. Harry reviews every
+        desk hourly and decides what gets escalated.</p>
+      {% endif %}
+    </div>
+  </div>
+  <div class="roster">
+    {% for a in roster %}
+    <span class="agent-chip {{ a.state }}" title="{{ a.detail }}">
+      <b>{{ a.name }}</b> {{ a.state }}</span>
+    {% endfor %}
+  </div>
+</section>
+
+{% if questions %}
+<section class="card accent-border">
+  <h2>Danny-in-the-loop ({{ questions|length }})</h2>
+  {% for q in questions %}
+  <div class="question">
+    <p><b>{{ q.asked_by }}</b>
+       {% if q.item_key %}<span class="pill">{{ q.item_key }}</span>{% endif %}
+       <span class="ts">{{ q.created_at }}</span></p>
+    <p class="q-text">{{ q.question }}</p>
+    <form method="post" action="/p/{{ p.name }}/question/{{ q.id }}/answer" class="answer-form">
+      <input name="answer" placeholder="Your decision…" required>
+      <button class="primary">Answer</button>
+      <button formaction="/p/{{ p.name }}/question/{{ q.id }}/dismiss"
+              formnovalidate class="danger">Dismiss</button>
+    </form>
+  </div>
+  {% endfor %}
+</section>
+{% endif %}
+
 {% if lead_report %}
 <section class="card">
   <h2>{{ p.lead_name }} — team lead <span class="ts">{{ lead_report.created_at }}</span></h2>
   <div class="md">{{ lead_report.content }}</div>
-</section>
-{% endif %}
-
-{% if desk_notes %}
-<section class="card">
-  <h2>Tariq — desk notes <span class="ts">{{ desk_notes.created_at }}</span></h2>
-  <div class="md">{{ desk_notes.content }}</div>
 </section>
 {% endif %}
 
@@ -53,39 +91,48 @@
 </section>
 {% endif %}
 
-{% if blocked %}
-<section class="card">
-  <h2>Blocked ({{ blocked|length }})</h2>
-  {% for i in blocked %}
-  <div class="item-row">
-    <a href="/p/{{ p.name }}/{{ i.kind }}/{{ i.number }}"><b>{{ i.kind }}#{{ i.number }}</b> {{ i.title }}</a>
-    <p class="snippet err">{{ i.error[:200] }}</p>
+<section class="card board-card">
+  <h2>Board</h2>
+  <div class="kanban">
+    {% for col in board %}
+    <div class="kanban-col">
+      <h3>{{ col.title }}
+        {% if col.agent %}<span class="pill">{{ col.agent }}</span>{% endif %}
+        <span class="count">{{ col.cards|length }}</span></h3>
+      {% for i in col.cards %}
+      <a class="kcard {{ 'err-border' if i.status == 'blocked' }}"
+         href="/p/{{ p.name }}/{{ i.kind }}/{{ i.number }}">
+        <span class="kcard-id">{{ i.kind }}#{{ i.number }}</span>
+        <span class="kcard-title">{{ i.title[:70] }}</span>
+        <span class="kcard-meta">
+          {% if i.verdict %}<span class="pill">{{ i.verdict }}</span>{% endif %}
+          <span class="ts">{{ i.author }}</span>
+        </span>
+      </a>
+      {% else %}<p class="hint">empty</p>{% endfor %}
+    </div>
+    {% endfor %}
   </div>
-  {% endfor %}
+</section>
+
+{% if desk_notes %}
+<section class="card">
+  <h2>Tariq — desk notes <span class="ts">{{ desk_notes.created_at }}</span></h2>
+  <div class="md">{{ desk_notes.content }}</div>
 </section>
 {% endif %}
 
-{% if queued %}
 <section class="card">
-  <h2>Queued for next release ({{ queued|length }})</h2>
-  <ul>{% for i in queued %}
-    <li><a href="/p/{{ p.name }}/{{ i.kind }}/{{ i.number }}">{{ i.kind }}#{{ i.number }}</a>
-        {{ i.title }} <span class="ts">since {{ i.queued_at }}</span></li>
-  {% endfor %}</ul>
-  <p class="hint">Releases batch at {{ policies.release_min_changes }} changes
-     or {{ policies.release_max_age_days }} days, whichever comes first.</p>
-</section>
-{% endif %}
-
-<section class="card">
-  <h2>Open items</h2>
-  {% for i in open_items %}
-  <div class="item-row">
-    <a href="/p/{{ p.name }}/{{ i.kind }}/{{ i.number }}"><b>{{ i.kind }}#{{ i.number }}</b> {{ i.title }}</a>
-    <span class="pill">{{ i.status }}</span>
-    {% if i.verdict %}<span class="pill">{{ i.verdict }}</span>{% endif %}
-  </div>
-  {% else %}<p>Nothing open.</p>{% endfor %}
+  <h2>Security {% if security_report %}<span class="ts">{{ security_report.created_at }}</span>{% endif %}</h2>
+  {% if security_pending %}
+    <p class="hint">Review requested — Zaf will run it on the next cycle.</p>
+  {% elif security_report %}
+    <div class="md">{{ security_report.content }}</div>
+  {% else %}
+    <p class="hint">No security review yet.</p>
+  {% endif %}
+  <form method="post" action="/p/{{ p.name }}/security-review">
+    <button>Run security review (Zaf)</button></form>
 </section>
 
 <section class="card">
@@ -112,27 +159,14 @@
 </section>
 
 <section class="card">
-  <h2>Security {% if security_report %}<span class="ts">{{ security_report.created_at }}</span>{% endif %}</h2>
-  {% if security_pending %}
-    <p class="hint">Review requested — Zaf will run it on the next cycle.</p>
-  {% elif security_report %}
-    <div class="md">{{ security_report.content }}</div>
-  {% else %}
-    <p class="hint">No security review yet.</p>
-  {% endif %}
-  <form method="post" action="/p/{{ p.name }}/security-review">
-    <button>Run security review (Zaf)</button></form>
-</section>
-
-<section class="card">
-  <h2>Agent runs · ${{ "%.2f"|format(cost) }}</h2>
+  <h2>Agent runs · {{ cost|money }}</h2>
   <ul class="events">
   {% for r in runs %}
     <li class="{{ 'info' if r.ok else 'error' }}">
       <span class="ts">{{ r.started_at }}</span>
-      <span class="pill">{{ agent_name(r.role, r.task, p.lead_name) }}</span> {{ r.task }} {{ r.item_key }}
+      <span class="pill">{{ r.agent or agent_name(r.role, r.task, p.lead_name) }}</span> {{ r.task }} {{ r.item_key }}
       {% if r.ok is not none %}{{ '✓' if r.ok else '✗' }}{% endif %}
-      ${{ "%.2f"|format(r.cost_usd) }} {{ r.summary[:120] }}</li>
+      {{ r.cost_usd|money }} {{ r.summary[:120] }}</li>
   {% endfor %}
   </ul>
 </section>

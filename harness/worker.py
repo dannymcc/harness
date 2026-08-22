@@ -14,8 +14,15 @@ _run_now = threading.Event()
 _state = {"running": False, "last_cycle": "", "thread": None}
 
 
+HEARTBEAT_STALE_S = 45 * 60
+
+
 def status() -> dict:
-    return {"running": _state["running"], "last_cycle": _state["last_cycle"]}
+    age = db.heartbeat_age_seconds()
+    alive = _state["thread"] is not None and _state["thread"].is_alive()
+    return {"running": _state["running"], "last_cycle": _state["last_cycle"],
+            "alive": alive, "heartbeat_age": age,
+            "stale": alive and age is not None and age > HEARTBEAT_STALE_S}
 
 
 def trigger() -> None:
@@ -26,6 +33,7 @@ def _loop() -> None:
     while True:
         _run_now.clear()
         _state["running"] = True
+        db.touch_heartbeat()
         try:
             hourly = housekeeping.due()
             if hourly:
@@ -38,6 +46,7 @@ def _loop() -> None:
                          "error")
         _state["running"] = False
         _state["last_cycle"] = db.now()
+        db.touch_heartbeat()
         # Wake early if paused_until expires before the normal interval —
         # this is what resumes stalled work as soon as limits reset.
         wait = config.POLL_INTERVAL_MINUTES * 60

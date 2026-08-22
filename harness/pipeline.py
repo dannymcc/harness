@@ -16,6 +16,13 @@ from .gh import CmdError
 MAX_AGENT_TASKS_PER_CYCLE = 5
 
 
+def _file_question(project_name: str, asked_by: str, item_key: str,
+                   out: dict | None) -> None:
+    if out and out.get("question_for_danny"):
+        db.ask_question(project_name, asked_by, item_key,
+                        out["question_for_danny"])
+
+
 def _login(author) -> str:
     if isinstance(author, dict):
         return author.get("login", "")
@@ -64,6 +71,7 @@ async def triage_item(project, item) -> None:
         db.update_item(name, "issue", item["number"], error=res["error"])
         return
     out = res["output"]
+    _file_question(name, "Ruth", f"issue#{item['number']}", out)
     fixable = bool(out["valid"] and out["fixable"]
                    and out["verdict"] in ("bug", "feature"))
     db.update_item(
@@ -86,7 +94,7 @@ async def triage_item(project, item) -> None:
         db.update_item(name, "issue", item["number"], status="approved")
 
 
-async def fix_item(project, item) -> None:
+async def fix_item(project, item, persona: str = "Malcolm") -> None:
     name = project["name"]
     detail = gh.issue_detail(project["repo"], item["number"])
     branch = f"harness/issue-{item['number']}"
@@ -94,7 +102,8 @@ async def fix_item(project, item) -> None:
     db.update_item(name, "issue", item["number"], status="working",
                    branch=branch)
     res = await agents.fix_issue(project, detail, item["plan"], cwd,
-                                 resume=item["session_id"] or None)
+                                 resume=item["session_id"] or None,
+                                 persona=persona)
     db.update_item(name, "issue", item["number"],
                    session_id=res.get("session_id", ""))
     if not res["ok"] or not res["output"]["success"]:
@@ -105,6 +114,7 @@ async def fix_item(project, item) -> None:
                      "warn", project=name)
         return
     out = res["output"]
+    _file_question(name, "Malcolm", f"issue#{item['number']}", out)
 
     if not repo.has_changes(project, project["dev_branch"]):
         db.update_item(name, "issue", item["number"], status="blocked",
@@ -179,6 +189,7 @@ async def review_item(project, item) -> None:
         db.update_item(name, "pr", item["number"], error=res["error"])
         return
     out = res["output"]
+    _file_question(name, "Ruth", f"pr#{item['number']}", out)
     verdict = out["verdict"]
     if verdict == "merge" and not passed:
         verdict = "needs_work"  # agents don't outrank the test suite
@@ -257,6 +268,7 @@ async def propose_release(project, queued) -> None:
                      project=name)
         return
     out = res["output"]
+    _file_question(name, "Colin", "release", out)
     version = out["version"].lstrip("v")
     passed, test_out = await asyncio.to_thread(repo.run_tests, project)
     if not passed:
@@ -333,6 +345,15 @@ def _state_digest(project) -> str:
             + (f" — verdict: {it['verdict']}: {it['verdict_summary'][:120]}"
                if it["verdict"] else "")
             + (f" — error: {it['error'][:120]}" if it["error"] else ""))
+    open_qs = db.open_questions(name)
+    if open_qs:
+        lines.append("\nQuestions already waiting on Danny (do not re-ask):")
+        lines += [f"- ({q['asked_by']}) {q['question'][:150]}" for q in open_qs]
+    answered = db.recent_answers(name)
+    if answered:
+        lines.append("\nDanny's recent decisions:")
+        lines += [f"- Q ({q['asked_by']}): {q['question'][:120]}\n  A: {q['answer'][:200]}"
+                  for q in answered]
     queued = db.items_by_status(name, "queued")
     lines.append(f"\nQueued for next release: {len(queued)} change(s). "
                  f"Release policy: >={db.policy(name, 'release_min_changes')} "
@@ -365,6 +386,11 @@ async def run_cycle(project) -> None:
         tasks = plan_res["output"]["tasks"] if plan_res["ok"] else []
         if plan_res["ok"]:
             db.save_report("lead", name, plan_res["output"]["summary"])
+            _file_question(name, project["lead_name"], "", plan_res["output"])
+
+        staff = db.staff_get(name)
+        engineers = ["Malcolm"] + staff["extra"]
+        fixes_done = 0
 
         done = 0
         for t in tasks:
@@ -378,13 +404,19 @@ async def run_cycle(project) -> None:
                 done += 1
                 # auto-advance freshly approved fixes in the same cycle
                 item = db.get_item(name, t["kind"], t["number"])
-                if item["status"] == "approved" and done < MAX_AGENT_TASKS_PER_CYCLE:
-                    await fix_item(project, item)
+                if item["status"] == "approved" and done < MAX_AGENT_TASKS_PER_CYCLE \
+                        and fixes_done < len(engineers):
+                    await fix_item(project, item,
+                                   engineers[fixes_done % len(engineers)])
+                    fixes_done += 1
                     done += 1
             elif t["action"] == "fix" and item["status"] in ("triaged", "approved"):
-                if db.policy(name, "fix_issues") == "auto" or \
-                        item["status"] == "approved":
-                    await fix_item(project, item)
+                if (db.policy(name, "fix_issues") == "auto" or
+                        item["status"] == "approved") and \
+                        fixes_done < len(engineers):
+                    await fix_item(project, item,
+                                   engineers[fixes_done % len(engineers)])
+                    fixes_done += 1
                     done += 1
             elif t["action"] == "review" and item["status"] == "new":
                 await review_item(project, item)
@@ -411,6 +443,7 @@ async def run_cycle(project) -> None:
 async def run_all_cycles() -> None:
     projects = db.all_projects(enabled_only=True)
     for p in projects:
+        db.touch_heartbeat()
         try:
             await run_cycle(p)
         except AgentStalled:
@@ -484,6 +517,21 @@ def _standup_digest() -> str:
         for it in db.items_by_status(name, "queued"):
             lines.append(f"queued for release {it['kind']}#{it['number']} "
                          f"({age_days(it['queued_at'] or it['updated_at'])})")
+        staff = db.staff_get(name)
+        util = {}
+        for r in db.recent_runs(100, name):
+            who = r["agent"] or r["role"]
+            util[who] = util.get(who, 0) + 1
+        lines.append("On this desk: Malcolm" +
+                     ("".join(f", {e}" for e in staff["extra"])) +
+                     ", Ruth, Colin, Zaf" +
+                     (f"; stood down: {', '.join(staff['benched'])}"
+                      if staff["benched"] else "") +
+                     f". Available hire pool: "
+                     f"{', '.join(n for n in __import__('harness.config', fromlist=['c']).HIRE_POOL if n not in staff['extra'])}")
+        lines.append("Recent run counts by person: " +
+                     (", ".join(f"{k}={v}" for k, v in sorted(util.items()))
+                      or "none"))
         fails = [r for r in db.recent_runs(10, name) if r["ok"] == 0]
         for r in fails[:5]:
             lines.append(f"failed run: {r['task']} {r['item_key']} — "
@@ -506,12 +554,51 @@ async def run_standup() -> None:
         db.log_event(f"Stand-up failed: {res['error']}", "warn")
         return
     out = res["output"]
+    _file_question("", "Harry", "", out)
     db.save_report("cto", "", out["standup_markdown"])
+    for desk in out.get("desks", []):
+        if db.get_project(desk["project"]):
+            marker = "" if desk["moving"] else "⚠ "
+            db.save_report("harry", desk["project"],
+                           marker + desk["status_line"])
     for b in out.get("blockers", []):
         db.log_event(f"Stand-up blocker: {b['message']}", "warn",
                      project=b.get("project", ""))
+    _apply_staffing(out.get("staffing", []))
     if out["all_clear"]:
         db.log_event("Stand-up: all clear")
+
+
+def _apply_staffing(actions: list) -> None:
+    from . import config as cfg
+    for a in actions:
+        pname, name = a.get("project", ""), a.get("name", "").strip()
+        if not db.get_project(pname):
+            continue
+        staff = db.staff_get(pname)
+        if a["action"] == "hire":
+            if name in cfg.HIRE_POOL and name not in staff["extra"] \
+                    and len(staff["extra"]) < cfg.MAX_EXTRA_ENGINEERS:
+                staff["extra"].append(name)
+                if name in staff["benched"]:
+                    staff["benched"].remove(name)
+                db.staff_set(pname, staff)
+                db.log_event(f"Harry has brought {name} onto the {pname} desk: "
+                             f"{a['reason'][:150]}", project=pname)
+        elif a["action"] == "stand_down":
+            if name in staff["extra"]:
+                staff["extra"].remove(name)
+            if name not in staff["benched"] and name not in ("Harry",):
+                staff["benched"].append(name)
+            db.staff_set(pname, staff)
+            db.log_event(f"Harry has stood {name} down on the {pname} desk: "
+                         f"{a['reason'][:150]}", project=pname)
+        elif a["action"] == "reinstate":
+            if name in staff["benched"]:
+                staff["benched"].remove(name)
+                db.staff_set(pname, staff)
+                db.log_event(f"Harry has reinstated {name} on the {pname} "
+                             f"desk", project=pname)
 
 
 # --- security review (manually triggered) ------------------------------------
@@ -530,6 +617,7 @@ async def run_security_review(project) -> None:
                      project=name)
         return
     out = res["output"]
+    _file_question(name, "Zaf", "", out)
     db.save_report("security", name, out["report_markdown"])
     serious = [f for f in out.get("findings", [])
                if f["severity"] in ("critical", "high")]
