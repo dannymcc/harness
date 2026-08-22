@@ -414,22 +414,97 @@ async def run_all_cycles() -> None:
         except Exception as e:
             db.log_event(f"Cycle failed: {type(e).__name__}: {e}", "error",
                          project=p["name"])
-    # CTO reviews the whole portfolio once per full sweep.
-    if not db.paused_until() and projects:
-        digest = []
-        for p in projects:
-            digest.append(f"## {p['name']} ({p['repo']})\n{_state_digest(p)}")
-            digest.append(f"Spend so far: ${db.total_cost(p['name']):.2f}")
-            for r in db.recent_runs(3, p["name"]):
-                flag = 'ok' if r['ok'] else 'FAILED'
-                digest.append(f"  run: {r['task']} {r['item_key']} {flag} "
-                              f"${r['cost_usd']:.2f}")
+    # Harry's cross-project review now happens in the hourly stand-up
+    # (run_standup) rather than every sweep — cheaper and more predictable.
+
+
+# --- hourly stand-up ---------------------------------------------------------
+
+STUCK_WORKING_HOURS = 6
+
+
+def _unstick_working() -> list[str]:
+    """Requeue items stranded in 'working' (e.g. after a crash/restart)."""
+    freed = []
+    cutoff = (datetime.now(timezone.utc)
+              .timestamp() - STUCK_WORKING_HOURS * 3600)
+    for p in db.all_projects(enabled_only=True):
+        for item in db.items_by_status(p["name"], "working"):
+            ts = datetime.strptime(item["updated_at"], "%Y-%m-%dT%H:%M:%SZ") \
+                .replace(tzinfo=timezone.utc).timestamp()
+            if ts < cutoff:
+                db.update_item(p["name"], item["kind"], item["number"],
+                               status="approved")
+                freed.append(f"{p['name']} {item['kind']}#{item['number']}")
+                db.log_event(
+                    f"Stand-up: {item['kind']}#{item['number']} was stuck in "
+                    f"'working' for over {STUCK_WORKING_HOURS}h — requeued",
+                    "warn", project=p["name"])
+    return freed
+
+
+def _standup_digest() -> str:
+    now_ts = datetime.now(timezone.utc)
+
+    def age_days(ts: str) -> str:
         try:
-            res = await agents.cto_review("\n".join(digest))
-            if res["ok"]:
-                db.save_report("cto", "", res["output"]["report_markdown"])
-                for esc in res["output"].get("escalations", []):
-                    db.log_event(f"CTO escalation: {esc['message']}", "warn",
-                                 project=esc.get("project", ""))
-        except AgentStalled:
-            pass
+            dt = datetime.strptime(ts, "%Y-%m-%dT%H:%M:%SZ") \
+                .replace(tzinfo=timezone.utc)
+            return f"{(now_ts - dt).total_seconds() / 86400:.1f}d"
+        except (ValueError, TypeError):
+            return "?"
+
+    sections = []
+    if db.paused_until():
+        sections.append(f"NOTE: agent work is paused for API limits until "
+                        f"{db.paused_until()}.")
+    for p in db.all_projects(enabled_only=True):
+        name = p["name"]
+        lead = db.latest_report("lead", name)
+        lines = [f"## {name} desk (lead: {p['lead_name']}, {p['repo']})"]
+        if lead:
+            lines.append(f"{p['lead_name']}'s last plan ({age_days(lead['created_at'])} ago): "
+                         f"{lead['content'][:300]}")
+        counts = db.counts_by_status(name)
+        lines.append("Open items by status: " +
+                     (", ".join(f"{k}={v}" for k, v in sorted(counts.items()))
+                      or "none"))
+        for it in db.items_by_status(name, "blocked"):
+            lines.append(f"BLOCKED {it['kind']}#{it['number']} "
+                         f"({age_days(it['updated_at'])}): {it['error'][:200]}")
+        for it in db.items_by_status(name, "waiting_human"):
+            if it["gh_state"] == "open":
+                lines.append(f"waiting on maintainer {it['kind']}#{it['number']} "
+                             f"for {age_days(it['updated_at'])}: "
+                             f"{it['verdict']} — {it['title'][:80]}")
+        for it in db.items_by_status(name, "queued"):
+            lines.append(f"queued for release {it['kind']}#{it['number']} "
+                         f"({age_days(it['queued_at'] or it['updated_at'])})")
+        fails = [r for r in db.recent_runs(10, name) if r["ok"] == 0]
+        for r in fails[:5]:
+            lines.append(f"failed run: {r['task']} {r['item_key']} — "
+                         f"{r['summary'][:150]}")
+        lines.append(f"Spend to date: ${db.total_cost(name):.2f}")
+        sections.append("\n".join(lines))
+    return "\n\n".join(sections) or "No harnesses configured."
+
+
+async def run_standup() -> None:
+    """Harry's hourly stand-up across every desk."""
+    _unstick_working()
+    if db.paused_until() or not db.all_projects(enabled_only=True):
+        return
+    try:
+        res = await agents.standup(_standup_digest())
+    except AgentStalled:
+        return
+    if not res["ok"]:
+        db.log_event(f"Stand-up failed: {res['error']}", "warn")
+        return
+    out = res["output"]
+    db.save_report("cto", "", out["standup_markdown"])
+    for b in out.get("blockers", []):
+        db.log_event(f"Stand-up blocker: {b['message']}", "warn",
+                     project=b.get("project", ""))
+    if out["all_clear"]:
+        db.log_event("Stand-up: all clear")

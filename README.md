@@ -17,7 +17,7 @@ Harness runs a small agent organisation, staffed from Spooks:
 
 | Agent | Role | Scope | Job |
 |---|---|---|---|
-| **Harry** | head of section (CTO) | all harnesses | Reviews every project each sweep, writes the overview status report, escalates anything stuck, failing repeatedly, or burning cost. |
+| **Harry** | head of section (CTO) | all harnesses | Takes an hourly stand-up across every desk: one line per project on whether it's moving, blockers called out with next steps, escalations logged. Work stranded mid-fix is requeued automatically first. |
 | **Tom, Adam, Ros, Lucas…** | team leads | one per harness | Read the project state each cycle and plan the work: what to triage, fix, review, and what to deliberately skip. |
 | **Ruth** | analyst (IC) | task-based | Triages issues and reviews pull requests. |
 | **Malcolm** | technical (IC) | task-based | Writes the fixes, with tests. |

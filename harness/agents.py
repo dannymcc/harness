@@ -257,6 +257,31 @@ PLAN_SCHEMA = {
     },
 }
 
+STANDUP_SCHEMA = {
+    "type": "object",
+    "additionalProperties": False,
+    "required": ["standup_markdown", "blockers", "all_clear", "summary"],
+    "properties": {
+        "summary": {"type": "string"},
+        "all_clear": {"type": "boolean",
+                      "description": "True if every desk is moving and nothing needs the maintainer."},
+        "standup_markdown": {"type": "string",
+                             "description": "Per-desk one-liners plus anything that needs attention."},
+        "blockers": {
+            "type": "array",
+            "items": {
+                "type": "object",
+                "additionalProperties": False,
+                "required": ["project", "message"],
+                "properties": {
+                    "project": {"type": "string"},
+                    "message": {"type": "string"},
+                },
+            },
+        },
+    },
+}
+
 CTO_SCHEMA = {
     "type": "object",
     "additionalProperties": False,
@@ -470,6 +495,26 @@ digest above."""
 
 
 # --- CTO ---------------------------------------------------------------------
+
+async def standup(digest: str) -> dict:
+    """Hourly stand-up: Harry hears every desk, checks nothing is stuck."""
+    prompt = f"""You are Harry, head of section, taking the hourly stand-up.
+Every desk's status is below: the team lead's latest plan, what's in
+progress, what's blocked and why, how long things have been waiting, and
+recent failures and spend.
+
+{digest}
+
+Run the stand-up: one line per desk on whether it's moving. Then call out
+anything genuinely stuck — an item blocked for a reason nobody is acting on,
+work waiting on the maintainer for days, repeated failures, unusual spend —
+as blockers, each with a concrete next step. Set all_clear only if there is
+truly nothing needing attention. Be brief; this happens every hour."""
+    return await run_agent(
+        project_name="", role="cto",
+        item_key="", task="standup",
+        prompt=prompt, cwd=None, schema=STANDUP_SCHEMA, readonly=True)
+
 
 async def cto_review(digest: str) -> dict:
     prompt = f"""You are Harry, head of section, overseeing every Harness

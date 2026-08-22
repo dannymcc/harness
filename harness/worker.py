@@ -27,9 +27,12 @@ def _loop() -> None:
         _run_now.clear()
         _state["running"] = True
         try:
-            if housekeeping.due():
+            hourly = housekeeping.due()
+            if hourly:
                 asyncio.run(housekeeping.run(allow_agent=not db.paused_until()))
             asyncio.run(pipeline.run_all_cycles())
+            if hourly:
+                asyncio.run(pipeline.run_standup())
         except Exception:
             db.log_event("Worker cycle crashed:\n" + traceback.format_exc()[-1500:],
                          "error")
