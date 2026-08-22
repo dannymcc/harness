@@ -8,6 +8,11 @@ phone-friendly dashboard.
 
 Named after Andy Wilman: the producer who managed May (and the rest of them).
 
+<p align="center">
+  <img src="screenshots/overview-mobile.png" alt="Overview dashboard" width="30%">
+  <img src="screenshots/project-mobile.png" alt="Project harness view" width="30%">
+</p>
+
 ## The org chart
 
 Wilman runs a small agent organisation:
