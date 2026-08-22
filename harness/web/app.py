@@ -22,6 +22,8 @@ templates = Jinja2Templates(directory=BASE / "templates")
 def agent_name(role: str, task: str, lead_name: str = "") -> str:
     if role == "cto":
         return config.CTO_NAME
+    if role == "admin":
+        return config.ADMIN_NAME
     if role == "lead":
         return lead_name or "lead"
     return config.IC_NAMES.get(task, "IC")
@@ -88,6 +90,7 @@ def project_page(request: Request, name: str):
         release=db.open_release(name),
         releases=db.project_releases(name),
         lead_report=db.latest_report("lead", name),
+        desk_notes=db.latest_report("notes", name),
         policies=db.all_policies(name),
         runs=db.recent_runs(15, name),
         events=db.recent_events(30, name),

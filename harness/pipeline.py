@@ -321,6 +321,9 @@ def finalize_release(project, release) -> None:
 def _state_digest(project) -> str:
     name = project["name"]
     lines = []
+    notes = db.latest_report("notes", name)
+    if notes:
+        lines.append(f"Desk notes (rolling summary):\n{notes['content']}\n")
     for it in db.project_items(name):
         if it["gh_state"] != "open" and it["status"] != "queued":
             continue
@@ -417,7 +420,7 @@ async def run_all_cycles() -> None:
         for p in projects:
             digest.append(f"## {p['name']} ({p['repo']})\n{_state_digest(p)}")
             digest.append(f"Spend so far: ${db.total_cost(p['name']):.2f}")
-            for r in db.recent_runs(5, p["name"]):
+            for r in db.recent_runs(3, p["name"]):
                 flag = 'ok' if r['ok'] else 'FAILED'
                 digest.append(f"  run: {r['task']} {r['item_key']} {flag} "
                               f"${r['cost_usd']:.2f}")

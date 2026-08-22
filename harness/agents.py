@@ -87,7 +87,8 @@ class AgentStalled(RuntimeError):
 
 async def run_agent(*, project_name: str, role: str, item_key: str, task: str,
                     prompt: str, cwd: str | None, schema: dict,
-                    readonly: bool = False, resume: str | None = None) -> dict:
+                    readonly: bool = False, resume: str | None = None,
+                    model: str | None = None) -> dict:
     """Run one agent session, log it, and return its structured output.
 
     Returns {"ok": bool, "output": dict|None, "session_id": str, "error": str}.
@@ -96,9 +97,10 @@ async def run_agent(*, project_name: str, role: str, item_key: str, task: str,
     if db.paused_until():
         raise AgentStalled("paused for API limits")
 
-    run_id = db.start_run(project_name, role, item_key, task, config.MODEL)
+    mdl = model or config.MODEL
+    run_id = db.start_run(project_name, role, item_key, task, mdl)
     options = ClaudeAgentOptions(
-        model=config.MODEL,
+        model=mdl,
         cwd=cwd,
         allowed_tools=READONLY_TOOLS if readonly else IC_TOOLS,
         disallowed_tools=BLOCKED,
@@ -405,6 +407,43 @@ Do NOT commit, push or tag — leave the working tree changes in place."""
         project_name=project["name"], role="ic",
         item_key="release", task="release",
         prompt=prompt, cwd=cwd, schema=RELEASE_SCHEMA)
+
+
+NOTES_SCHEMA = {
+    "type": "object",
+    "additionalProperties": False,
+    "required": ["notes_markdown", "summary"],
+    "properties": {
+        "notes_markdown": {"type": "string",
+                           "description": "The updated rolling desk notes."},
+        "summary": {"type": "string"},
+    },
+}
+
+
+async def compact_notes(project_name: str, old_notes: str,
+                        new_events: str) -> dict:
+    """Tariq folds recent activity into short rolling desk notes.
+
+    The notes replace raw history in the team lead and CTO prompts, which is
+    where the token saving happens. Runs on the cheap admin model.
+    """
+    prompt = f"""You are Tariq, the section's admin. Maintain the rolling desk
+notes for the {project_name} harness. Fold the new activity below into the
+existing notes: keep decisions, recurring problems, community context and
+anything a team lead would need; drop routine noise and anything now stale.
+Hard limit 200 words — these notes exist to keep prompts small.
+
+Existing notes:
+{old_notes or '(none yet)'}
+
+New activity since the notes were last updated:
+{new_events}"""
+    return await run_agent(
+        project_name=project_name, role="admin",
+        item_key="", task="notes",
+        prompt=prompt, cwd=None, schema=NOTES_SCHEMA, readonly=True,
+        model=config.ADMIN_MODEL)
 
 
 # --- Team Lead ---------------------------------------------------------------

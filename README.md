@@ -21,7 +21,8 @@ Harness runs a small agent organisation, staffed from Spooks:
 | **Tom, Adam, Ros, Lucas…** | team leads | one per harness | Read the project state each cycle and plan the work: what to triage, fix, review, and what to deliberately skip. |
 | **Ruth** | analyst (IC) | task-based | Triages issues and reviews pull requests. |
 | **Malcolm** | technical (IC) | task-based | Writes the fixes, with tests. |
-| **Colin** | operations (IC) | task-based | Drafts releases: version bump, changelog, docs check. |
+| **Colin** | operations (IC) | task-based | Runs the release cycle: version bump, CHANGELOG.md, release notes with contributor credits, docs check. The pipeline then opens the dev→main PR and, on approval, merges, tags and publishes the GitHub Release. |
+| **Tariq** | admin | all harnesses | Hourly housekeeping to minimise token usage: prunes old events/runs/logs/sessions (free, deterministic) and maintains 200-word rolling desk notes per project on a cheap model, which stand in for raw history in every lead/CTO prompt. |
 
 Judgement is agent work; **actions are not**. Every push, merge, comment and
 release is executed by deterministic code behind policy gates, and the test
@@ -48,6 +49,11 @@ anything network-facing.
   rest. One fix never means one release.
 - **Docs** — fix sessions must update README/docs when user-visible behaviour
   changes, and every release drafting pass re-checks them.
+- **Housekeeping** — every hour Tariq compacts state: old events and runs
+  fold into aggregates, finished items lose their stored diffs and session
+  ids, stale transcripts and SDK session files are deleted, and per-project
+  desk notes are refreshed (only when there is enough new activity to be
+  worth the call — a quiet harness costs nothing to keep tidy).
 - **Stall handling** — if the Claude API rate-limits or your account hits its
   usage cap, Harness pauses all agent work, records why, and resumes
   automatically the moment the limit resets (parsed from the error where

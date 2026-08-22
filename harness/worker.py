@@ -8,7 +8,7 @@ import asyncio
 import threading
 import traceback
 
-from . import config, db, pipeline
+from . import config, db, housekeeping, pipeline
 
 _run_now = threading.Event()
 _state = {"running": False, "last_cycle": "", "thread": None}
@@ -27,6 +27,8 @@ def _loop() -> None:
         _run_now.clear()
         _state["running"] = True
         try:
+            if housekeeping.due():
+                asyncio.run(housekeeping.run(allow_agent=not db.paused_until()))
             asyncio.run(pipeline.run_all_cycles())
         except Exception:
             db.log_event("Worker cycle crashed:\n" + traceback.format_exc()[-1500:],

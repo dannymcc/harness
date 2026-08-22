@@ -330,15 +330,23 @@ def recent_runs(limit: int = 30, project: str | None = None):
 
 
 def total_cost(project: str | None = None) -> float:
+    """Live run rows plus costs archived by housekeeping."""
     with conn() as c:
         if project is None:
             row = c.execute("SELECT COALESCE(SUM(cost_usd), 0) t FROM runs").fetchone()
+            arch = c.execute(
+                "SELECT COALESCE(SUM(CAST(value AS REAL)), 0) t FROM settings "
+                "WHERE key LIKE 'archived_cost.%'").fetchone()
         else:
             row = c.execute(
                 "SELECT COALESCE(SUM(cost_usd), 0) t FROM runs WHERE project = ?",
                 (project,),
             ).fetchone()
-        return row["t"]
+            arch = c.execute(
+                "SELECT COALESCE(SUM(CAST(value AS REAL)), 0) t FROM settings "
+                "WHERE key = ?", (f"archived_cost.{project}",),
+            ).fetchone()
+        return row["t"] + arch["t"]
 
 
 # --- releases ---------------------------------------------------------------

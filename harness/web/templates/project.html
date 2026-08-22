@@ -12,6 +12,13 @@
 </section>
 {% endif %}
 
+{% if desk_notes %}
+<section class="card">
+  <h2>Tariq — desk notes <span class="ts">{{ desk_notes.created_at }}</span></h2>
+  <div class="md">{{ desk_notes.content }}</div>
+</section>
+{% endif %}
+
 {% if release %}
 <section class="card accent-border">
   <h2>Release v{{ release.version }} proposed
