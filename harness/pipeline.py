@@ -347,6 +347,10 @@ async def run_cycle(project) -> None:
     if db.paused_until():
         return
 
+    if db.get_setting(f"security_requested.{name}") == "1":
+        db.set_setting(f"security_requested.{name}", "")
+        await run_security_review(project)
+
     try:
         # Anything a human approved in the GUI runs first.
         for item in db.items_by_status(name, "approved"):
@@ -508,3 +512,29 @@ async def run_standup() -> None:
                      project=b.get("project", ""))
     if out["all_clear"]:
         db.log_event("Stand-up: all clear")
+
+
+# --- security review (manually triggered) ------------------------------------
+
+async def run_security_review(project) -> None:
+    name = project["name"]
+    cwd = str(repo.clean_checkout(project, project["dev_branch"]))
+    db.log_event("Security review started (Zaf)", project=name)
+    try:
+        res = await agents.security_review(project, cwd)
+    except AgentStalled:
+        db.set_setting(f"security_requested.{name}", "1")  # retry after pause
+        return
+    if not res["ok"]:
+        db.log_event(f"Security review failed: {res['error']}", "warn",
+                     project=name)
+        return
+    out = res["output"]
+    db.save_report("security", name, out["report_markdown"])
+    serious = [f for f in out.get("findings", [])
+               if f["severity"] in ("critical", "high")]
+    for f in serious:
+        db.log_event(f"Security finding [{f['severity']}] {f['title']} "
+                     f"({f['location']})", "warn", project=name)
+    db.log_event(f"Security review complete: {len(out.get('findings', []))} "
+                 f"finding(s), {len(serious)} serious", project=name)

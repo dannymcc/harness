@@ -42,6 +42,7 @@ IC_NAMES = {
     "review": "Ruth",
     "fix": "Malcolm",     # technical
     "release": "Colin",   # ops
+    "security": "Zaf",    # security reviews (manually triggered)
 }
 
 # --- Per-project defaults ---------------------------------------------------

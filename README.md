@@ -22,6 +22,7 @@ Harness runs a small agent organisation, staffed from Spooks:
 | **Ruth** | analyst (IC) | task-based | Triages issues and reviews pull requests. |
 | **Malcolm** | technical (IC) | task-based | Writes the fixes, with tests. |
 | **Colin** | operations (IC) | task-based | Runs the release cycle: version bump, CHANGELOG.md, release notes with contributor credits, docs check. The pipeline then opens the dev→main PR and, on approval, merges, tags and publishes the GitHub Release. |
+| **Zaf** | security (IC) | manually triggered | Read-only security review of a harness's codebase from the project page: auth, injection, uploads, secrets, deployment config. Findings ranked by severity; serious ones raised as warnings. |
 | **Tariq** | admin | all harnesses | Hourly housekeeping to minimise token usage: prunes old events/runs/logs/sessions (free, deterministic) and maintains 200-word rolling desk notes per project on a cheap model, which stand in for raw history in every lead/CTO prompt. |
 
 Judgement is agent work; **actions are not**. Every push, merge, comment and

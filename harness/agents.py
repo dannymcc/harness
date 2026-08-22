@@ -471,6 +471,57 @@ New activity since the notes were last updated:
         model=config.ADMIN_MODEL)
 
 
+SECURITY_SCHEMA = {
+    "type": "object",
+    "additionalProperties": False,
+    "required": ["report_markdown", "findings", "summary"],
+    "properties": {
+        "summary": {"type": "string"},
+        "report_markdown": {"type": "string",
+                            "description": "Full security review report."},
+        "findings": {
+            "type": "array",
+            "items": {
+                "type": "object",
+                "additionalProperties": False,
+                "required": ["severity", "title", "location", "detail"],
+                "properties": {
+                    "severity": {"type": "string",
+                                 "enum": ["critical", "high", "medium",
+                                          "low", "info"]},
+                    "title": {"type": "string"},
+                    "location": {"type": "string",
+                                 "description": "file:line or component"},
+                    "detail": {"type": "string",
+                               "description": "What, why it matters, and the fix."},
+                },
+            },
+        },
+    },
+}
+
+
+async def security_review(project, cwd: str) -> dict:
+    prompt = f"""You are Zaf, running a security review of {project['repo']}.
+You are in a clean read-only checkout of the {project['dev_branch']} branch.
+
+Review the codebase as a defender: authentication and session handling,
+authorisation on every route, injection (SQL/command/template), file upload
+and path handling, secrets in the repo or logs, CSRF/XSS, dependency red
+flags, Docker/deployment configuration, and anything security-relevant in
+recent changes (git log will show you what moved lately).
+
+Report only genuine findings with concrete locations — no boilerplate
+checklists, no credit for things done well beyond a sentence in the summary.
+Rank by severity honestly; a self-hosted app behind a home network is still
+allowed to have real vulnerabilities. For each finding give the fix you
+would make. Do not modify any files."""
+    return await run_agent(
+        project_name=project["name"], role="ic",
+        item_key="", task="security",
+        prompt=prompt, cwd=cwd, schema=SECURITY_SCHEMA, readonly=True)
+
+
 # --- Team Lead ---------------------------------------------------------------
 
 async def lead_plan(project, state_digest: str, cwd: str) -> dict:

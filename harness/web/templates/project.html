@@ -112,6 +112,19 @@
 </section>
 
 <section class="card">
+  <h2>Security {% if security_report %}<span class="ts">{{ security_report.created_at }}</span>{% endif %}</h2>
+  {% if security_pending %}
+    <p class="hint">Review requested — Zaf will run it on the next cycle.</p>
+  {% elif security_report %}
+    <div class="md">{{ security_report.content }}</div>
+  {% else %}
+    <p class="hint">No security review yet.</p>
+  {% endif %}
+  <form method="post" action="/p/{{ p.name }}/security-review">
+    <button>Run security review (Zaf)</button></form>
+</section>
+
+<section class="card">
   <h2>Agent runs · ${{ "%.2f"|format(cost) }}</h2>
   <ul class="events">
   {% for r in runs %}

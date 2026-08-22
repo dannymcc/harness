@@ -91,6 +91,8 @@ def project_page(request: Request, name: str):
         releases=db.project_releases(name),
         lead_report=db.latest_report("lead", name),
         desk_notes=db.latest_report("notes", name),
+        security_report=db.latest_report("security", name),
+        security_pending=db.get_setting(f"security_requested.{name}") == "1",
         policies=db.all_policies(name),
         runs=db.recent_runs(15, name),
         events=db.recent_events(30, name),
@@ -169,6 +171,15 @@ def set_policy(name: str, key: str, value: str = Form(...)):
     if key in config.POLICY_DEFAULTS:
         db.set_policy(name, key, value)
         db.log_event(f"Policy {key} -> {value}", project=name)
+    return RedirectResponse(f"/p/{name}", status_code=303)
+
+
+@app.post("/p/{name}/security-review")
+def request_security_review(name: str):
+    if db.get_project(name):
+        db.set_setting(f"security_requested.{name}", "1")
+        db.log_event("Security review requested", project=name)
+        worker.trigger()
     return RedirectResponse(f"/p/{name}", status_code=303)
 
 
