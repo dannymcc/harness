@@ -30,7 +30,7 @@ def agent_name(role: str, task: str, lead_name: str = "") -> str:
 
 
 templates.env.globals["agent_name"] = agent_name
-templates.env.filters["money"] = lambda v: f"US${(v or 0):,.2f}"
+templates.env.filters["money"] = lambda v: f"≈US${(v or 0):,.2f}"
 
 
 @app.get("/health")
