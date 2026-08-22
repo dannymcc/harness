@@ -280,7 +280,8 @@ CTO_SCHEMA = {
 
 
 async def triage_issue(project, issue: dict, cwd: str) -> dict:
-    prompt = f"""Triage this GitHub issue for {project['repo']}. You are in a
+    prompt = f"""You are Ruth, the section's analyst.
+Triage this GitHub issue for {project['repo']}. You are in a
 clean checkout of the {project['dev_branch']} branch. Investigate properly:
 read the relevant code, try to reproduce the claim where practical.
 
@@ -306,7 +307,8 @@ misunderstanding, or confirming the plan). Do not modify any files."""
 
 async def fix_issue(project, issue: dict, plan: str, cwd: str,
                     resume: str | None = None) -> dict:
-    prompt = f"""Fix this issue in {project['repo']}. You are on a work branch
+    prompt = f"""You are Malcolm, the section's technical specialist.
+Fix this issue in {project['repo']}. You are on a work branch
 off {project['dev_branch']} in wilman's checkout. The triage plan is below —
 verify it against the code before following it.
 
@@ -334,8 +336,8 @@ Requirements:
 async def review_pr(project, pr: dict, diff: str, test_result: str,
                     cwd: str) -> dict:
     checks = json.dumps(pr.get("statusCheckRollup") or [], indent=2)[:3000]
-    prompt = f"""Review this pull request to {project['repo']} as a careful
-maintainer. You are in a checkout with the PR already merged onto
+    prompt = f"""You are Ruth, the section's analyst.
+Review this pull request to {project['repo']} as a careful maintainer. You are in a checkout with the PR already merged onto
 {project['dev_branch']} so you can read the combined result.
 
 PR #{pr['number']}: {pr['title']}
@@ -375,7 +377,8 @@ async def draft_release(project, queued_items: list, current_version: str,
     items_txt = "\n".join(
         f"- {i['kind']}#{i['number']}: {i['title']} ({i['verdict']})"
         for i in queued_items)
-    prompt = f"""Prepare a release of {project['repo']}. You are on the
+    prompt = f"""You are Colin, the section's operations specialist.
+Prepare a release of {project['repo']}. You are on the
 {project['dev_branch']} branch in wilman's checkout.
 
 Current version: {current_version}
@@ -405,8 +408,9 @@ Do NOT commit, push or tag — leave the working tree changes in place."""
 # --- Team Lead ---------------------------------------------------------------
 
 async def lead_plan(project, state_digest: str, cwd: str) -> dict:
-    prompt = f"""You are the Team Lead for {project['repo']} in the Wilman
-harness. Your ICs can: triage issues, fix triaged bugs, and review PRs. The
+    prompt = f"""You are {project['lead_name']}, the team lead running the
+{project['repo']} desk in the Wilman harness. Your officers can: triage
+issues (Ruth), fix triaged bugs (Malcolm), and review PRs (Ruth). The
 harness (not you) handles merges, comments and releases behind policy gates.
 
 Current project state:
@@ -427,9 +431,10 @@ digest above."""
 # --- CTO ---------------------------------------------------------------------
 
 async def cto_review(digest: str) -> dict:
-    prompt = f"""You are the CTO overseeing all Wilman harnesses (one per
-project). Below is the state of every project: queues, blocked items, recent
-failures, costs, and pending human approvals.
+    prompt = f"""You are Harry, head of section, overseeing every Wilman
+harness (one per project, each run by a team lead). Below is the state of
+every project: queues, blocked items, recent failures, costs, and pending
+human approvals.
 
 {digest}
 

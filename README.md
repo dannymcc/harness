@@ -13,15 +13,17 @@ Named after Andy Wilman: the producer who managed May (and the rest of them).
   <img src="screenshots/project-mobile.png" alt="Project harness view" width="30%">
 </p>
 
-## The org chart
+## The section
 
-Wilman runs a small agent organisation:
+Wilman runs a small agent organisation, staffed from Spooks:
 
-| Role | Scope | Job |
-|---|---|---|
-| **CTO** | all harnesses | Reviews every project each sweep, writes the overview status report, escalates anything stuck, failing repeatedly, or burning cost. |
-| **Team Lead** | one per harness | Reads the project state each cycle and plans the work: what to triage, fix, review, and what to deliberately skip. |
-| **ICs** | task-based | Do the actual work: triage an issue, write a fix, review a PR, draft a release. |
+| Agent | Role | Scope | Job |
+|---|---|---|---|
+| **Harry** | head of section (CTO) | all harnesses | Reviews every project each sweep, writes the overview status report, escalates anything stuck, failing repeatedly, or burning cost. |
+| **Tom, Adam, Ros, Lucas…** | team leads | one per harness | Read the project state each cycle and plan the work: what to triage, fix, review, and what to deliberately skip. |
+| **Ruth** | analyst (IC) | task-based | Triages issues and reviews pull requests. |
+| **Malcolm** | technical (IC) | task-based | Writes the fixes, with tests. |
+| **Colin** | operations (IC) | task-based | Drafts releases: version bump, changelog, docs check. |
 
 Judgement is agent work; **actions are not**. Every push, merge, comment and
 release is executed by deterministic code behind policy gates, and the test

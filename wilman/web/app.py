@@ -19,6 +19,17 @@ app.mount("/static", StaticFiles(directory=BASE / "static"), name="static")
 templates = Jinja2Templates(directory=BASE / "templates")
 
 
+def agent_name(role: str, task: str, lead_name: str = "") -> str:
+    if role == "cto":
+        return config.CTO_NAME
+    if role == "lead":
+        return lead_name or "lead"
+    return config.IC_NAMES.get(task, "IC")
+
+
+templates.env.globals["agent_name"] = agent_name
+
+
 def render(request: Request, template: str, **ctx):
     ctx.update(
         request=request,

@@ -7,7 +7,7 @@
 
 {% if lead_report %}
 <section class="card">
-  <h2>Team lead <span class="ts">{{ lead_report.created_at }}</span></h2>
+  <h2>{{ p.lead_name }} — team lead <span class="ts">{{ lead_report.created_at }}</span></h2>
   <div class="md">{{ lead_report.content }}</div>
 </section>
 {% endif %}
@@ -110,7 +110,7 @@
   {% for r in runs %}
     <li class="{{ 'info' if r.ok else 'error' }}">
       <span class="ts">{{ r.started_at }}</span>
-      <span class="pill">{{ r.role }}</span> {{ r.task }} {{ r.item_key }}
+      <span class="pill">{{ agent_name(r.role, r.task, p.lead_name) }}</span> {{ r.task }} {{ r.item_key }}
       {% if r.ok is not none %}{{ '✓' if r.ok else '✗' }}{% endif %}
       ${{ "%.2f"|format(r.cost_usd) }} {{ r.summary[:120] }}</li>
   {% endfor %}

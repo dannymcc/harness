@@ -27,6 +27,18 @@ POLL_INTERVAL_MINUTES = int(os.environ.get("WILMAN_POLL_INTERVAL_MINUTES", "30")
 BIND_HOST = os.environ.get("WILMAN_BIND_HOST", "0.0.0.0")
 BIND_PORT = int(os.environ.get("WILMAN_BIND_PORT", "8300"))
 
+# --- Agent personas (Spooks) ------------------------------------------------
+# Harry runs the section. Each harness gets a senior officer as team lead;
+# the ICs are the specialists.
+CTO_NAME = "Harry"
+LEAD_ROSTER = ["Tom", "Adam", "Ros", "Lucas", "Zoe", "Jo", "Danny", "Fiona"]
+IC_NAMES = {
+    "triage": "Ruth",     # analysis
+    "review": "Ruth",
+    "fix": "Malcolm",     # technical
+    "release": "Colin",   # ops
+}
+
 # --- Per-project defaults ---------------------------------------------------
 # "auto"    – wilman acts on its own verdict
 # "approve" – wilman prepares the action and waits for a click in the GUI

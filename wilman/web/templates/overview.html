@@ -15,7 +15,7 @@
       {% if c.release %}<span class="pill accent">release v{{ c.release.version }} proposed</span>{% endif %}
       {% if not c.waiting and not c.queued and not c.release %}<span class="pill">all quiet</span>{% endif %}
     </div>
-    {% if c.lead_report %}<p class="report-snippet">{{ c.lead_report.content[:180] }}</p>{% endif %}
+    {% if c.lead_report %}<p class="report-snippet"><b>{{ c.project.lead_name }}:</b> {{ c.lead_report.content[:180] }}</p>{% endif %}
     <p class="cost">${{ "%.2f"|format(c.cost) }} spent</p>
   </a>
 {% endfor %}
@@ -26,7 +26,7 @@
 
 {% if cto_report %}
 <section class="card">
-  <h2>CTO report <span class="ts">{{ cto_report.created_at }}</span></h2>
+  <h2>Harry — section report <span class="ts">{{ cto_report.created_at }}</span></h2>
   <div class="md">{{ cto_report.content }}</div>
 </section>
 {% endif %}

@@ -24,6 +24,7 @@ CREATE TABLE IF NOT EXISTS projects (
     version_pattern TEXT NOT NULL,
     test_command TEXT NOT NULL,
     setup_command TEXT NOT NULL DEFAULT '',
+    lead_name TEXT NOT NULL DEFAULT 'Tom',
     enabled INTEGER NOT NULL DEFAULT 1,
     created_at TEXT NOT NULL
 );
@@ -123,14 +124,16 @@ def create_project(name: str, repo: str, **overrides) -> None:
     vals = dict(config.PROJECT_DEFAULTS)
     vals.update({k: v for k, v in overrides.items() if v})
     with conn() as c:
+        n = c.execute("SELECT COUNT(*) AS n FROM projects").fetchone()["n"]
+        lead = config.LEAD_ROSTER[n % len(config.LEAD_ROSTER)]
         c.execute(
             """INSERT INTO projects (name, repo, dev_branch, main_branch,
                  version_file, version_pattern, test_command, setup_command,
-                 created_at)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                 lead_name, created_at)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
             (name, repo, vals["dev_branch"], vals["main_branch"],
              vals["version_file"], vals["version_pattern"],
-             vals["test_command"], vals["setup_command"], now()),
+             vals["test_command"], vals["setup_command"], lead, now()),
         )
 
 
