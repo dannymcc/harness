@@ -17,16 +17,16 @@ WORKDIR /app
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
-COPY wilman/ wilman/
+COPY harness/ harness/
 COPY run.py .
 
-ENV WILMAN_DATA_DIR=/data
+ENV HARNESS_DATA_DIR=/data
 VOLUME /data
 EXPOSE 8300
 
-# Git identity for wilman's commits (override in compose if you prefer).
-RUN git config --system user.name "Wilman" \
-    && git config --system user.email "wilman@localhost" \
+# Git identity for harness's commits (override in compose if you prefer).
+RUN git config --system user.name "Harness" \
+    && git config --system user.email "harness@localhost" \
     && git config --system --add safe.directory '*'
 
 CMD ["python", "run.py"]

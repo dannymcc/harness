@@ -1,8 +1,8 @@
-"""Wilman entry point: start the background worker and the GUI."""
+"""Harness entry point: start the background worker and the GUI."""
 import uvicorn
 
-from wilman import config, worker
-from wilman.web.app import app
+from harness import config, worker
+from harness.web.app import app
 
 
 def main() -> None:

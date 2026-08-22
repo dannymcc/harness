@@ -1,35 +1,35 @@
-"""Wilman configuration.
+"""Harness configuration.
 
 Global settings live here (env-overridable). Per-project settings (repo,
-branches, policies) live in the database — see db.py — because wilman manages
+branches, policies) live in the database — see db.py — because harness manages
 many harnesses and they are edited from the GUI.
 """
 import os
 from pathlib import Path
 
 # --- Paths ------------------------------------------------------------------
-DATA_DIR = Path(os.environ.get("WILMAN_DATA_DIR", "./data")).resolve()
-REPOS_DIR = DATA_DIR / "repos"        # wilman's own clones, one per project
-DB_PATH = DATA_DIR / "wilman.db"
+DATA_DIR = Path(os.environ.get("HARNESS_DATA_DIR", "./data")).resolve()
+REPOS_DIR = DATA_DIR / "repos"        # harness's own clones, one per project
+DB_PATH = DATA_DIR / "harness.db"
 LOG_DIR = DATA_DIR / "logs"           # per-run agent transcripts
 
 # --- Claude -----------------------------------------------------------------
 # The Agent SDK inherits credentials from the environment
 # (ANTHROPIC_API_KEY or CLAUDE_CODE_OAUTH_TOKEN via `claude setup-token`).
-MODEL = os.environ.get("WILMAN_MODEL", "claude-opus-5")
+MODEL = os.environ.get("HARNESS_MODEL", "claude-opus-5")
 # Housekeeping/compaction runs are summarisation, not engineering — a cheap
 # model keeps the housekeeper from eating the budget it exists to protect.
-ADMIN_MODEL = os.environ.get("WILMAN_ADMIN_MODEL", "claude-haiku-4-5")
-MAX_TURNS = int(os.environ.get("WILMAN_MAX_TURNS", "80"))
-MAX_BUDGET_USD_PER_RUN = float(os.environ.get("WILMAN_MAX_BUDGET_USD_PER_RUN", "5.0"))
+ADMIN_MODEL = os.environ.get("HARNESS_ADMIN_MODEL", "claude-haiku-4-5")
+MAX_TURNS = int(os.environ.get("HARNESS_MAX_TURNS", "80"))
+MAX_BUDGET_USD_PER_RUN = float(os.environ.get("HARNESS_MAX_BUDGET_USD_PER_RUN", "5.0"))
 
 # --- Worker -----------------------------------------------------------------
-POLL_INTERVAL_MINUTES = int(os.environ.get("WILMAN_POLL_INTERVAL_MINUTES", "30"))
-ADMIN_INTERVAL_MINUTES = int(os.environ.get("WILMAN_ADMIN_INTERVAL_MINUTES", "60"))
+POLL_INTERVAL_MINUTES = int(os.environ.get("HARNESS_POLL_INTERVAL_MINUTES", "30"))
+ADMIN_INTERVAL_MINUTES = int(os.environ.get("HARNESS_ADMIN_INTERVAL_MINUTES", "60"))
 
 # --- Web --------------------------------------------------------------------
-BIND_HOST = os.environ.get("WILMAN_BIND_HOST", "0.0.0.0")
-BIND_PORT = int(os.environ.get("WILMAN_BIND_PORT", "8300"))
+BIND_HOST = os.environ.get("HARNESS_BIND_HOST", "0.0.0.0")
+BIND_PORT = int(os.environ.get("HARNESS_BIND_PORT", "8300"))
 
 # --- Agent personas (Spooks) ------------------------------------------------
 # Harry runs the section. Each harness gets a senior officer as team lead;
@@ -45,8 +45,8 @@ IC_NAMES = {
 }
 
 # --- Per-project defaults ---------------------------------------------------
-# "auto"    – wilman acts on its own verdict
-# "approve" – wilman prepares the action and waits for a click in the GUI
+# "auto"    – harness acts on its own verdict
+# "approve" – harness prepares the action and waits for a click in the GUI
 PROJECT_DEFAULTS = {
     "dev_branch": "dev",
     "main_branch": "main",

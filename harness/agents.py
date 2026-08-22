@@ -2,7 +2,7 @@
 
 Three roles:
   * ICs        - task runs: triage an issue, fix a bug, review a PR, draft a
-                 release. They work inside wilman's clone of the project.
+                 release. They work inside harness's clone of the project.
   * Team Lead  - one per project: reads the project's state and produces the
                  work plan for the cycle (what to do, in what order, and what
                  to skip).
@@ -11,7 +11,7 @@ Three roles:
                  dashboard.
 
 Safety model: agents never push, merge, comment on GitHub, or tag. They only
-read, edit files in wilman's clone, and run tests. All outward actions are
+read, edit files in harness's clone, and run tests. All outward actions are
 performed deterministically by pipeline.py, subject to the per-project policy
 gates. Enforced belt-and-braces: prompts say so, and disallowed_tools blocks
 git push / gh / network use inside sessions.
@@ -38,7 +38,7 @@ BLOCKED = [
 ]
 
 BASE_RULES = """
-You are part of Wilman, an automated maintainer for open-source projects.
+You are part of Harness, an automated maintainer for open-source projects.
 Ground rules, non-negotiable:
 - You work only inside the provided checkout. NEVER run `git push`, `gh`,
   or anything that talks to GitHub or the network. The harness handles all
@@ -293,7 +293,7 @@ Author: {issue['author']['login'] if isinstance(issue.get('author'), dict) else 
 Comments:
 {json.dumps([{'author': c.get('author', {}).get('login', ''), 'body': c.get('body', '')} for c in issue.get('comments', [])], indent=2)[:6000]}
 
-Assess: is it valid? A bug or a feature request? Could Wilman fix it safely
+Assess: is it valid? A bug or a feature request? Could Harness fix it safely
 (small, well-understood change with test coverage)? Feature requests are only
 "fixable" when they are small, clearly specified, and an obvious product fit —
 otherwise leave them for the maintainer. Write a draft reply for the issue
@@ -309,7 +309,7 @@ async def fix_issue(project, issue: dict, plan: str, cwd: str,
                     resume: str | None = None) -> dict:
     prompt = f"""You are Malcolm, the section's technical specialist.
 Fix this issue in {project['repo']}. You are on a work branch
-off {project['dev_branch']} in wilman's checkout. The triage plan is below —
+off {project['dev_branch']} in harness's checkout. The triage plan is below —
 verify it against the code before following it.
 
 Issue #{issue['number']}: {issue['title']}
@@ -379,7 +379,7 @@ async def draft_release(project, queued_items: list, current_version: str,
         for i in queued_items)
     prompt = f"""You are Colin, the section's operations specialist.
 Prepare a release of {project['repo']}. You are on the
-{project['dev_branch']} branch in wilman's checkout.
+{project['dev_branch']} branch in harness's checkout.
 
 Current version: {current_version}
 Changes queued for this release:
@@ -411,7 +411,7 @@ Do NOT commit, push or tag — leave the working tree changes in place."""
 
 async def lead_plan(project, state_digest: str, cwd: str) -> dict:
     prompt = f"""You are {project['lead_name']}, the team lead running the
-{project['repo']} desk in the Wilman harness. Your officers can: triage
+{project['repo']} desk in the Harness harness. Your officers can: triage
 issues (Ruth), fix triaged bugs (Malcolm), and review PRs (Ruth). The
 harness (not you) handles merges, comments and releases behind policy gates.
 
@@ -433,7 +433,7 @@ digest above."""
 # --- CTO ---------------------------------------------------------------------
 
 async def cto_review(digest: str) -> dict:
-    prompt = f"""You are Harry, head of section, overseeing every Wilman
+    prompt = f"""You are Harry, head of section, overseeing every Harness
 harness (one per project, each run by a team lead). Below is the state of
 every project: queues, blocked items, recent failures, costs, and pending
 human approvals.

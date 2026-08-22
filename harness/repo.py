@@ -1,6 +1,6 @@
-"""Manage wilman's clone of each project and run its test suite there.
+"""Manage harness's clone of each project and run its test suite there.
 
-The clone under data/repos/<project> belongs to wilman: agents edit it, the
+The clone under data/repos/<project> belongs to harness: agents edit it, the
 pipeline resets it. It is never the user's own working copy.
 """
 import re
@@ -84,7 +84,7 @@ def fetch_pr_branch(project, number: int, branch: str) -> Path:
 # --- tests ------------------------------------------------------------------
 
 def _venv_python(project) -> Path:
-    """A per-project virtualenv so test deps don't pollute wilman's own env."""
+    """A per-project virtualenv so test deps don't pollute harness's own env."""
     vdir = config.DATA_DIR / "venvs" / project["name"]
     py = vdir / "bin" / "python"
     if not py.exists():

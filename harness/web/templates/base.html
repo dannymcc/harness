@@ -3,12 +3,12 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>{% block title %}Wilman{% endblock %}</title>
+<title>{% block title %}Harness{% endblock %}</title>
 <link rel="stylesheet" href="/static/style.css">
 </head>
 <body>
 <nav>
-  <a class="brand" href="/">Wilman</a>
+  <a class="brand" href="/">Harness</a>
   <div class="navlinks">
     {% for pr in projects %}
       <a href="/p/{{ pr.name }}" {% if not pr.enabled %}class="dim"{% endif %}>{{ pr.name }}</a>

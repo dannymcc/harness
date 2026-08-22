@@ -1,4 +1,4 @@
-# Wilman — project rules
+# Harness — project rules
 
 ## Git commits
 
@@ -17,12 +17,12 @@
   Never trust an agent's claim that tests pass.
 - The GUI has no auth: it must stay tailnet-only. Don't add features that
   assume public exposure.
-- New persistent state needs a column default that keeps old `data/wilman.db`
+- New persistent state needs a column default that keeps old `data/harness.db`
   files loading (SQLite `ALTER TABLE ... ADD COLUMN` with defaults, or the
   CREATE TABLE guards in `db.py`).
 
 ## Checks before committing
 
 ```sh
-python -m compileall -q wilman run.py
+python -m compileall -q harness run.py
 ```

@@ -1,7 +1,7 @@
 """Thin wrappers around the gh CLI and git.
 
 All GitHub access goes through gh (authenticated via GH_TOKEN or gh auth
-login); all git access goes through wilman's own clone of each project.
+login); all git access goes through harness's own clone of each project.
 
 Merges never bypass branch protection: if required checks are pending or
 failing, `gh pr merge` fails and the item stays blocked for a human.

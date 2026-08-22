@@ -1,4 +1,4 @@
-"""Wilman GUI.
+"""Harness GUI.
 
 Server-rendered, mobile-first, no build step. Meant to sit behind
 `tailscale serve` on hyperion — no auth of its own, so never expose it with
@@ -14,7 +14,7 @@ from fastapi.templating import Jinja2Templates
 from .. import config, db, gh, pipeline, repo, worker
 
 BASE = Path(__file__).parent
-app = FastAPI(title="Wilman")
+app = FastAPI(title="Harness")
 app.mount("/static", StaticFiles(directory=BASE / "static"), name="static")
 templates = Jinja2Templates(directory=BASE / "templates")
 

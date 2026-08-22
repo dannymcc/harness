@@ -1,12 +1,10 @@
-# Wilman
+# Harness
 
-An AI maintainer harness built on the Claude Agent SDK. Wilman watches the
+An AI maintainer harness built on the Claude Agent SDK. Harness watches the
 GitHub repos you point it at, triages issues, reviews pull requests, fixes
 what it safely can, keeps the docs honest, and batches everything into
 sensible versioned releases — with you approving the important bits from a
 phone-friendly dashboard.
-
-Named after Andy Wilman: the producer who managed May (and the rest of them).
 
 <p align="center">
   <img src="screenshots/overview-mobile.png" alt="Overview dashboard" width="30%">
@@ -15,7 +13,7 @@ Named after Andy Wilman: the producer who managed May (and the rest of them).
 
 ## The section
 
-Wilman runs a small agent organisation, staffed from Spooks:
+Harness runs a small agent organisation, staffed from Spooks:
 
 | Agent | Role | Scope | Job |
 |---|---|---|---|
@@ -45,20 +43,20 @@ anything network-facing.
   click.
 - **Releases are batched.** Fixes and merges queue on `dev`. When the queue
   reaches N changes (default 3) or the oldest change is D days old (default
-  7), Wilman drafts a release: version bump, changelog, README/docs check,
+  7), Harness drafts a release: version bump, changelog, README/docs check,
   then a `dev → main` PR. You approve; it merges and tags; your CI does the
   rest. One fix never means one release.
 - **Docs** — fix sessions must update README/docs when user-visible behaviour
   changes, and every release drafting pass re-checks them.
 - **Stall handling** — if the Claude API rate-limits or your account hits its
-  usage cap, Wilman pauses all agent work, records why, and resumes
+  usage cap, Harness pauses all agent work, records why, and resumes
   automatically the moment the limit resets (parsed from the error where
   possible, exponential backoff otherwise). In-flight fixes resume their
   session rather than starting over.
 
 ## Policies
 
-Per-harness, editable live in the GUI. `auto` means Wilman acts on its own
+Per-harness, editable live in the GUI. `auto` means Harness acts on its own
 verdict; `approve` means it prepares everything and waits for your click.
 
 | Policy | Default |
@@ -88,7 +86,7 @@ match its layout).
 ### On hyperion
 
 ```bash
-cd /home/danny/docker/wilman
+cd /home/danny/docker/harness
 cp .env.example .env   # fill in CLAUDE_CODE_OAUTH_TOKEN + GH_TOKEN
 docker compose up -d
 tailscale serve --bg --https=443 http://127.0.0.1:8300   # tailnet-only
@@ -102,7 +100,7 @@ needed.
 ## Layout
 
 ```
-wilman/
+harness/
 ├── config.py     # env-driven global config
 ├── db.py         # SQLite state: projects, items, runs, releases, reports
 ├── gh.py         # gh CLI + git wrappers (all GitHub access)

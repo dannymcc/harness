@@ -48,7 +48,7 @@ def _loop() -> None:
 
 def start() -> None:
     if _state["thread"] is None:
-        t = threading.Thread(target=_loop, name="wilman-worker", daemon=True)
+        t = threading.Thread(target=_loop, name="harness-worker", daemon=True)
         _state["thread"] = t
         t.start()
         db.log_event("Worker started")

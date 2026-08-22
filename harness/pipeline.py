@@ -89,7 +89,7 @@ async def triage_item(project, item) -> None:
 async def fix_item(project, item) -> None:
     name = project["name"]
     detail = gh.issue_detail(project["repo"], item["number"])
-    branch = f"wilman/issue-{item['number']}"
+    branch = f"harness/issue-{item['number']}"
     cwd = str(repo.create_branch(project, branch, project["dev_branch"]))
     db.update_item(name, "issue", item["number"], status="working",
                    branch=branch)
@@ -111,7 +111,7 @@ async def fix_item(project, item) -> None:
                        error="agent reported success but made no changes")
         return
 
-    # The deterministic gate: wilman runs the tests itself.
+    # The deterministic gate: harness runs the tests itself.
     passed, test_out = await asyncio.to_thread(repo.run_tests, project)
     if not passed:
         db.update_item(name, "issue", item["number"], status="blocked",
@@ -158,7 +158,7 @@ async def review_item(project, item) -> None:
         db.update_item(name, "pr", item["number"], status="waiting_human",
                        verdict_summary="draft PR - left for the author")
         return
-    branch = f"wilman/pr-{item['number']}"
+    branch = f"harness/pr-{item['number']}"
     try:
         cwd = str(repo.fetch_pr_branch(project, item["number"], branch))
     except CmdError:
