@@ -4,6 +4,35 @@ All notable changes to Harness are recorded here. The format is
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project
 follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.8.1] - 2026-08-23
+
+### Fixed
+
+- **The light/dark toggle no longer wraps onto its own line on a phone.**
+  At 600px and under the nav links become a full-width second row that
+  scrolls sideways, so the brand and the toggle share the first row instead
+  of the toggle being pushed below them (issue #26). The mobile screenshots
+  in the README and on the site are hand-made and now show the old two-row
+  nav as well as the pre-0.4.0 dark palette; there is still no screenshot
+  tooling in the repo to regenerate them from.
+
+### Security
+
+- **State-changing requests from other sites are refused.** The dashboard
+  has no authentication of its own, so any page open in the operator's
+  browser could POST to `/add` — which stores setup and test commands the
+  harness later runs as shell. A single `http` middleware now checks where
+  a non-safe request came from: it is allowed only if `Sec-Fetch-Site` is
+  `same-origin` or `none`, or, where that header is absent, the `Origin`
+  host matches `Host`, `X-Forwarded-Host` or `HARNESS_PUBLIC_URL`;
+  otherwise it gets a 403. `same-site` is refused along with `cross-site`,
+  because on a tailnet another machine's page would otherwise qualify.
+  Clients sending neither header — the ntfy action buttons, `curl`, health
+  checks — are deliberately still accepted. Checking in middleware rather
+  than with per-form tokens means routes added later are covered without
+  anyone opting in, and the existing forms and `fetch()` calls needed no
+  change. The README and SECURITY.md say so (issue #5).
+
 ## [0.8.0] - 2026-08-23
 
 ### Added

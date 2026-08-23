@@ -109,7 +109,10 @@ up meanwhile, and only then exits. The compose file sets
 **Keep it private.** The dashboard has no authentication — it approves
 merges and releases, so treat it like a shell. Bind it to loopback (the
 default compose does), and reach it over a tailnet/VPN or behind an
-authenticating reverse proxy. Never expose it to the public internet.
+authenticating reverse proxy. Never expose it to the public internet. So that
+no other site can drive it from your browser, every state-changing request
+that a browser marks as coming from elsewhere is refused; requests with no
+origin headers at all (the ntfy buttons, `curl`, health checks) still work.
 
 ### Notifications
 

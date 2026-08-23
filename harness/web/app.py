@@ -8,7 +8,7 @@ from pathlib import Path
 from urllib.parse import urlparse
 
 from fastapi import FastAPI, Form, Request
-from fastapi.responses import RedirectResponse
+from fastapi.responses import PlainTextResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 
@@ -18,6 +18,51 @@ BASE = Path(__file__).parent
 app = FastAPI(title="Harness")
 app.mount("/static", StaticFiles(directory=BASE / "static"), name="static")
 templates = Jinja2Templates(directory=BASE / "templates")
+
+SAFE_METHODS = {"GET", "HEAD", "OPTIONS"}
+
+
+def _own_hosts(request: Request) -> set[str]:
+    """Every host name this request could legitimately have been sent to."""
+    hosts = {request.headers.get("host", "")}
+    hosts.update(h.strip() for h
+                 in request.headers.get("x-forwarded-host", "").split(","))
+    if config.PUBLIC_URL:
+        hosts.add(urlparse(config.PUBLIC_URL).netloc)
+    return {h.lower() for h in hosts if h}
+
+
+@app.middleware("http")
+async def block_cross_site(request: Request, call_next):
+    """Refuse state-changing requests set off by another site.
+
+    The GUI has no auth of its own, so any page in the operator's browser
+    could otherwise POST to /add — which stores shell commands the harness
+    later runs. Checking here rather than with per-form tokens means routes
+    added later are covered without anyone remembering to opt in, and the
+    existing forms and fetch() calls need no change.
+
+    `same-site` is refused along with `cross-site`: no in-app flow produces
+    it, and on a tailnet (`ts.net` is a public suffix) a page served by
+    another machine on the tailnet would otherwise qualify. Clients that
+    send neither header — the ntfy action buttons, curl, health tooling —
+    are let through: every current browser sends at least one of the two on
+    a cross-origin form POST.
+    """
+    if request.method.upper() in SAFE_METHODS:
+        return await call_next(request)
+    site = request.headers.get("sec-fetch-site")
+    if site is not None:
+        ok = site.lower() in ("same-origin", "none")
+    else:
+        # Older browsers, and anything behind a proxy that strips the
+        # Sec-Fetch headers: fall back to comparing Origin with the host.
+        origin = request.headers.get("origin")
+        ok = (not origin
+              or urlparse(origin).netloc.lower() in _own_hosts(request))
+    if not ok:
+        return PlainTextResponse("cross-site request refused", status_code=403)
+    return await call_next(request)
 
 
 def agent_name(role: str, task: str, lead_name: str = "") -> str:
