@@ -204,15 +204,31 @@ def project_page(request: Request, name: str):
     if not p:
         return RedirectResponse("/", status_code=303)
     items = db.project_items(name)
+    runs = db.recent_runs(80, name)
+    # Who is (or was last) on each item: live run wins, else latest run.
+    activity = {}
+    for r in reversed(runs):
+        if r["item_key"] and r["agent"]:
+            live = r["finished_at"] is None
+            prev = activity.get(r["item_key"])
+            if prev is None or live or not prev["live"]:
+                activity[r["item_key"]] = {"agent": r["agent"], "live": live,
+                                           "ok": r["ok"]}
     recent = {"released", "closed", "rejected"}
     board = []
     for title, agent, statuses in KANBAN_COLUMNS:
-        cards = [i for i in items if i["status"] in statuses
-                 and (i["status"] not in recent or i["gh_state"] != "open")]
+        cards = []
+        for i in items:
+            if i["status"] not in statuses or                     (i["status"] in recent and i["gh_state"] == "open"):
+                continue
+            act = activity.get(f"{i['kind']}#{i['number']}")
+            cards.append({"i": i, "act": act,
+                          "live": bool(act and act["live"])})
+        cards.sort(key=lambda c: not c["live"])  # active work first
         if statuses == ("released", "closed", "rejected"):
             cards = cards[:10]
-        board.append({"title": title, "agent": agent, "cards": cards})
-    runs = db.recent_runs(50, name)
+        board.append({"title": title, "agent": agent, "cards": cards,
+                      "live_count": sum(1 for c in cards if c["live"])})
     return render(
         request, "project.html", p=p, items=items, board=board,
         harry_line=db.latest_report("harry", name),

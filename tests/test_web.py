@@ -31,3 +31,12 @@ def test_question_buttons_and_ntfy_answer(client, fresh_db):
 
 def test_health_reports_worker_down(client):
     assert client.get("/health").status_code == 503  # no worker in tests
+
+
+def test_board_shows_live_assignee(client, fresh_db):
+    fresh_db.upsert_item("may", "issue", 12, "Busy item", "bob", "open", "x")
+    fresh_db.update_item("may", "issue", 12, status="working")
+    fresh_db.start_run("may", "ic", "issue#12", "fix", "m", "Dimitri")  # live
+    html = client.get("/p/may").text
+    assert "Dimitri · working" in html and "assignee live" in html
+    assert "1 live" in html
