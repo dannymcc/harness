@@ -120,11 +120,15 @@
     <div class="kanban-col">
       <h3>{{ col.title }}
         <span class="count">{{ col.cards|length }}</span>
-        {% if col.agent %}<span class="pill">{{ col.agent }}</span>{% endif %}</h3>
-      {% for i in col.cards %}
-      <a class="kcard {{ 'err-border' if i.status == 'blocked' }}"
+        {% if col.live_count %}<span class="pill accent">{{ col.live_count }} live</span>
+        {% elif col.agent %}<span class="pill">{{ col.agent }}</span>{% endif %}</h3>
+      {% for c in col.cards %}{% set i = c.i %}
+      <a class="kcard {{ 'err-border' if i.status == 'blocked' }} {{ 'kcard-live' if c.live }}"
          href="/p/{{ p.name }}/{{ i.kind }}/{{ i.number }}">
-        <span class="kcard-id">{{ i.kind }}#{{ i.number }}</span>
+        <span class="kcard-id">{{ i.kind }}#{{ i.number }}
+          {% if c.act %}<span class="assignee {{ 'live' if c.live }}"
+                title="{{ c.act.agent }}{{ ' — working now' if c.live else ' worked this last' }}">{{ c.act.agent[0] }}</span>{% endif %}
+          {% if c.live %}<span class="pill warn">{{ c.act.agent }} · working</span>{% endif %}</span>
         <span class="kcard-title clamp3">{{ i.title[:100] }}</span>
         <span class="kcard-meta">
           {% if i.verdict %}<span class="pill">{{ i.verdict }}</span>{% endif %}

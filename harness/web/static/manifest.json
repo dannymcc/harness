@@ -3,7 +3,7 @@
   "short_name": "Harness",
   "description": "Self-hosted AI maintainer dashboard",
   "start_url": "/",
-  "display": "standalone",
+  "display": "fullscreen",
   "background_color": "#0e1411",
   "theme_color": "#1D5741",
   "icons": [
@@ -22,5 +22,9 @@
       "sizes": "512x512",
       "type": "image/png"
     }
+  ],
+  "display_override": [
+    "fullscreen",
+    "standalone"
   ]
 }
