@@ -5,11 +5,68 @@ branches, policies) live in the database — see db.py — because harness manag
 many harnesses and they are edited from the GUI.
 """
 import os
+import re
+import subprocess
 from pathlib import Path
 
+# The single source of truth for the number: the release process bumps this
+# line (version file `harness/config.py`, pattern `VERSION\s*=\s*"..."`) and
+# tags the commit. Don't edit it by hand.
 VERSION = "0.1.0"
-GIT_SHA = os.environ.get("HARNESS_GIT_SHA", "")[:7]
-DISPLAY_VERSION = f"v{VERSION}" + (f" ({GIT_SHA})" if GIT_SHA else "")
+
+_SHA_RE = re.compile(r"^[0-9a-f]{7,40}$")
+_STAMP_FILE = Path(__file__).resolve().parent / "_build_sha"
+
+
+def _clean(sha: str) -> str:
+    """Accept a plausible git SHA, truncated to 7; anything else is ''."""
+    sha = (sha or "").strip().lower()
+    return sha[:7] if _SHA_RE.match(sha) else ""
+
+
+def _git_head_sha() -> str:
+    """HEAD of the checkout harness is running from, or '' if it can't tell.
+
+    Fully guarded: a missing git binary, a slow disk, or a non-zero exit
+    ("dubious ownership" and friends) all mean "unknown", never an exception.
+    """
+    root = Path(__file__).resolve().parent.parent
+    try:
+        out = subprocess.run(["git", "-C", str(root), "rev-parse", "--short=7", "HEAD"],
+                             capture_output=True, text=True, timeout=5)
+    except (OSError, subprocess.SubprocessError):
+        return ""
+    return _clean(out.stdout) if out.returncode == 0 else ""
+
+
+def _stamp_sha() -> str:
+    """The SHA written into the image at build time, if there is one."""
+    try:
+        return _clean(_STAMP_FILE.read_text())
+    except OSError:
+        return ""
+
+
+def _build_sha() -> str:
+    """Identify the running build: env, then build stamp, then the checkout.
+
+    This runs once at import and config is imported everywhere, so nothing
+    here may raise or hang.
+    """
+    return (_clean(os.environ.get("HARNESS_GIT_SHA", ""))
+            or _stamp_sha()
+            or _git_head_sha())
+
+
+def _display(sha: str) -> str:
+    """Say "unknown build" out loud rather than showing a bare version: a
+    footer the operator can't tie to a commit is worse than one that admits
+    it can't."""
+    return f"v{VERSION} ({sha})" if sha else f"v{VERSION} (unknown build)"
+
+
+GIT_SHA = _build_sha()
+DISPLAY_VERSION = _display(GIT_SHA)
 
 # --- Paths ------------------------------------------------------------------
 DATA_DIR = Path(os.environ.get("HARNESS_DATA_DIR", "./data")).resolve()

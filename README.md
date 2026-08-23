@@ -128,6 +128,13 @@ defaults match a Flask-style project (`config.py`, pytest).
 Costs shown in the GUI are the SDK's API-equivalent estimates (`≈US$`) — on
 a subscription plan nothing is billed per token; read them as a burn meter.
 
+The footer names the build you are looking at: `v0.1.0 (abc1234)`. The number
+comes from `VERSION` in `harness/config.py` (bumped by the release process,
+not by hand) and the SHA from, in order, `HARNESS_GIT_SHA`, the stamp the
+image build writes to `harness/_build_sha`, or `git HEAD` of the checkout it
+is running from. If none of those can answer, the footer says
+`v0.1.0 (unknown build)` rather than implying a commit it doesn't know.
+
 ## Development
 
 ```bash

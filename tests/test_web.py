@@ -1,13 +1,3 @@
-import pytest
-
-
-@pytest.fixture()
-def client(fresh_db, may):
-    from fastapi.testclient import TestClient
-    from harness.web.app import app
-    return TestClient(app)
-
-
 def test_pages_render(client, fresh_db):
     fresh_db.upsert_item("may", "issue", 7, "A bug", "alice", "open", "x")
     for path in ("/", "/p/may", "/p/may/settings", "/p/may/issue/7", "/add",
@@ -18,7 +8,7 @@ def test_pages_render(client, fresh_db):
 def test_version_in_footer(client):
     from harness import config
     html = client.get("/").text
-    assert f"v{config.VERSION}" in html and "harness/commit/" in html
+    assert config.DISPLAY_VERSION in html
 
 
 def test_question_buttons_and_ntfy_answer(client, fresh_db):
