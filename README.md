@@ -17,8 +17,8 @@ Harness runs a small agent organisation, staffed from Spooks:
 
 | Agent | Role | Scope | Job |
 |---|---|---|---|
-| **Harry** | head of section (CTO) | all harnesses | Takes an hourly stand-up across every desk: one line per project on whether it's moving, blockers called out, stuck work requeued. He makes the decisions — questions from the team come to him first, and he answers what's in the section's remit, escalating to you only what's genuinely yours. He also runs staffing: hires extra engineers onto busy desks (real fix capacity, max 2 per desk) and stands down people who never see work. |
-| **Tom, Adam, Ros, Lucas…** | team leads | one per harness | Read the project state each cycle and plan the work: what to triage, fix, review, and what to deliberately skip. |
+| **Harry** | head of section (CTO) | all harnesses | Takes an hourly stand-up across every desk and runs the section through the team leads: blockers become directives delivered into the lead's next plan, stuck work is requeued, questions from the team come to him first (he escalates to you only what's genuinely yours). Staffing flows upward — leads request agents, Harry grants or declines weighing backlog against spend (max 2 extra engineers per desk). |
+| **Tom, Adam, Ros, Lucas…** | team leads | one per harness | Own execution on their desk: plan each cycle's work, action Harry's directives first, assign fixes to engineers, and request staffing from Harry when the backlog outgrows the desk. |
 | **Ruth** | analyst (IC) | task-based | Triages issues and reviews pull requests. |
 | **Malcolm** | technical (IC) | task-based | Writes the fixes, with tests. |
 | **Colin** | operations (IC) | task-based | Runs the release cycle: version bump, CHANGELOG.md, release notes with contributor credits, docs check. The pipeline then opens the dev→main PR and, on approval, merges, tags and publishes the GitHub Release. |

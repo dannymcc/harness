@@ -415,6 +415,10 @@ def _state_digest(project) -> str:
     notes = db.latest_report("notes", name)
     if notes:
         lines.append(f"Desk notes (rolling summary):\n{notes['content']}\n")
+    directives = db.get_setting(f"directives.{name}", "")
+    if directives:
+        lines.append("Directives from Harry's last stand-up (address first):\n"
+                     + directives + "\n")
     for it in db.project_items(name):
         if it["gh_state"] != "open" and it["status"] != "queued":
             continue
@@ -471,6 +475,12 @@ async def run_cycle(project, force: bool = False) -> None:
         if plan_res["ok"]:
             db.save_report("lead", name, plan_res["output"]["summary"])
             _file_question(name, project["lead_name"], "", plan_res["output"])
+            db.set_setting(f"directives.{name}", "")  # consumed by this plan
+            req = (plan_res["output"].get("staffing_request") or "").strip()
+            if req:
+                db.set_setting(f"staffing_request.{name}", req)
+                db.log_event(f"{project['lead_name']} asked Harry for "
+                             f"staffing: {req[:150]}", project=name)
 
         staff = db.staff_get(name)
         engineers = ["Malcolm"] + staff["extra"]
@@ -631,6 +641,9 @@ def _standup_digest() -> str:
                       if staff["benched"] else "") +
                      f". Available hire pool: "
                      f"{', '.join(n for n in __import__('harness.config', fromlist=['c']).HIRE_POOL if n not in staff['extra'])}")
+        req = db.get_setting(f"staffing_request.{name}", "")
+        if req:
+            lines.append(f"STAFFING REQUEST from {p['lead_name']}: {req}")
         lines.append("Recent run counts by person: " +
                      (", ".join(f"{k}={v}" for k, v in sorted(util.items()))
                       or "none"))
@@ -680,6 +693,17 @@ async def run_standup(force: bool = False) -> None:
                      project=b.get("project", ""))
     _apply_decisions(out.get("decisions", []))
     _apply_staffing(out.get("staffing", []))
+    for d in out.get("directives", []):
+        pr = db.get_project(d.get("project", ""))
+        if pr and d.get("directive", "").strip():
+            prev = db.get_setting(f"directives.{d['project']}", "")
+            db.set_setting(f"directives.{d['project']}",
+                           (prev + "\n- " if prev else "- ") +
+                           d["directive"].strip()[:400])
+            db.log_event(f"Harry directed {pr['lead_name']}: "
+                         f"{d['directive'][:150]}", project=d["project"])
+    for pr in db.all_projects(enabled_only=True):
+        db.set_setting(f"staffing_request.{pr['name']}", "")  # Harry has ruled
     db.set_setting("last_standup_at", db.now())
     if out["all_clear"]:
         db.log_event("Stand-up: all clear")

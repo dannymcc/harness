@@ -288,6 +288,8 @@ PLAN_SCHEMA = {
     "properties": {
         "summary": {"type": "string",
                     "description": "Team lead's read on the project this cycle."},
+        "staffing_request": {"type": "string",
+                             "description": "Optional: ask Harry for staffing (e.g. 'one more engineer until the backlog clears'), else empty."},
         "question_for_danny": {"type": "string",
                                "description": "Optional: one question needing Danny's decision, else empty."},
         "question_options": {"type": "array", "maxItems": 3,
@@ -373,6 +375,19 @@ STANDUP_SCHEMA = {
                                "enum": ["answer", "escalate"]},
                     "answer": {"type": "string",
                                "description": "Your ruling (empty when escalating)."},
+                },
+            },
+        },
+        "directives": {
+            "type": "array",
+            "description": "Instructions to team leads; delivered into their next planning cycle.",
+            "items": {
+                "type": "object",
+                "additionalProperties": False,
+                "required": ["project", "directive"],
+                "properties": {
+                    "project": {"type": "string"},
+                    "directive": {"type": "string"},
                 },
             },
         },
@@ -704,6 +719,11 @@ harness (not you) handles merges, comments and releases behind policy gates.
 Current project state:
 {state_digest}
 
+If the state digest lists directives from Harry, address them first — your
+plan is how they get actioned. If your backlog exceeds what the desk's
+engineers can clear, request staffing from Harry via staffing_request; he
+weighs it against spend.
+
 Produce this cycle's work plan: up to 10 tasks, most important first.
 Prioritise: regressions and data-loss bugs, then community PRs waiting on
 review (contributors deserve timely answers), then ordinary bugs, then small
@@ -727,6 +747,14 @@ progress, what's blocked and why, how long things have been waiting, and
 recent failures and spend.
 
 {digest}
+
+You run the section through the team leads. For anything stuck or drifting,
+issue a directive to that desk's lead — leads assign the work, and your
+directives are delivered into their next planning cycle. Do not leave a
+blocker without either a directive or an escalation. Leads may also request
+staffing; you decide, weighing their backlog against the spend figures in
+the digest — grant with a hire action, or decline it in your desk line with
+a reason.
 
 You make the decisions. The digest lists open questions from your people,
 each with an id. Rule on each: answer it yourself when it is within the
