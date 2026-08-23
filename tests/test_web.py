@@ -129,3 +129,13 @@ def test_auto_release_shows_on_overview_and_is_not_your_queue(client, fresh_db):
     fresh_db.set_policy("may", "cut_release", "auto")
     html = client.get("/").text
     assert "auto release" in html and "release v1.0.0 going out" in html
+
+
+def test_live_console_keeps_polling_before_the_log_exists(client, fresh_db):
+    """A live run with nothing written yet must not report live=False — the
+    poller stops for good on that, which reads as a stalled agent."""
+    rid = fresh_db.start_run("may", "ic", "issue#4", "fix", "m", "Dimitri")
+    j = client.get(f"/run/{rid}/tail?offset=0").json()
+    assert j["data"] == "" and j["live"] is True
+    fresh_db.finish_run(rid, True, 0.1, 3, "done")
+    assert client.get(f"/run/{rid}/tail?offset=0").json()["live"] is False

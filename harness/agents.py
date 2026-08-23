@@ -134,6 +134,10 @@ async def run_agent(*, project_name: str, role: str, item_key: str, task: str,
 
     config.LOG_DIR.mkdir(parents=True, exist_ok=True)
     log_path = config.LOG_DIR / f"run-{run_id}.log"
+    # Record it now, not at finish: the live console tails whatever the run
+    # row points at, so a path written only on the way out means the console
+    # is empty for the whole run and the GUI looks like a stalled agent.
+    db.update_run(run_id, log_path=str(log_path))
     session_id, cost, turns, result = "", 0.0, 0, None
     try:
         with open(log_path, "w") as log:
@@ -144,6 +148,7 @@ async def run_agent(*, project_name: str, role: str, item_key: str, task: str,
                     raise RunCancelled(f"run {run_id} stopped from the GUI")
                 if isinstance(message, AssistantMessage):
                     turns += 1
+                    db.update_run(run_id, turns=turns)  # the facts line moves
                     for block in message.content:
                         text = getattr(block, "text", None)
                         if text:

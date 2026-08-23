@@ -462,8 +462,13 @@ def run_tail(run_id: int, offset: int = 0):
     """Incremental transcript bytes for the live console view."""
     from fastapi.responses import JSONResponse
     run = db.get_run(run_id)
-    if not run or not run["log_path"]:
+    if not run:
         return JSONResponse({"data": "", "offset": 0, "live": False})
+    live = run["finished_at"] is None
+    if not run["log_path"]:
+        # Nothing to tail yet, but the run is not over: saying live=False here
+        # is what stops the poller for good.
+        return JSONResponse({"data": "", "offset": 0, "live": live})
     from pathlib import Path as _P
     try:
         f = _P(run["log_path"])
@@ -478,7 +483,7 @@ def run_tail(run_id: int, offset: int = 0):
             "live": run["finished_at"] is None,
         })
     except OSError:
-        return JSONResponse({"data": "", "offset": offset, "live": False})
+        return JSONResponse({"data": "", "offset": offset, "live": live})
 
 
 @app.post("/run/{run_id}/stop")
