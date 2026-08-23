@@ -238,7 +238,14 @@ def run_tests(project, cwd: Path | None = None,
         tail = "\n".join(outputs)[-8000:]
         return True, tail
     except CmdError as e:
-        tail = ((e.out or "") + "\n" + (e.err or ""))[-8000:]
+        full = (e.out or "") + "\n" + (e.err or "")
+        # Surface the pytest verdict first: a FAILED line must never be
+        # buried under thousands of deprecation warnings.
+        marker = full.rfind("short test summary info")
+        if marker != -1:
+            tail = full[marker:][:3000] + "\n---\n" + full[-3000:]
+        else:
+            tail = full[-8000:]
         return False, tail
 
 
