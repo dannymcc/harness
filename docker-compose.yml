@@ -5,6 +5,11 @@ services:
     build: .
     container_name: harness
     restart: unless-stopped
+    labels:
+      # Opt-in for watchtower-style auto-updates; harmless otherwise.
+      # Restarts are self-healing: interrupted agent runs are closed and
+      # their items requeued on boot.
+      - "com.centurylinklabs.watchtower.enable=true"
     ports:
       # Keep the GUI off the public internet: bind to loopback (and front it
       # with a tailnet/VPN or an authenticating reverse proxy).

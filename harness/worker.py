@@ -73,8 +73,30 @@ def _loop() -> None:
         _run_now.wait(timeout=wait)
 
 
+def recover_after_restart() -> None:
+    """Close runs orphaned by the previous process and requeue their items.
+
+    Makes unattended restarts (deploys, watchtower auto-updates, crashes)
+    self-healing: no manual tidy-up required."""
+    with db.conn() as c:
+        n = c.execute(
+            "UPDATE runs SET ok = 0, finished_at = ?, "
+            "summary = 'orphaned by restart' WHERE finished_at IS NULL",
+            (db.now(),)).rowcount
+    requeued = []
+    for p in db.all_projects():
+        for it in db.items_by_status(p["name"], "working"):
+            db.update_item(p["name"], it["kind"], it["number"],
+                           status="approved")
+            requeued.append(f"{p['name']} {it['kind']}#{it['number']}")
+    if n or requeued:
+        db.log_event(f"Restart recovery: closed {n} orphaned run(s)"
+                     + (f", requeued {', '.join(requeued)}" if requeued else ""))
+
+
 def start() -> None:
     if _state["thread"] is None:
+        recover_after_restart()
         t = threading.Thread(target=_loop, name="harness-worker", daemon=True)
         _state["thread"] = t
         t.start()

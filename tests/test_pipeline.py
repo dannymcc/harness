@@ -69,3 +69,13 @@ def test_release_due_thresholds(fresh_db, may):
         fresh_db.update_item("may", "issue", n, status="queued",
                              queued_at=fresh_db.now())
     assert len(pipeline._release_due(may)) == 3
+
+
+def test_restart_recovery(fresh_db, may):
+    from harness import worker
+    rid = fresh_db.start_run("may", "ic", "issue#5", "fix", "m", "Malcolm")
+    fresh_db.upsert_item("may", "issue", 5, "t", "a", "open", "x")
+    fresh_db.update_item("may", "issue", 5, status="working")
+    worker.recover_after_restart()
+    assert fresh_db.get_run(rid)["ok"] == 0
+    assert fresh_db.get_item("may", "issue", 5)["status"] == "approved"
