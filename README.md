@@ -1,145 +1,141 @@
 # Harness
 
-An AI maintainer harness built on the Claude Agent SDK. Harness watches the
-GitHub repos you point it at, triages issues, reviews pull requests, fixes
-what it safely can, keeps the docs honest, and batches everything into
-sensible versioned releases — with you approving the important bits from a
-phone-friendly dashboard.
+**An AI maintainer for your GitHub repos.** Harness watches the repositories
+you point it at, triages issues, reviews pull requests, fixes what it safely
+can, keeps the docs honest, and batches everything into sensible versioned
+releases — with you approving the important bits from a phone-friendly
+dashboard.
+
+Built on the [Claude Agent SDK](https://code.claude.com/docs/en/agent-sdk).
+Self-hosted: one Docker container, SQLite, no external services beyond
+GitHub, Claude, and (optionally) [ntfy](https://ntfy.sh).
 
 <p align="center">
   <img src="screenshots/overview-mobile.png" alt="Overview dashboard" width="30%">
-  <img src="screenshots/project-mobile.png" alt="Project harness view" width="30%">
+  <img src="screenshots/project-mobile.png" alt="Project board" width="30%">
 </p>
 
 ## The section
 
-Harness runs a small agent organisation, staffed from Spooks:
+Harness runs your repos with a small agent organisation, staffed from Spooks:
 
-| Agent | Role | Scope | Job |
-|---|---|---|---|
-| **Harry** | head of section (CTO) | all harnesses | Takes an hourly stand-up across every desk and runs the section through the team leads: blockers become directives delivered into the lead's next plan, stuck work is requeued, questions from the team come to him first (he escalates to you only what's genuinely yours). Staffing flows upward — leads request agents, Harry grants or declines weighing backlog against spend (max 2 extra engineers per desk). |
-| **Tom, Adam, Ros, Lucas…** | team leads | one per harness | Own execution on their desk: plan each cycle's work, action Harry's directives first, assign fixes to engineers, and request staffing from Harry when the backlog outgrows the desk. |
-| **Ruth** | analyst (IC) | task-based | Triages issues and reviews pull requests. |
-| **Malcolm** | technical (IC) | task-based | Writes the fixes, with tests. |
-| **Colin** | operations (IC) | task-based | Runs the release cycle: version bump, CHANGELOG.md, release notes with contributor credits, docs check. The pipeline then opens the dev→main PR and, on approval, merges, tags and publishes the GitHub Release. |
-| **Zaf** | security (IC) | manually triggered | Read-only security review of a harness's codebase from the project page: auth, injection, uploads, secrets, deployment config. Findings ranked by severity; serious ones raised as warnings. |
-| **Tariq** | admin | all harnesses | Hourly housekeeping to minimise token usage: prunes old events/runs/logs/sessions (free, deterministic) and maintains 200-word rolling desk notes per project on a cheap model, which stand in for raw history in every lead/CTO prompt. |
+| Agent | Role | Job |
+|---|---|---|
+| **Harry** | head of section | Hourly stand-up across every desk. Runs the section through the team leads: blockers become directives, questions come to him first and he escalates to you only what's genuinely yours, staffing requests land on his desk and he decides against spend. |
+| **Tom, Adam, Ros…** | team leads (one per repo) | Own execution: plan each cycle, action Harry's directives, assign work, request staffing when the backlog outgrows the desk. |
+| **Ruth** | analyst | Triages issues against the actual code; reviews PRs for *value* (is this worth having?) as well as quality. |
+| **Malcolm** + hires | engineers | Fix bugs and small features in parallel git worktrees, with tests. |
+| **Colin** | operations | Runs the release cycle: version bump, CHANGELOG, credited release notes, GitHub Release. |
+| **Tariq** | admin | Hourly housekeeping: prunes state, condenses each desk's rolling memory, keeps token usage down. |
+| **Zaf** | security | On-demand security review of a repo, triggered from the dashboard. |
 
-Judgement is agent work; **actions are not**. Every push, merge, comment and
-release is executed by deterministic code behind policy gates, and the test
-suite is always re-run by the harness itself before anything leaves the
-building — an IC claiming success is never taken on trust. Agents are
-blocked (by tool policy, not just prompt) from running `git push`, `gh`, or
-anything network-facing.
+**Judgement is agent work; actions are not.** Every push, merge, comment and
+release is executed by deterministic code behind per-repo policies (`auto`
+vs `approve`), and the test suite is always re-run by the harness itself
+before anything lands — an agent claiming success is never taken on trust.
+Agents are tool-blocked from `git push`, `gh`, and the network, not just
+told to behave.
 
 ## What it does
 
-- **Issues** — investigates each new issue against the actual code. Valid,
-  safely-fixable bugs get fixed on a work branch with tests; the harness
-  re-runs the suite and only then pushes to `dev`. Everything else gets a
-  drafted reply and waits for you.
-- **Pull requests** — merges the PR onto `dev` locally, runs the tests, then
-  reviews for *value* (is this worth having?) as well as quality. Verdicts:
-  merge / needs work / reject, each with a drafted, courteous review. Nothing
-  merges without passing tests, and by default nothing merges without your
-  click.
-- **Releases are batched.** Fixes and merges queue on `dev`. When the queue
-  reaches N changes (default 3) or the oldest change is D days old (default
-  7), Harness drafts a release: version bump, changelog, README/docs check,
-  then a `dev → main` PR. You approve; it merges and tags; your CI does the
-  rest. One fix never means one release.
-- **Docs** — fix sessions must update README/docs when user-visible behaviour
-  changes, and every release drafting pass re-checks them.
-- **Mid-run control** — every agent run has a live transcript page and a
-  Stop button; a circuit breaker holds any item after two consecutive
-  failed runs rather than retrying forever.
-- **Desk memory** — agents bank one-line learnings as they work (shared by
-  role: analyst, engineering, lead, ops, security). Memories are recalled
-  into every relevant prompt and condensed hourly by Tariq, so judgement
-  stays consistent across cycles without prompts growing.
-- **Parallel engineers** — each fix runs in its own git worktree, and the
-  desk's engineers (Malcolm plus anyone Harry hires) work concurrently as
-  one wave per cycle. Landing on dev is serialised: rebase and re-test when
-  dev has moved, conflicts held for a human.
-- **Housekeeping** — every hour Tariq compacts state: old events and runs
-  fold into aggregates, finished items lose their stored diffs and session
-  ids, stale transcripts and SDK session files are deleted, and per-project
-  desk notes are refreshed (only when there is enough new activity to be
-  worth the call — a quiet harness costs nothing to keep tidy).
-- **Danny-in-the-loop** — any agent can file a question when a decision
-  isn't theirs to make. Harry rules on them at stand-up; only what he
-  escalates reaches your queue, where you answer inline (answers flow back
-  into every relevant prompt). You can also issue standing directions —
-  desk-wide or about a single item — to respond to any report or feedback.
-- **Heartbeat** — the worker maintains a heartbeat (touched on every agent
-  message); `/health` returns 503 if the worker dies or wedges, the GUI
-  shows a warning banner, and the container healthcheck picks it up.
-- **Stall handling** — if the Claude API rate-limits or your account hits its
-  usage cap, Harness pauses all agent work, records why, and resumes
-  automatically the moment the limit resets (parsed from the error where
-  possible, exponential backoff otherwise). In-flight fixes resume their
-  session rather than starting over.
+- **Issues** — investigated against the code. Valid, safely-fixable ones are
+  fixed in an isolated git worktree with tests; the harness re-runs the
+  suite, then lands the branch on your dev branch (rebasing and re-testing
+  if dev moved). Everything else gets a drafted reply and waits for you.
+- **Pull requests** — merged onto dev locally, tested, then reviewed for
+  value and quality. Verdicts: merge / needs work / reject, each with a
+  courteous drafted review. Nothing merges without passing tests; by default
+  nothing merges without your click.
+- **Batched releases** — fixes and merges queue on dev. At a threshold (N
+  changes or age), Colin drafts the release: version bump, CHANGELOG,
+  README check, credited notes, then a dev → main PR. You approve; it
+  merges, tags, and publishes the GitHub Release. One fix never means one
+  release.
+- **Operator-in-the-loop** — any agent can ask you a question when a
+  decision isn't theirs. Harry rules on what's in the section's remit;
+  what he escalates reaches your queue and (via ntfy) your phone — with
+  one-tap answer buttons when the question has discrete options. You can
+  also issue standing directions, desk-wide or per-item.
+- **Mid-run control** — live transcripts for every agent run, a Stop
+  button, and a circuit breaker that holds any item after two consecutive
+  failures instead of burning retries.
+- **Desk memory** — agents bank one-line learnings, recalled into future
+  prompts and condensed hourly, so judgement stays consistent without
+  prompts growing.
+- **Resilience** — API rate/usage limits pause all agent work and resume
+  automatically when the limit resets. A worker heartbeat backs `/health`,
+  the container healthcheck, and GUI warnings. Active-hours policy keeps
+  the section inside your working day if you want it to.
 
-Costs shown in the GUI are the SDK's API-equivalent estimates (`≈US$`) —
-on a subscription plan nothing is billed per token; treat them as a relative
-burn meter for your plan's usage limits.
+## Quick start
 
-## Policies
+You need Docker, a GitHub token with `repo` scope, and Claude access —
+either a [Claude subscription](https://claude.com) (run `claude setup-token`
+anywhere Claude Code is installed) or an Anthropic API key.
 
-Per-harness, editable live in the GUI. `auto` means Harness acts on its own
-verdict; `approve` means it prepares everything and waits for your click.
+```bash
+git clone https://github.com/dannymcc/harness.git && cd harness
+cp .env.example .env    # fill in CLAUDE_CODE_OAUTH_TOKEN (or an API key),
+                        # GH_TOKEN, and HARNESS_OPERATOR_NAME (your name)
+docker compose up -d
+```
+
+Open http://localhost:8300, click **+ add**, and point it at a repo. New
+harnesses start conservative: fixes run automatically but land only on your
+dev branch; merges, public comments, and releases all wait for your
+approval until you loosen the policies in Settings.
+
+**Keep it private.** The dashboard has no authentication — it approves
+merges and releases, so treat it like a shell. Bind it to loopback (the
+default compose does), and reach it over a tailnet/VPN or behind an
+authenticating reverse proxy. Never expose it to the public internet.
+
+### Notifications
+
+Set `HARNESS_NTFY_TOPIC` (and `HARNESS_PUBLIC_URL`, reachable from your
+phone) to get pushes for escalated questions, release proposals, held
+items, and usage-limit pauses — with one-tap answer buttons. On the public
+ntfy.sh server the topic name is effectively a password; pick something
+unguessable. The dashboard also installs as a PWA.
+
+## Configuration
+
+Environment (see `.env.example`): `HARNESS_MODEL` (default `claude-opus-5`),
+`HARNESS_ADMIN_MODEL` (cheap model for housekeeping), poll interval, per-run
+budget cap, timezone, ntfy settings.
+
+Per-repo policies, editable live in Settings:
 
 | Policy | Default |
 |---|---|
-| fix issues (and push to dev) | auto |
+| fix issues (and land on dev) | auto |
 | merge community PRs | approve |
 | merge dependabot PRs | approve |
 | post comments/reviews publicly | approve |
 | cut releases | approve |
 | release batch size / max age | 3 changes / 7 days |
+| active hours | always |
 
-## Running it
+Repo expectations (all configurable per harness): a dev branch flowing to a
+main branch by PR, a version string in a file, and a test command. The
+defaults match a Flask-style project (`config.py`, pytest).
 
-### Locally
+Costs shown in the GUI are the SDK's API-equivalent estimates (`≈US$`) — on
+a subscription plan nothing is billed per token; read them as a burn meter.
+
+## Development
 
 ```bash
 python -m venv venv && . venv/bin/activate
 pip install -r requirements.txt
-export CLAUDE_CODE_OAUTH_TOKEN=...   # `claude setup-token`, uses your Claude account
-export GH_TOKEN=...                  # PAT with repo scope
-python run.py                        # GUI on :8300
+export CLAUDE_CODE_OAUTH_TOKEN=... GH_TOKEN=...
+python run.py            # GUI + worker on :8300
 ```
 
-Add your first harness at `/add` (for May: repo `dannymcc/may`, the defaults
-match its layout).
+State lives in `data/` (SQLite, clones, worktrees, per-run transcripts).
+Deleting `data/repos` or `data/worktrees` is always safe — they're rebuilt.
 
-### On hyperion
+## Licence
 
-```bash
-cd /home/danny/docker/harness
-cp .env.example .env   # fill in CLAUDE_CODE_OAUTH_TOKEN + GH_TOKEN
-docker compose up -d
-tailscale serve --bg --https=443 http://127.0.0.1:8300   # tailnet-only
-```
-
-The GUI is mobile-friendly — pin it to your phone's home screen. It has **no
-auth of its own**: keep it tailnet-only (never Funnel). If you want a second
-layer, put Caddy in front with `forward_auth` to Pocket ID; no app changes
-needed.
-
-## Layout
-
-```
-harness/
-├── config.py     # env-driven global config
-├── db.py         # SQLite state: projects, items, runs, releases, reports
-├── gh.py         # gh CLI + git wrappers (all GitHub access)
-├── repo.py       # per-project clone, branches, deterministic test runs
-├── agents.py     # Agent SDK sessions: IC tasks, team lead, CTO
-├── pipeline.py   # orchestration + policy gates + release batching
-├── worker.py     # background cycle loop, stall-aware scheduling
-└── web/          # FastAPI GUI (overview → project → item)
-```
-
-State lives in `data/` (SQLite DB, clones, per-run agent logs). Deleting
-`data/repos` is always safe — clones are rebuilt on demand.
+[MIT](LICENSE). Named for the thing that keeps a working animal pointed in
+the right direction while it does the pulling.
