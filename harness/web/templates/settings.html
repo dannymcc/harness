@@ -13,6 +13,11 @@
   fix without you; your gate moves to the release. file issues — whether
   team leads may open tracking issues on the repo from their plan (capped
   at three a day per desk).</p>
+  <p class="hint">cut release on auto is hands-off management: once the batch
+  is drafted and the tests pass, Colin merges the
+  {{ p.dev_branch }} → {{ p.main_branch }} PR, tags and publishes without
+  asking. Nothing ships on a failing suite either way. Set the other
+  policies to auto too if you want the whole desk to run unattended.</p>
   <div class="policies">
   {% for key, value in policies.items() %}
     <form method="post" action="/p/{{ p.name }}/policy/{{ key }}" class="policy-row">

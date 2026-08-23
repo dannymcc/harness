@@ -68,14 +68,16 @@ def overview(request: Request):
         counts = db.counts_by_status(p["name"])
         waiting = counts.get("waiting_human", 0)
         rel = db.open_release(p["name"])
-        if rel:
-            waiting += 1
+        auto = db.policy(p["name"], "cut_release") == "auto"
+        if rel and not auto:
+            waiting += 1  # an auto release is not waiting on anybody
         cards.append({
             "project": p,
             "counts": counts,
             "waiting": waiting,
             "queued": counts.get("queued", 0),
             "release": rel,
+            "release_auto": auto,
             "cost": db.total_cost(p["name"]),
             "lead_report": db.latest_report("lead", p["name"]),
         })
@@ -250,6 +252,9 @@ def project_page(request: Request, name: str):
                  and i["gh_state"] == "open"],
         release=db.open_release(name),
         releases=db.project_releases(name),
+        release_pending=db.get_setting(f"release_requested.{name}") == "1",
+        release_auto=db.policy(name, "cut_release") == "auto",
+        queued_count=sum(1 for i in items if i["status"] == "queued"),
         lead_report=db.latest_report("lead", name),
         desk_notes=db.latest_report("notes", name),
         security_report=db.latest_report("security", name),
@@ -319,6 +324,20 @@ def post_comment(name: str, kind: str, number: int):
         db.log_event(f"Human posted drafted comment on {kind}#{number}",
                      project=name)
     return RedirectResponse(f"/p/{name}/{kind}/{number}", status_code=303)
+
+
+@app.post("/p/{name}/release/request")
+def request_release(name: str):
+    """Ask Colin for a release now, without waiting for the batch thresholds.
+
+    Sets the same flag Harry sets when told to, so there is one release path:
+    the next cycle drafts, tests and opens the PR, and cut_release decides
+    whether it then waits for a click."""
+    if db.get_project(name) and not db.open_release(name):
+        db.set_setting(f"release_requested.{name}", "1")
+        db.log_event(f"{config.OPERATOR} asked for a release", project=name)
+        worker.trigger()
+    return RedirectResponse(f"/p/{name}", status_code=303)
 
 
 @app.post("/p/{name}/release/{rid}/approve")

@@ -102,7 +102,8 @@
     <div class="stats">
       {% if c.waiting %}<span class="pill warn">{{ c.waiting }} awaiting you</span>{% endif %}
       {% if c.queued %}<span class="pill ok">{{ c.queued }} queued for release</span>{% endif %}
-      {% if c.release %}<span class="pill accent">release v{{ c.release.version }} proposed</span>{% endif %}
+      {% if c.release %}<span class="pill accent">release v{{ c.release.version }} {{ 'going out' if c.release_auto else 'proposed' }}</span>{% endif %}
+      {% if c.release_auto %}<span class="pill ok">auto release</span>{% endif %}
       {% if not c.waiting and not c.queued and not c.release %}<span class="pill">all quiet</span>{% endif %}
     </div>
     {% if c.lead_report %}<p class="report-snippet clamp3"><b>{{ c.project.lead_name }}:</b> {{ c.lead_report.content[:300] }}</p>{% endif %}

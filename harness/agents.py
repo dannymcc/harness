@@ -583,7 +583,9 @@ async def draft_release(project, queued_items: list, current_version: str,
                         commit_log: str, cwd: str) -> dict:
     items_txt = "\n".join(
         f"- {i['kind']}#{i['number']}: {i['title']} ({i['verdict']})"
-        for i in queued_items)
+        for i in queued_items) or (
+        "- (none tracked here — this release was asked for directly, so the "
+        "commit log below is the whole story)")
     prompt = f"""You are Colin, the section's operations specialist.
 Prepare a release of {project['repo']}. You are on the
 {project['dev_branch']} branch in harness's checkout.

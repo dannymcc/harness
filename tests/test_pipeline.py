@@ -63,12 +63,76 @@ def test_directives_and_staffing_requests(fresh_db, may):
 
 def test_release_due_thresholds(fresh_db, may):
     from harness import pipeline
-    assert pipeline._release_due(may) == []
+    assert pipeline._release_due(may) is None
     for n in (1, 2, 3):
         fresh_db.upsert_item("may", "issue", n, "t", "a", "open", "x")
         fresh_db.update_item("may", "issue", n, status="queued",
                              queued_at=fresh_db.now())
     assert len(pipeline._release_due(may)) == 3
+
+
+def test_operator_release_with_nothing_queued(fresh_db, may, monkeypatch):
+    """Work landed on dev outside the harness: pressing Release now must
+    still cut one, and must not claim there is a release when there isn't."""
+    from harness import pipeline, repo
+    monkeypatch.setattr(repo, "dev_ahead_count", lambda project: 2)
+    fresh_db.set_setting("release_requested.may", "1")
+    assert pipeline._release_due(may) == []          # empty, but a real yes
+    assert fresh_db.get_setting("release_requested.may") == ""  # consumed
+
+    monkeypatch.setattr(repo, "dev_ahead_count", lambda project: 0)
+    fresh_db.set_setting("release_requested.may", "1")
+    assert pipeline._release_due(may) is None
+    assert "nothing to release" in fresh_db.recent_events(5, "may")[0]["message"]
+
+
+def test_no_release_proposed_while_one_is_open(fresh_db, may):
+    from harness import pipeline
+    fresh_db.upsert_item("may", "issue", 1, "t", "a", "open", "x")
+    fresh_db.update_item("may", "issue", 1, status="queued",
+                         queued_at=fresh_db.now())
+    fresh_db.create_release("may", "1.2.0", "notes", ["issue#1"])
+    fresh_db.set_setting("release_requested.may", "1")
+    assert pipeline._release_due(may) is None
+    # the request survives for after this one lands, rather than being eaten
+    assert fresh_db.get_setting("release_requested.may") == "1"
+
+
+def test_auto_cut_release_marks_merging_before_finalising(fresh_db, may,
+                                                          monkeypatch):
+    """Auto releases must not sit in 'proposed' while they finalise, or the
+    GUI offers an approve button for a release already being merged."""
+    import asyncio
+    from harness import pipeline, repo
+
+    drafted, seen = {}, {}
+
+    class _NoLock:
+        def __enter__(self): return None
+        def __exit__(self, *a): return False
+
+    async def _fake_propose(project, queued):
+        return drafted["rid"]
+
+    def _fake_finalize(project, release):
+        seen["status"] = fresh_db.get_release(drafted["rid"])["status"]
+
+    monkeypatch.setattr(repo, "clone_lock", lambda project: _NoLock())
+    monkeypatch.setattr(pipeline, "_propose_release_locked", _fake_propose)
+    monkeypatch.setattr(pipeline, "finalize_release", _fake_finalize)
+
+    drafted["rid"] = fresh_db.create_release("may", "2.0.0", "notes", [])
+    fresh_db.set_policy("may", "cut_release", "auto")
+    asyncio.run(pipeline.propose_release(may, []))
+    assert seen["status"] == "merging"
+
+    # on approve, the operator's click is still what moves it
+    seen.clear()
+    drafted["rid"] = fresh_db.create_release("may", "2.0.1", "notes", [])
+    fresh_db.set_policy("may", "cut_release", "approve")
+    asyncio.run(pipeline.propose_release(may, []))
+    assert seen == {}
+    assert fresh_db.get_release(drafted["rid"])["status"] == "proposed"
 
 
 def test_restart_recovery(fresh_db, may):

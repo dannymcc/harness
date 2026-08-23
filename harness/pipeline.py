@@ -327,17 +327,29 @@ async def merge_pr_item(project, item) -> None:
 
 # --- release flow -----------------------------------------------------------
 
-def _release_due(project) -> list:
-    """Queued items, if thresholds (or an operator request) say it's time."""
+def _release_due(project) -> list | None:
+    """Queued items when it is time to cut, otherwise None.
+
+    An empty list is a real answer, not "nothing to do": the operator pressed
+    Release now and dev is ahead of main with nothing queued behind it, which
+    happens whenever work landed on dev outside the harness. There is still a
+    release to cut, just no harness items to credit in it.
+    """
     name = project["name"]
-    queued = db.items_by_status(name, "queued")
-    if not queued:
-        return []
     if db.open_release(name):
-        return []
-    if db.get_setting(f"release_requested.{name}") == "1":
+        return None
+    queued = db.items_by_status(name, "queued")
+    requested = db.get_setting(f"release_requested.{name}") == "1"
+    if requested:
         db.set_setting(f"release_requested.{name}", "")
-        return queued
+        if queued or repo.dev_ahead_count(project) > 0:
+            return queued
+        db.log_event(f"Release requested, but {project['dev_branch']} matches "
+                     f"{project['main_branch']} and nothing is queued — "
+                     "nothing to release", "warn", project=name)
+        return None
+    if not queued:
+        return None
     min_changes = int(db.policy(name, "release_min_changes"))
     max_age_days = float(db.policy(name, "release_max_age_days"))
     if len(queued) >= min_changes:
@@ -346,16 +358,25 @@ def _release_due(project) -> list:
     age_days = (datetime.now(timezone.utc)
                 - datetime.strptime(oldest, "%Y-%m-%dT%H:%M:%SZ")
                 .replace(tzinfo=timezone.utc)).total_seconds() / 86400
-    return queued if age_days >= max_age_days else []
+    return queued if age_days >= max_age_days else None
 
 
 async def propose_release(project, queued) -> None:
     name = project["name"]
     with repo.clone_lock(project):
         rid = await _propose_release_locked(project, queued)
+    if rid is None or db.policy(name, "cut_release") != "auto":
+        return
+    # Hands-off: nobody is going to click. Mark it merging before finalising
+    # so the GUI cannot offer an approve button for a release already on its
+    # way out — a second click would try to merge a merged PR.
+    release = db.get_release(rid)
+    db.update_release(rid, status="merging")
+    db.log_event(f"cut_release is auto — merging and tagging v"
+                 f"{release['version']} without waiting for "
+                 f"{config.OPERATOR}", project=name)
     # finalize outside the lock: it re-acquires it, and flock is not reentrant
-    if rid is not None and db.policy(project["name"], "cut_release") == "auto":
-        finalize_release(project, db.get_release(rid))
+    finalize_release(project, release)
 
 
 async def _propose_release_locked(project, queued) -> int | None:
@@ -502,7 +523,7 @@ async def run_cycle(project, force: bool = False,
         # Release first: a due release must never be starved by a long
         # sweep (or a restart mid-sweep).
         queued = _release_due(project)
-        if queued:
+        if queued is not None:
             await propose_release(project, queued)
 
         fix_jobs: list = []
@@ -623,7 +644,7 @@ async def run_cycle(project, force: bool = False,
         await process_questions(name)
 
         queued = _release_due(project)
-        if queued:
+        if queued is not None:
             await propose_release(project, queued)  # catches same-cycle landings
     except AgentStalled:
         db.log_event(f"Cycle for {name} paused mid-way; will resume", "warn",

@@ -95,3 +95,37 @@ def test_only_escalations_get_primary_buttons(client, fresh_db):
     assert "Answer it yourself instead" in html
     html = client.get("/").text
     assert "Needs your decision (1)" in html
+
+
+def test_release_now_button_and_request(client, fresh_db):
+    html = client.get("/p/may").text
+    assert "Release now (Colin)" in html
+    r = client.post("/p/may/release/request", follow_redirects=False)
+    assert r.status_code == 303
+    assert fresh_db.get_setting("release_requested.may") == "1"
+    # the button gives way to the pending state, so it cannot be pressed twice
+    html = client.get("/p/may").text
+    assert "Release requested" in html and "Release now (Colin)" not in html
+
+
+def test_release_now_is_refused_while_one_is_open(client, fresh_db):
+    fresh_db.create_release("may", "1.0.0", "notes", [])
+    client.post("/p/may/release/request", follow_redirects=False)
+    assert fresh_db.get_setting("release_requested.may") == ""
+    assert "Release now (Colin)" not in client.get("/p/may").text
+
+
+def test_auto_release_is_visible_on_the_project(client, fresh_db):
+    assert "pill ok\">auto" not in client.get("/p/may").text
+    fresh_db.set_policy("may", "cut_release", "auto")
+    html = client.get("/p/may").text
+    assert "pill ok\">auto" in html
+    assert "merges and tags itself" in html
+
+
+def test_auto_release_shows_on_overview_and_is_not_your_queue(client, fresh_db):
+    fresh_db.create_release("may", "1.0.0", "notes", [])
+    assert "release v1.0.0 proposed" in client.get("/").text
+    fresh_db.set_policy("may", "cut_release", "auto")
+    html = client.get("/").text
+    assert "auto release" in html and "release v1.0.0 going out" in html
