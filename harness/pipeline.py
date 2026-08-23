@@ -129,18 +129,35 @@ async def triage_item(project, item) -> None:
         db.update_item(name, "issue", item["number"], error=res["error"])
         return
     out = res["output"]
-    _file_question(name, "Ruth", f"issue#{item['number']}", out)
+    key = f"issue#{item['number']}"
+    _file_question(name, "Ruth", key, out)
     fixable = bool(out["valid"] and out["fixable"]
                    and out["verdict"] in ("bug", "feature"))
+    repro_path = (out.get("repro_test_path") or "").strip().lstrip("/")
+    repro_body = out.get("repro_test_content") or ""
+    repro = json.dumps({"path": repro_path, "content": repro_body}) \
+        if fixable and repro_path and repro_body.strip() and ".." not in repro_path \
+        else ""
     db.update_item(
         name, "issue", item["number"],
         verdict=out["verdict"],
         verdict_summary=out["summary"],
         plan=out.get("plan", ""),
         draft_comment=out.get("draft_comment", ""),
+        repro_test=repro,
         status="triaged" if fixable else "waiting_human",
         error="",
     )
+    db.thread_append(name, key, "Ruth", "finding",
+                     f"Verdict: {out['verdict']} (valid={out['valid']}, "
+                     f"fixable={out['fixable']})\n{out['summary']}")
+    if out.get("plan"):
+        db.thread_append(name, key, "Ruth", "plan", out["plan"])
+    if repro:
+        db.thread_append(name, key, "Ruth", "test",
+                         f"Reproduction test written for {repro_path} "
+                         "(placed in the engineer's worktree; must fail "
+                         "before the fix and pass after).")
     if out.get("draft_comment") and db.policy(name, "post_comments") == "auto":
         gh.comment_issue(project["repo"], item["number"], out["draft_comment"])
         db.log_event(f"Posted triage reply on issue #{item['number']}",
@@ -159,20 +176,48 @@ async def fix_item(project, item, persona: str = "Malcolm") -> None:
     name = project["name"]
     if _breaker_tripped(project, item):
         return
+    key = f"issue#{item['number']}"
     detail = gh.issue_detail(project["repo"], item["number"])
     branch = f"harness/issue-{item['number']}"
     wt = repo.add_worktree(project, branch)
     db.update_item(name, "issue", item["number"], status="working",
                    branch=branch)
+    repro_path = ""
+    if item["repro_test"]:
+        try:
+            rt = json.loads(item["repro_test"])
+            target = (wt / rt["path"]).resolve()
+            if str(target).startswith(str(wt.resolve())):
+                target.parent.mkdir(parents=True, exist_ok=True)
+                target.write_text(rt["content"])
+                repro_path = rt["path"]
+        except (ValueError, KeyError, OSError) as e:
+            db.thread_append(name, key, "harness", "test",
+                             f"Could not place the reproduction test: {e}")
+    if repro_path and not item["session_id"]:
+        # Prove the bug before touching it: the repro must fail on current code.
+        passed, out = await asyncio.to_thread(repo.run_tests, project, wt, True)
+        db.thread_append(name, key, "harness", "test",
+                         ("Reproduction test FAILS on current code as expected "
+                          "— bug confirmed." if not passed else
+                          "Reproduction test PASSES on current code — it does "
+                          "not reproduce the bug. Engineer: treat the plan with "
+                          "care and fix or replace the test.")
+                         + (f"\n{out[-600:]}" if not passed else ""))
+    db.thread_append(name, key, persona, "event",
+                     f"Starting the fix on branch {branch}"
+                     + (" (resuming earlier session)" if item["session_id"] else ""))
     res = await agents.fix_issue(project, detail, item["plan"], str(wt),
                                  resume=item["session_id"] or None,
-                                 persona=persona)
+                                 persona=persona, repro_path=repro_path)
     db.update_item(name, "issue", item["number"],
                    session_id=res.get("session_id", ""))
     if not res["ok"] or not res["output"]["success"]:
         msg = (res["error"] or res["output"]["notes"]) if res["output"] \
             else res["error"]
         msg = (msg or "fix did not succeed")[:2000]
+        db.thread_append(name, key, persona, "event",
+                         f"Fix attempt did not succeed: {msg[:600]}")
         if res.get("cancelled"):
             # A human pressed Stop — never auto-retry over their decision.
             db.update_item(name, "issue", item["number"],
@@ -195,7 +240,9 @@ async def fix_item(project, item, persona: str = "Malcolm") -> None:
                          project=name)
         return
     out = res["output"]
-    _file_question(name, persona, f"issue#{item['number']}", out)
+    _file_question(name, persona, key, out)
+    db.thread_append(name, key, persona, "note",
+                     out["summary"] + (f"\nNotes: {out['notes']}" if out.get("notes") else ""))
 
     if not repo.wt_has_changes(project, wt):
         db.update_item(name, "issue", item["number"], status="waiting_human",
@@ -213,6 +260,11 @@ async def fix_item(project, item, persona: str = "Malcolm") -> None:
         db.update_item(name, "issue", item["number"],
                        status="waiting_human" if again else "approved",
                        error="tests failed after fix:\n" + test_out[-1500:])
+        db.thread_append(name, key, "harness", "test",
+                         "Tests FAILED after the fix — not pushed"
+                         + (" — held for a human after two red runs." if again
+                            else "; the engineer retries with this in front of them.")
+                         + "\n" + test_out[-1200:])
         db.log_event(f"Issue #{item['number']}: tests failed — fix not pushed"
                      + (", held for a human after two red runs" if again
                         else ", retrying next cycle"), "warn", project=name)
@@ -236,6 +288,9 @@ async def fix_item(project, item, persona: str = "Malcolm") -> None:
         name, "issue", item["number"],
         status="queued", queued_at=db.now(), diff=diff,
         commits=msg, verdict_summary=out["summary"], error="")
+    db.thread_append(name, key, "harness", "event",
+                     f"Tests passed; landed on {project['dev_branch']} as "
+                     f"\"{msg.splitlines()[0][:100]}\"\n{stat[-800:]}")
     db.log_event(
         f"{persona} fixed issue #{item['number']} and landed it on "
         f"{project['dev_branch']}", project=name)
@@ -285,6 +340,10 @@ async def review_item(project, item) -> None:
     verdict = out["verdict"]
     if verdict == "merge" and not passed:
         verdict = "needs_work"  # agents don't outrank the test suite
+    db.thread_append(name, f"pr#{item['number']}", "Ruth", "finding",
+                     f"Review verdict: {verdict} (valuable={out['valuable']}; "
+                     f"tests {'passed' if passed else 'FAILED'})\n{out['summary']}"
+                     + (f"\nRisks: {out['risks']}" if out.get("risks") else ""))
     db.update_item(
         name, "pr", item["number"],
         verdict=verdict, verdict_summary=out["summary"],
@@ -519,12 +578,19 @@ def _state_digest(project) -> str:
     for it in db.project_items(name):
         if it["gh_state"] != "open" and it["status"] != "queued":
             continue
-        lines.append(
-            f"- {it['kind']}#{it['number']} [{it['status']}] "
-            f"{it['title']} (by {it['author']})"
-            + (f" — verdict: {it['verdict']}: {it['verdict_summary'][:120]}"
-               if it["verdict"] else "")
-            + (f" — error: {it['error'][:120]}" if it["error"] else ""))
+        line = (f"- {it['kind']}#{it['number']} [{it['status']}] "
+                f"{it['title']} (by {it['author']})")
+        if it["status"] == "triaged" and it["kind"] == "issue":
+            # Awaiting the lead's sign-off: give them the whole case, not a
+            # 120-character glimpse of it.
+            line += (f"\n  Ruth's verdict: {it['verdict']} — {it['verdict_summary']}"
+                     f"\n  Plan:\n    " + (it["plan"] or "(none)").replace("\n", "\n    ")
+                     + ("\n  A reproduction test is ready." if it["repro_test"] else ""))
+        elif it["verdict"]:
+            line += f" — verdict: {it['verdict']}: {it['verdict_summary'][:300]}"
+        if it["error"]:
+            line += f" — error: {it['error'][:160]}"
+        lines.append(line)
     open_qs = db.open_questions(name)
     if open_qs:
         lines.append("\nQuestions already filed and pending (do not re-ask):")
@@ -543,13 +609,80 @@ def _state_digest(project) -> str:
     return "\n".join(lines) or "No open items."
 
 
-async def run_cycle(project, force: bool = False,
-                    quick: bool = False) -> None:
-    """One full cycle for one project.
+LEAD_REVIEW_HOURS = 6   # the lead looks over a quiet board at least this often
 
-    quick=True is a re-wake to start work that is already signed off: if
-    there are fresh approvals they run without re-planning the desk (the
-    plan is the expensive part and they'd run before it anyway)."""
+
+def _since_last_plan(project) -> str:
+    return db.get_setting(f"last_plan_at.{project['name']}", "")
+
+
+def _budget_hold(project) -> bool:
+    """True when the desk has spent its daily budget: no new agent work
+    starts until the 24h window rolls on. Logged once per hold."""
+    name = project["name"]
+    try:
+        cap = float(db.policy(name, "daily_budget_usd"))
+    except ValueError:
+        return False
+    if cap <= 0:
+        return False
+    since = (datetime.now(timezone.utc) - __import__("datetime").timedelta(days=1)
+             ).strftime("%Y-%m-%dT%H:%M:%SZ")
+    spent = db.spend_since(name, since)
+    key = f"budget_hold.{name}"
+    if spent >= cap:
+        if db.get_setting(key) != "1":
+            db.set_setting(key, "1")
+            db.log_event(f"Daily budget reached (${spent:.2f} of ${cap:.0f} in "
+                         "24h) — agent work on this desk pauses until it "
+                         "rolls off; raise daily_budget_usd to continue",
+                         "warn", project=name)
+            notify.send(f"{name}: daily budget reached",
+                        f"${spent:.2f} spent in 24h; the desk is paused until "
+                        "the window rolls on.", tags="moneybag",
+                        click_path=f"/p/{name}/settings")
+        return True
+    if db.get_setting(key) == "1":
+        db.set_setting(key, "")
+        db.log_event("Daily budget window rolled on — desk resumes", project=name)
+    return False
+
+
+def desk_events(project) -> list[str]:
+    """Why the lead should plan now. Empty means nothing has changed since
+    the last plan that needs a lead's judgement — no plan, no cost."""
+    name = project["name"]
+    since = _since_last_plan(project)
+    reasons = []
+    if db.get_setting(f"directives.{name}", "").strip():
+        reasons.append("directive from Harry")
+    fix_policy = db.policy(name, "fix_issues")
+    triaged = [i for i in db.items_by_status(name, "triaged")
+               if i["kind"] == "issue" and i["gh_state"] == "open"]
+    if fix_policy == "lead" and any(i["updated_at"] > since for i in triaged):
+        reasons.append("triage results awaiting sign-off")
+    approved = [i for i in db.items_by_status(name, "approved")
+                if i["kind"] == "issue" and not i["error"]]
+    engineers = 1 + len(db.staff_get(name)["extra"])
+    if len(approved) > engineers and any(i["updated_at"] > since for i in approved):
+        reasons.append("backlog exceeds engineers — ordering needed")
+    open_items = [i for i in db.project_items(name) if i["gh_state"] == "open"]
+    if open_items and not since:
+        reasons.append("first look at this desk")
+    elif open_items and since:
+        age_h = (datetime.now(timezone.utc)
+                 - datetime.strptime(since, "%Y-%m-%dT%H:%M:%SZ")
+                 .replace(tzinfo=timezone.utc)).total_seconds() / 3600
+        if age_h >= LEAD_REVIEW_HOURS:
+            reasons.append(f"routine review ({LEAD_REVIEW_HOURS}h since last plan)")
+    return reasons
+
+
+async def run_cycle(project, force: bool = False) -> None:
+    """One pass over one desk. Event-driven: new items are triaged or
+    reviewed straight away, the lead plans only when something needs their
+    judgement, and signed-off fixes run in a wave. Cheap when nothing has
+    changed — a sync and no agent runs."""
     name = project["name"]
     sync(project)
     if db.paused_until():
@@ -570,89 +703,79 @@ async def run_cycle(project, force: bool = False,
         if queued is not None:
             await propose_release(project, queued)
 
-        fix_jobs: list = []
+        if _budget_hold(project):
+            return
 
-        # Anything a human approved in the GUI runs first. Fresh approvals
-        # ahead of retries (items carrying an error), so a fix that keeps
-        # failing cannot starve new work; a quick re-wake runs fresh ones
-        # only — retries wait for the normal poll.
-        approved = sorted(db.items_by_status(name, "approved"),
-                          key=lambda i: bool(i["error"]))
-        for item in approved:
+        done = 0
+        # 1. Anything new gets looked at now — triage and review are the
+        #    section's reflexes, not something the lead has to schedule.
+        for item in db.items_by_status(name, "new"):
+            if done >= MAX_AGENT_TASKS_PER_CYCLE:
+                break
             if item["kind"] == "issue":
-                if not (quick and item["error"]):
-                    fix_jobs.append(item)
+                await triage_item(project, item)
             else:
-                await merge_pr_item(project, item)
+                with repo.clone_lock(project):
+                    await review_item(project, item)
+            done += 1
+        if done:
+            await process_questions(name)
 
-        # Team Lead plans the rest of the cycle.
-        cwd = str(repo.clean_checkout(project, project["dev_branch"]))
-        if quick and fix_jobs:
-            plan_res = {"ok": False, "output": None}
-        else:
-            db.set_setting(f"last_plan_at.{name}", db.now())
-            plan_res = await agents.lead_plan(project, _state_digest(project), cwd)
-        tasks = plan_res["output"]["tasks"] if plan_res["ok"] else []
-        if plan_res["ok"]:
-            db.save_report("lead", name, plan_res["output"]["summary"])
-            _file_question(name, project["lead_name"], "", plan_res["output"])
-            db.set_setting(f"directives.{name}", "")  # consumed by this plan
-            req = (plan_res["output"].get("staffing_request") or "").strip()
-            if req:
-                db.set_setting(f"staffing_request.{name}", req)
-                db.log_event(f"{project['lead_name']} asked Harry for "
-                             f"staffing: {req[:150]}", project=name)
-            _open_tracking_issues(project, plan_res["output"].get("new_issues"))
-        await process_questions(name)
-
+        # 2. The lead plans when there is something to decide.
+        reasons = desk_events(project)
+        if force and not reasons:
+            reasons = ["operator ran the desk by hand"]
         staff = db.staff_get(name)
         engineers = ["Malcolm"] + staff["extra"]
         fix_policy = db.policy(name, "fix_issues")
-
-        done = 0
-        for t in tasks:
-            if done >= MAX_AGENT_TASKS_PER_CYCLE:
-                break
-            item = db.get_item(name, t["kind"], t["number"])
-            if item is None or t["action"] == "skip":
-                continue
-            if t["action"] == "triage" and item["status"] == "new":
-                await triage_item(project, item)
-                done += 1
-                await process_questions(name)  # Ruth may have asked Harry
-                # auto-advance freshly approved fixes in the same cycle
-                item = db.get_item(name, t["kind"], t["number"])
-                if item["status"] == "approved":
-                    fix_jobs.append(item)
-            elif t["action"] == "fix" and item["status"] in ("triaged", "approved"):
-                # The lead's "fix" is the section's sign-off. Only the
-                # "approve" policy additionally waits for the operator.
-                if item["kind"] != "issue":
-                    continue
-                if item["status"] == "approved" or fix_policy in ("auto", "lead"):
-                    if item["status"] == "triaged":
+        if reasons:
+            cwd = str(repo.clean_checkout(project, project["dev_branch"]))
+            db.set_setting(f"last_plan_at.{name}", db.now())
+            digest = _state_digest(project) + \
+                "\n\nYou are planning because: " + "; ".join(reasons) + "."
+            plan_res = await agents.lead_plan(project, digest, cwd)
+            if plan_res["ok"]:
+                out = plan_res["output"]
+                db.save_report("lead", name, out["summary"])
+                _file_question(name, project["lead_name"], "", out)
+                db.set_setting(f"directives.{name}", "")  # consumed by this plan
+                req = (out.get("staffing_request") or "").strip()
+                if req:
+                    db.set_setting(f"staffing_request.{name}", req)
+                    db.log_event(f"{project['lead_name']} asked Harry for "
+                                 f"staffing: {req[:150]}", project=name)
+                _open_tracking_issues(project, out.get("new_issues"))
+                for t in out["tasks"]:
+                    item = db.get_item(name, t["kind"], t["number"])
+                    if item is None or t["kind"] != "issue":
+                        continue
+                    if t["action"] == "fix" and item["status"] == "triaged" \
+                            and fix_policy in ("auto", "lead"):
                         db.update_item(name, "issue", item["number"],
                                        status="approved")
+                        db.thread_append(name, f"issue#{item['number']}",
+                                         project["lead_name"], "ruling",
+                                         "Signed off for an engineer: "
+                                         + (t.get("reason") or "")[:400])
                         db.log_event(f"{project['lead_name']} put an engineer "
                                      f"on issue #{item['number']}: "
                                      f"{t.get('reason', '')[:120]}", project=name)
-                        item = db.get_item(name, t["kind"], t["number"])
-                    fix_jobs.append(item)
-            elif t["action"] == "review" and item["status"] == "new":
-                with repo.clone_lock(project):
-                    await review_item(project, item)
-                done += 1
-                await process_questions(name)
+                    elif t["action"] == "skip" and item["status"] == "triaged":
+                        db.thread_append(name, f"issue#{item['number']}",
+                                         project["lead_name"], "ruling",
+                                         "Not this time: " + (t.get("reason") or "")[:400])
+            await process_questions(name)
 
-        # Execute fixes as one concurrent wave: one engineer per job, each
-        # in an isolated worktree. Hires give the desk real parallelism.
-        seen, wave = set(), []
-        for item in fix_jobs:
-            k = (item["kind"], item["number"])
-            if k in seen:
-                continue
-            seen.add(k)
-            wave.append(item)
+        # 3. Signed-off fixes run as a wave: one engineer per job, each in an
+        #    isolated worktree. Fresh approvals ahead of retries.
+        approved = sorted(db.items_by_status(name, "approved"),
+                          key=lambda i: bool(i["error"]))
+        wave = []
+        for item in approved:
+            if item["kind"] == "issue":
+                wave.append(item)
+            else:
+                await merge_pr_item(project, item)
         wave = wave[:len(engineers)]
         if wave:
             await asyncio.to_thread(repo.ensure_test_env, project)
@@ -672,20 +795,7 @@ async def run_cycle(project, force: bool = False,
                     db.log_event(f"Fix for issue #{item['number']} could not "
                                  f"start: {str(r)[:120]} — will retry next "
                                  "cycle", "warn", project=name)
-            done += len(wave)
             await process_questions(name)
-
-        # Fallback: triage anything new the lead didn't mention.
-        for item in db.items_by_status(name, "new"):
-            if done >= MAX_AGENT_TASKS_PER_CYCLE:
-                break
-            if item["kind"] == "issue":
-                await triage_item(project, item)
-            else:
-                with repo.clone_lock(project):
-                    await review_item(project, item)
-            done += 1
-        await process_questions(name)
 
         queued = _release_due(project)
         if queued is not None:
@@ -696,39 +806,29 @@ async def run_cycle(project, force: bool = False,
 
 
 def work_ready(project) -> bool:
-    """True when the desk has work it can start without anyone's click —
-    the worker wakes again soon rather than waiting a full poll interval.
+    """True when the desk can start more work without anyone's click —
+    the worker comes straight back rather than waiting for the next sync.
 
-    Deliberately narrow: fresh approvals (not retries carrying an error —
-    those wait for the normal poll so a failing fix can't spin) and issues
-    triaged since the lead last planned (if the lead has seen an item and
-    left it triaged, that was a decision)."""
+    Deliberately narrow: fresh approvals and fresh new items (not ones
+    carrying an error — those wait for the normal poll so a failing run
+    can't spin), triage results the lead hasn't seen, a pending directive.
+    Never outside active hours or under a budget hold."""
     name = project["name"]
-    if not within_active_hours(name):
+    if not within_active_hours(name) or db.get_setting(f"budget_hold.{name}") == "1":
         return False
-    if any(not i["error"] for i in db.items_by_status(name, "approved")):
+    if any(not i["error"] for i in db.items_by_status(name, "approved", "new")
+           if i["gh_state"] == "open"):
         return True
-    if db.policy(name, "fix_issues") not in ("auto", "lead"):
-        return False
-    # Compared with when the lead was last *asked* to plan (set before the
-    # run, success or not) so a failing plan cannot keep the desk "ready".
-    since = db.get_setting(f"last_plan_at.{name}", "")
-    return any(i["gh_state"] == "open" and i["kind"] == "issue"
-               and i["updated_at"] > since
-               for i in db.items_by_status(name, "triaged"))
+    return bool(desk_events(project))
 
 
-async def run_all_cycles(force: bool = False,
-                         only: list[str] | None = None) -> list[str]:
-    """Run every desk's cycle (or just `only` — a fast re-wake for desks
-    with signed-off work). Returns the desks with work ready to go on."""
+async def run_all_cycles(force: bool = False) -> bool:
+    """Run every desk once. Returns True if any desk has work ready to go on."""
     projects = db.all_projects(enabled_only=True)
     for p in projects:
-        if only is not None and p["name"] not in only:
-            continue
         db.touch_heartbeat()
         try:
-            await run_cycle(p, force=force, quick=only is not None)
+            await run_cycle(p, force=force)
         except AgentStalled:
             break
         except Exception as e:
@@ -737,8 +837,8 @@ async def run_all_cycles(force: bool = False,
     # Harry's cross-project review now happens in the hourly stand-up
     # (run_standup) rather than every sweep — cheaper and more predictable.
     if db.paused_until():
-        return []
-    return [p["name"] for p in projects if work_ready(p)]
+        return False
+    return any(work_ready(p) for p in projects)
 
 
 def _reconcile_branches(project) -> None:

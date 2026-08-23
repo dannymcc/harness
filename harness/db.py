@@ -109,6 +109,23 @@ CREATE TABLE IF NOT EXISTS settings (
     key TEXT PRIMARY KEY,
     value TEXT NOT NULL
 );
+CREATE TABLE IF NOT EXISTS thread (
+    id INTEGER PRIMARY KEY,
+    project TEXT NOT NULL,
+    item_key TEXT NOT NULL,           -- 'issue#123' / 'pr#45' / 'release'
+    who TEXT NOT NULL,                -- persona or operator
+    kind TEXT NOT NULL DEFAULT 'note',-- note | finding | plan | ruling | direction | test | event
+    text TEXT NOT NULL,
+    created_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS thread_item ON thread(project, item_key, id);
+CREATE TABLE IF NOT EXISTS steers (
+    id INTEGER PRIMARY KEY,
+    run_id INTEGER NOT NULL,
+    text TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    delivered_at TEXT
+);
 """
 
 
@@ -121,6 +138,7 @@ MIGRATIONS = [
     "ALTER TABLE questions ADD COLUMN answered_by TEXT NOT NULL DEFAULT ''",
     "ALTER TABLE runs ADD COLUMN cancel_requested INTEGER NOT NULL DEFAULT 0",
     "ALTER TABLE questions ADD COLUMN options TEXT NOT NULL DEFAULT ''",
+    "ALTER TABLE items ADD COLUMN repro_test TEXT NOT NULL DEFAULT ''",
 ]
 
 
@@ -504,6 +522,10 @@ def answer_question(qid: int, answer: str, by: str = "operator") -> None:
         c.execute("UPDATE questions SET status = 'answered', answer = ?, "
                   "answered_by = ?, answered_at = ? WHERE id = ?",
                   (answer, by, now(), qid))
+        q = c.execute("SELECT * FROM questions WHERE id = ?", (qid,)).fetchone()
+    if q and q["item_key"] and q["project"]:
+        thread_append(q["project"], q["item_key"], by, "ruling",
+                      f"Q ({q['asked_by']}): {q['question']}\nA: {answer}")
 
 
 def escalate_question(qid: int) -> None:
@@ -578,6 +600,8 @@ def add_direction(project: str, text: str, item_key: str = "") -> None:
             "status, answer, answered_by, created_at) VALUES "
             "(?, 'operator', ?, ?, 'directive', '', '', ?)",
             (project, item_key, text, now()))
+    if item_key:
+        thread_append(project, item_key, config.OPERATOR, "direction", text)
     log_event(f"Operator direction: {text[:120]}", project=project)
 
 
@@ -613,6 +637,94 @@ def answers_for(project: str, item_key: str):
             "SELECT * FROM questions WHERE status = 'answered' "
             "AND project = ? AND item_key = ? ORDER BY id", 
             (project, item_key)).fetchall()
+
+
+# --- item threads -------------------------------------------------------------
+# One running conversation per item: Ruth's findings, the plan, Harry's
+# rulings, the operator's directions, the engineer's notes, test results.
+# Every agent touching the item reads it whole and appends to it — the
+# hand-off artefact, rather than fields scattered across columns.
+
+THREAD_MAX_CHARS = 14000
+
+
+def thread_append(project: str, item_key: str, who: str, kind: str,
+                  text: str) -> None:
+    text = (text or "").strip()
+    if not text or not item_key:
+        return
+    with conn() as c:
+        c.execute(
+            "INSERT INTO thread (project, item_key, who, kind, text, created_at) "
+            "VALUES (?, ?, ?, ?, ?, ?)",
+            (project, item_key, who, kind, text[:20000], now()))
+
+
+def thread(project: str, item_key: str):
+    with conn() as c:
+        return c.execute(
+            "SELECT * FROM thread WHERE project = ? AND item_key = ? ORDER BY id",
+            (project, item_key)).fetchall()
+
+
+def thread_text(project: str, item_key: str,
+                max_chars: int = THREAD_MAX_CHARS) -> str:
+    """The thread rendered for a prompt, newest entries kept whole if it has
+    to be cut (old context is summarised by position, not dropped silently)."""
+    rows = thread(project, item_key)
+    if not rows:
+        return ""
+    parts = [f"[{r['created_at'][5:16].replace('T', ' ')}] {r['who']} ({r['kind']}):\n{r['text']}"
+             for r in rows]
+    out = "\n\n".join(parts)
+    if len(out) <= max_chars:
+        return out
+    kept, size = [], 0
+    for part in reversed(parts):
+        if size + len(part) > max_chars:
+            break
+        kept.append(part)
+        size += len(part) + 2
+    dropped = len(parts) - len(kept)
+    return (f"[{dropped} earlier entr{'y' if dropped == 1 else 'ies'} omitted "
+            "for length]\n\n" + "\n\n".join(reversed(kept)))
+
+
+# --- steering a running agent ---------------------------------------------------
+
+def add_steer(run_id: int, text: str) -> None:
+    text = (text or "").strip()
+    if not text:
+        return
+    with conn() as c:
+        c.execute("INSERT INTO steers (run_id, text, created_at) VALUES (?, ?, ?)",
+                  (run_id, text, now()))
+
+
+def take_steers(run_id: int):
+    """Undelivered steers for a run, marked delivered on the way out."""
+    with conn() as c:
+        rows = c.execute(
+            "SELECT * FROM steers WHERE run_id = ? AND delivered_at IS NULL "
+            "ORDER BY id", (run_id,)).fetchall()
+        if rows:
+            c.execute("UPDATE steers SET delivered_at = ? WHERE run_id = ? "
+                      "AND delivered_at IS NULL", (now(), run_id))
+    return rows
+
+
+def run_steers(run_id: int):
+    with conn() as c:
+        return c.execute("SELECT * FROM steers WHERE run_id = ? ORDER BY id",
+                         (run_id,)).fetchall()
+
+
+def spend_since(project: str, since_iso: str) -> float:
+    with conn() as c:
+        r = c.execute("SELECT COALESCE(SUM(cost_usd), 0) FROM runs "
+                      "WHERE project = ? AND started_at >= ?",
+                      (project, since_iso)).fetchone()
+        return float(r[0] or 0)
 
 
 # --- maintenance mode --------------------------------------------------------

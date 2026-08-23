@@ -6,7 +6,6 @@ event.
 """
 import asyncio
 import threading
-import time
 import traceback
 
 from . import config, db, housekeeping, pipeline
@@ -16,13 +15,11 @@ class _Maintenance(Exception):
 
 
 _run_now = threading.Event()
-_state = {"running": False, "last_cycle": "", "thread": None,
-          "ready": [],       # desks with signed-off work: next wake is quick
-          "last_full": 0.0}  # monotonic time of the last full sweep
+_state = {"running": False, "last_cycle": "", "thread": None}
 
 
 HEARTBEAT_STALE_S = 45 * 60
-READY_REWAKE_S = 60
+READY_REWAKE_S = 5
 
 
 def status() -> dict:
@@ -34,10 +31,8 @@ def status() -> dict:
 
 
 def trigger() -> None:
-    # Human-initiated: the next cycle runs even outside active hours, and
-    # over every desk (not just the ones queued for a quick re-wake).
+    # Human-initiated: the next cycle runs even outside active hours.
     db.set_setting("force_cycle", "1")
-    _state["ready"] = []
     _run_now.set()
 
 
@@ -63,23 +58,10 @@ def _loop() -> None:
             # long cycle (or a restart mid-cycle) can never starve it.
             if pipeline.standup_due():
                 asyncio.run(pipeline.run_standup(force=force))
-            # Quick re-wakes cover only the desks with signed-off work, but
-            # never for longer than a poll interval: every desk still gets
-            # its sync / triage / review / release check on the normal clock.
-            only = _state["ready"] or None
-            full_due = (time.monotonic() - _state["last_full"]
-                        >= config.POLL_INTERVAL_MINUTES * 60)
-            if force or full_due:
-                only = None
-            if only is None:
-                _state["last_full"] = time.monotonic()
-            ready = asyncio.run(pipeline.run_all_cycles(force=force, only=only))
-            _state["ready"] = ready
-            more = bool(ready)
+            more = asyncio.run(pipeline.run_all_cycles(force=force))
         except _Maintenance:
             pass  # maintenance mode: idle until the operator clears it
         except Exception:
-            _state["ready"] = []
             db.log_event("Worker cycle crashed:\n" + traceback.format_exc()[-1500:],
                          "error")
         _state["running"] = False
@@ -89,8 +71,8 @@ def _loop() -> None:
         # this is what resumes stalled work as soon as limits reset.
         wait = config.POLL_INTERVAL_MINUTES * 60
         if more:
-            # A desk has approved/assigned work ready to start: come straight
-            # back rather than leaving it for the next poll.
+            # A desk can go on without anyone's click: come straight back.
+            # This is what makes the section run until the board is clear.
             wait = READY_REWAKE_S
         paused = db.paused_until()
         if paused:

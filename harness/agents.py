@@ -22,16 +22,25 @@ import time
 from datetime import datetime, timezone, timedelta
 
 from claude_agent_sdk import (
-    query,
+    ClaudeSDKClient,
     ClaudeAgentOptions,
     AssistantMessage,
     ResultMessage,
+    create_sdk_mcp_server,
+    tool as sdk_tool,
 )
 
 from . import config, db
 
+try:  # isolation layer (bwrap sandbox + scrubbed env); optional at import
+    from . import sandbox as _sandbox
+except ImportError:  # pragma: no cover
+    _sandbox = None
+
 IC_TOOLS = ["Read", "Glob", "Grep", "Edit", "Write", "Bash", "TodoWrite"]
 READONLY_TOOLS = ["Read", "Glob", "Grep", "Bash", "TodoWrite"]
+# In-process tools every session gets: the section's back-channel.
+SECTION_TOOLS = ["mcp__harness__ask_harry", "mcp__harness__note"]
 BLOCKED = [
     "Bash(git push*)", "Bash(gh *)", "Bash(git remote*)",
     "WebFetch", "WebSearch", "Task",
@@ -47,15 +56,18 @@ Ground rules, non-negotiable:
   a wrong "success" is far worse than a "needs a human".
 - British English, plain and understated, in anything user-facing.
 - Never invent facts about the project. Read the code before concluding.
-- Every schema has an optional question_for_human field. It is for
-  decisions genuinely outside your remit — not for how to do your own job.
-  Anything in it goes to Harry, head of section, who rules within minutes;
-  he escalates to the operator only product direction, breaking changes and
-  consequences outside the codebase. Prefer deciding: make the sensible
-  call, state it in your summary, and carry on. When you do ask: one short,
-  specific question; empty string otherwise. When the answer is a choice
-  between clear alternatives, also fill question_options with up to 3 short
-  options. Never re-ask something already listed as waiting or decided.
+- You can talk to the section while you work. `ask_harry` puts a question
+  to Harry, head of section, and returns his ruling in the same run — use it
+  when a decision is genuinely outside your remit (he escalates to the
+  operator only product direction, breaking changes, consequences outside
+  the codebase). Prefer deciding: make the sensible call, say so, carry on.
+  `note` appends a line to the item's thread, which everyone working the
+  item (and the operator) reads — use it for findings worth handing on and
+  for progress on long jobs. The thread is in your prompt; read it before
+  re-deciding anything in it.
+- question_for_human in your output is the end-of-run fallback for a
+  question you could not ask mid-run; empty otherwise. Never re-ask
+  something already in the thread or listed as waiting.
 """
 
 
@@ -98,6 +110,52 @@ class RunCancelled(RuntimeError):
 
 # --- core runner -------------------------------------------------------------
 
+def _section_tools(project_name: str, item_key: str, persona: str):
+    """The back-channel: tools any session can call mid-run.
+
+    ask_harry files the question and has Harry rule on it there and then
+    (pipeline.process_questions) so the asker gets the answer inside the
+    same run. note appends to the item thread. Both are deterministic code
+    on this side — the agent is still barred from the network and GitHub."""
+    from . import pipeline  # late import: pipeline imports this module
+
+    @sdk_tool("ask_harry",
+              "Ask Harry, head of section, a question you cannot decide "
+              "yourself. Returns his ruling (or tells you it was escalated).",
+              {"question": str})
+    async def ask_harry(args):
+        q = (args.get("question") or "").strip()
+        qid = db.ask_question(project_name, persona, item_key, q)
+        if qid is None:
+            return {"content": [{"type": "text", "text":
+                    "That question is already filed or empty. Carry on with "
+                    "the most reasonable option and note it."}]}
+        await pipeline.process_questions(project_name)
+        row = db.question(qid)
+        if row["status"] == "answered":
+            return {"content": [{"type": "text", "text": f"Harry: {row['answer']}"}]}
+        if row["status"] == "escalated":
+            return {"content": [{"type": "text", "text":
+                    f"Harry has escalated this to {config.OPERATOR}. Do not "
+                    "wait: take the most conservative option, note in your "
+                    "output that it is provisional, and the answer will be in "
+                    "the thread next time."}]}
+        return {"content": [{"type": "text", "text":
+                "Harry could not rule right now. Take the most conservative "
+                "option and note it."}]}
+
+    @sdk_tool("note",
+              "Append a line to this item's thread: a finding worth handing "
+              "on, or progress on a long job. Everyone on the item reads it.",
+              {"text": str})
+    async def note(args):
+        db.thread_append(project_name, item_key, persona, "note",
+                         args.get("text") or "")
+        return {"content": [{"type": "text", "text": "noted"}]}
+
+    return create_sdk_mcp_server("harness", "1.0", [ask_harry, note])
+
+
 async def run_agent(*, project_name: str, role: str, item_key: str, task: str,
                     prompt: str, cwd: str | None, schema: dict,
                     readonly: bool = False, resume: str | None = None,
@@ -106,6 +164,10 @@ async def run_agent(*, project_name: str, role: str, item_key: str, task: str,
 
     Returns {"ok": bool, "output": dict|None, "session_id": str, "error": str}.
     Raises AgentStalled after registering a global pause on rate/usage limits.
+
+    The session is steerable: the operator can post to the run (GUI "Tell
+    <agent>") and it is delivered into the conversation on the next message;
+    Stop interrupts the session cleanly.
     """
     if db.paused_until():
         raise AgentStalled("paused for API limits")
@@ -117,11 +179,23 @@ async def run_agent(*, project_name: str, role: str, item_key: str, task: str,
         persona = (config.CTO_NAME if role == "cto"
                    else config.ADMIN_NAME if role == "admin"
                    else config.IC_NAMES.get(task, ""))
+    if not persona and role == "lead" and project_name:
+        pr = db.get_project(project_name)
+        persona = pr["lead_name"] if pr else ""
     run_id = db.start_run(project_name, role, item_key, task, mdl, persona)
+    tools = (READONLY_TOOLS if readonly else IC_TOOLS) + SECTION_TOOLS
+    extra = {}
+    if _sandbox is not None:
+        env = _sandbox.agent_env()
+        if env:
+            extra["env"] = env
+        sb = _sandbox.agent_sandbox()
+        if sb:
+            extra["sandbox"] = sb
     options = ClaudeAgentOptions(
         model=mdl,
         cwd=cwd,
-        allowed_tools=READONLY_TOOLS if readonly else IC_TOOLS,
+        allowed_tools=tools,
         disallowed_tools=BLOCKED,
         permission_mode="dontAsk",
         system_prompt=BASE_RULES,
@@ -130,6 +204,8 @@ async def run_agent(*, project_name: str, role: str, item_key: str, task: str,
         output_format={"type": "json_schema", "schema": schema},
         setting_sources=[],
         resume=resume,
+        mcp_servers={"harness": _section_tools(project_name, item_key, persona)},
+        **extra,
     )
 
     config.LOG_DIR.mkdir(parents=True, exist_ok=True)
@@ -139,33 +215,41 @@ async def run_agent(*, project_name: str, role: str, item_key: str, task: str,
     # is empty for the whole run and the GUI looks like a stalled agent.
     db.update_run(run_id, log_path=str(log_path))
     session_id, cost, turns, result = "", 0.0, 0, None
+    cancelled = False
     try:
         with open(log_path, "w") as log:
             log.write(f"# {task} {item_key} ({role})\n\n{prompt}\n\n---\n\n")
-            async for message in query(prompt=prompt, options=options):
-                db.touch_heartbeat()
-                if db.cancel_requested(run_id):
-                    raise RunCancelled(f"run {run_id} stopped from the GUI")
-                if isinstance(message, AssistantMessage):
-                    turns += 1
-                    db.update_run(run_id, turns=turns)  # the facts line moves
-                    for block in message.content:
-                        text = getattr(block, "text", None)
-                        if text:
-                            log.write(text + "\n")
-                        tool = getattr(block, "name", None)
-                        if tool:
-                            arg = json.dumps(getattr(block, "input", {}))[:300]
-                            log.write(f"\n▸ {tool} {arg}\n")
-                    log.flush()
-                elif isinstance(message, ResultMessage):
-                    result = message
-                    session_id = getattr(message, "session_id", "") or ""
-                    cost = message.total_cost_usd or 0.0
-    except RunCancelled as e:
-        db.finish_run(run_id, False, cost, turns, "stopped by the operator", str(log_path))
-        return {"ok": False, "output": None, "session_id": session_id,
-                "error": "stopped by the operator", "cancelled": True}
+            async with ClaudeSDKClient(options=options) as client:
+                await client.query(prompt)
+                async for message in client.receive_messages():
+                    db.touch_heartbeat()
+                    if isinstance(message, AssistantMessage):
+                        turns += 1
+                        db.update_run(run_id, turns=turns)  # the facts line moves
+                        for block in message.content:
+                            text = getattr(block, "text", None)
+                            if text:
+                                log.write(text + "\n")
+                            tool_name = getattr(block, "name", None)
+                            if tool_name:
+                                arg = json.dumps(getattr(block, "input", {}))[:300]
+                                log.write(f"\n▸ {tool_name} {arg}\n")
+                        log.flush()
+                    elif isinstance(message, ResultMessage):
+                        result = message
+                        session_id = getattr(message, "session_id", "") or ""
+                        cost = message.total_cost_usd or 0.0
+                        break
+                    if db.cancel_requested(run_id):
+                        cancelled = True
+                        await client.interrupt()
+                        break
+                    for st in db.take_steers(run_id):
+                        log.write(f"\n◂ {config.OPERATOR} steers: {st['text']}\n")
+                        log.flush()
+                        await client.query(f"[Message from {config.OPERATOR}, "
+                                           f"the operator, while you work]: "
+                                           f"{st['text']}")
     except Exception as e:  # SDK/process/transport failures
         err = f"{type(e).__name__}: {e}"
         db.finish_run(run_id, False, cost, turns, err, str(log_path))
@@ -173,6 +257,12 @@ async def run_agent(*, project_name: str, role: str, item_key: str, task: str,
             db.pause_until(_stall_reset_time(err), err[:300])
             raise AgentStalled(err) from e
         return {"ok": False, "output": None, "session_id": session_id, "error": err}
+
+    if cancelled:
+        db.finish_run(run_id, False, cost, turns, "stopped by the operator",
+                      str(log_path))
+        return {"ok": False, "output": None, "session_id": session_id,
+                "error": "stopped by the operator", "cancelled": True}
 
     if result is None:
         db.finish_run(run_id, False, cost, turns, "no result message", str(log_path))
@@ -222,6 +312,10 @@ TRIAGE_SCHEMA = {
         "memory_note": {"type": "string", "description": "Optional: one line worth remembering for future work on this project, else empty."},
         "plan": {"type": "string",
                  "description": "If fixable: concrete fix plan with files. Else empty."},
+        "repro_test_path": {"type": "string",
+                            "description": "If fixable and you could write one: path (relative to the repo) of a test that reproduces the bug — fails now, should pass once fixed — in the project's existing test style. Else empty."},
+        "repro_test_content": {"type": "string",
+                               "description": "Full content of that test file (or the new test function appended to an existing file: then give the complete new file content). Else empty."},
         "draft_comment": {"type": "string",
                           "description": "Reply to post on the issue (may be empty)."},
     },
@@ -475,15 +569,17 @@ def _desk_memory(project_name: str, key: str) -> str:
     return f"\nYour desk memory for this project (accumulated on past work):\n{mem}\n"
 
 
-def _danny_answers(project_name: str, item_key: str) -> str:
-    rows = db.answers_for(project_name, item_key)
-    if not rows:
+def _item_context(project_name: str, item_key: str) -> str:
+    """The item's thread — everything the section has found, decided and
+    been told about it. Rulings and directions in it are binding."""
+    text = db.thread_text(project_name, item_key)
+    if not text:
         return ""
-    lines = ["\nDecisions already made about this item (binding — do not re-ask):"]
-    lines += [f"- Q ({r['asked_by']}): {r['question'][:150]}\n"
-              f"  A ({r['answered_by'] or 'operator'}): {r['answer'][:250]}"
-              for r in rows]
-    return "\n".join(lines) + "\n"
+    return ("\nThe thread on this item so far (rulings and directions in it "
+            "are binding — do not re-ask them):\n" + text + "\n")
+
+
+_danny_answers = _item_context  # old name
 
 
 async def triage_issue(project, issue: dict, cwd: str) -> dict:
@@ -506,7 +602,14 @@ Assess: is it valid? A bug or a feature request? Could Harness fix it safely
 otherwise leave them for the maintainer. Write a draft reply for the issue
 where a reply would help (asking for missing info, explaining a
 misunderstanding, or confirming the plan). Do not modify any files.
-{_danny_answers(project["name"], f"issue#{issue['number']}")}{_desk_memory(project["name"], "analyst")}"""
+
+If it is a fixable bug, hand the engineer proof, not just a plan: write a
+reproduction test (repro_test_path / repro_test_content) in the project's
+existing test style that fails on the current code and will pass once the
+bug is fixed. The harness places it in the engineer's worktree and checks
+it fails before the fix and passes after. Leave it empty only when the bug
+genuinely cannot be captured in a test.
+{_item_context(project["name"], f"issue#{issue['number']}")}{_desk_memory(project["name"], "analyst")}"""
     return await run_agent(
         project_name=project["name"], role="ic",
         item_key=f"issue#{issue['number']}", task="triage",
@@ -515,7 +618,10 @@ misunderstanding, or confirming the plan). Do not modify any files.
 
 async def fix_issue(project, issue: dict, plan: str, cwd: str,
                     resume: str | None = None,
-                    persona: str = "Malcolm") -> dict:
+                    persona: str = "Malcolm", repro_path: str = "") -> dict:
+    repro = (f"\nA reproduction test from triage is at {repro_path}; it fails "
+             "on the current code. Make it pass without weakening it — it is "
+             "part of the suite now.\n" if repro_path else "")
     prompt = f"""You are {persona}, one of the section's engineers.
 Fix this issue in {project['repo']}. You are on a work branch
 off {project['dev_branch']} in harness's checkout. The triage plan is below —
@@ -527,7 +633,7 @@ Issue #{issue['number']}: {issue['title']}
 
 Triage plan:
 {plan}
-
+{repro}
 Requirements:
 - Follow the project's existing style and conventions (read CLAUDE.md if present).
 - Add or update tests that cover the fix.
@@ -536,7 +642,7 @@ Requirements:
 - Do NOT commit, push, or touch git config — leave changes in the working tree.
 - If the fix is riskier or larger than the plan suggested, stop and report
   success=false with an explanation rather than forcing it.
-{_danny_answers(project["name"], f"issue#{issue['number']}")}{_desk_memory(project["name"], "engineering")}"""
+{_item_context(project["name"], f"issue#{issue['number']}")}{_desk_memory(project["name"], "engineering")}"""
     return await run_agent(
         project_name=project["name"], role="ic",
         item_key=f"issue#{issue['number']}", task="fix",
@@ -577,7 +683,7 @@ Verdict "merge" only when you'd stake the release on it. "needs_work" with a
 courteous, specific draft_review when the idea is good but the execution
 isn't there. "reject" when it doesn't belong, with a kind explanation. Do not
 modify any files.
-{_danny_answers(project["name"], f"pr#{pr['number']}")}{_desk_memory(project["name"], "analyst")}"""
+{_item_context(project["name"], f"pr#{pr['number']}")}{_desk_memory(project["name"], "analyst")}"""
     return await run_agent(
         project_name=project["name"], role="ic",
         item_key=f"pr#{pr['number']}", task="review",

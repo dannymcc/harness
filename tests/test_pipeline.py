@@ -214,30 +214,38 @@ def test_directive_create_issue(fresh_db, may, monkeypatch):
     assert fresh_db.get_item("may", "issue", 41)["status"] == "new"
 
 
-def test_lead_policy_work_ready_guard(fresh_db, may):
-    """Under the lead policy, a freshly triaged issue asks the worker to
-    come back soon; once the lead has planned and left it, it does not."""
+def test_work_ready_guards(fresh_db, may):
+    """work_ready drives the fast re-wake, so it must be narrow: fresh
+    approvals and new items yes; errored retries, items the lead has already
+    seen, approve-policy waits, budget holds and off-hours no."""
     from harness import pipeline
     fresh_db.set_policy("may", "fix_issues", "lead")
     fresh_db.upsert_item("may", "issue", 3, "bug", "a", "open", "x")
     fresh_db.update_item("may", "issue", 3, status="triaged")
+    # nothing planned yet → first look → ready
     assert pipeline.work_ready(may) is True
     # the lead has since been asked to plan (whether or not the plan worked)
     fresh_db.set_setting("last_plan_at.may", "2999-01-01T00:00:00Z")
     assert pipeline.work_ready(may) is False
-    fresh_db.set_setting("last_plan_at.may", "")
-    # a retry (approved with an error) must not spin the worker either
+    # a retry (approved with an error) must not spin the worker
     fresh_db.update_item("may", "issue", 3, status="approved", error="tests failed")
     assert pipeline.work_ready(may) is False
     fresh_db.update_item("may", "issue", 3, status="approved", error="")
     assert pipeline.work_ready(may) is True
+    # a new item is ready (triage is a reflex) — unless its triage errored
+    fresh_db.update_item("may", "issue", 3, status="new", error="boom")
+    assert pipeline.work_ready(may) is False
+    fresh_db.update_item("may", "issue", 3, status="new", error="")
+    assert pipeline.work_ready(may) is True
+    # approve policy: triaged waits for the operator, not the worker
     fresh_db.set_policy("may", "fix_issues", "approve")
     fresh_db.update_item("may", "issue", 3, status="triaged")
     assert pipeline.work_ready(may) is False
-    # and never outside active hours
-    fresh_db.set_policy("may", "fix_issues", "auto")
+    # budget hold and off-hours win over everything
     fresh_db.update_item("may", "issue", 3, status="approved", error="")
-    assert pipeline.work_ready(may) is True
+    fresh_db.set_setting("budget_hold.may", "1")
+    assert pipeline.work_ready(may) is False
+    fresh_db.set_setting("budget_hold.may", "")
     import datetime as dt
     from unittest.mock import patch
 
@@ -248,6 +256,32 @@ def test_lead_policy_work_ready_guard(fresh_db, may):
     fresh_db.set_policy("may", "active_hours", "08-23")
     with patch.object(pipeline, "datetime", At3):
         assert pipeline.work_ready(may) is False
+
+
+def test_desk_events_and_budget(fresh_db, may):
+    from harness import pipeline
+    fresh_db.set_setting("last_plan_at.may", "2999-01-01T00:00:00Z")
+    assert pipeline.desk_events(may) == []
+    fresh_db.set_setting("directives.may", "- do the thing")
+    assert "directive" in pipeline.desk_events(may)[0]
+    fresh_db.set_setting("directives.may", "")
+    fresh_db.set_policy("may", "fix_issues", "lead")
+    fresh_db.upsert_item("may", "issue", 3, "bug", "a", "open", "x")
+    fresh_db.update_item("may", "issue", 3, status="triaged")
+    fresh_db.set_setting("last_plan_at.may", "2000-01-01T00:00:00Z")
+    reasons = pipeline.desk_events(may)
+    assert any("sign-off" in r for r in reasons)
+    assert any("routine review" in r for r in reasons)
+    # budget governor: spend in the last 24h at/over the cap holds the desk
+    fresh_db.set_policy("may", "daily_budget_usd", "1")
+    rid = fresh_db.start_run("may", "ic", "issue#3", "fix", "m", "Malcolm")
+    fresh_db.finish_run(rid, True, 1.5, 3, "ok")
+    assert pipeline._budget_hold(may) is True
+    assert fresh_db.get_setting("budget_hold.may") == "1"
+    assert pipeline.work_ready(may) is False
+    fresh_db.set_policy("may", "daily_budget_usd", "100")
+    assert pipeline._budget_hold(may) is False
+    assert fresh_db.get_setting("budget_hold.may") == ""
 
 
 def test_harrys_own_question_goes_to_operator(fresh_db, may):
@@ -347,46 +381,56 @@ def test_reconcile_branches_logs(fresh_db, may, monkeypatch):
                for e in fresh_db.recent_events(5, "may"))
 
 
-def test_quick_cycle_runs_fresh_approvals_only(fresh_db, may, monkeypatch):
-    """A quick re-wake must not retry an errored approval (that would
-    skip the plan forever and burn an engineer run a minute)."""
+def test_event_driven_cycle(fresh_db, may, monkeypatch):
+    """New items are triaged without a plan; the lead plans only when
+    something needs judgement; the lead's fix is the sign-off; fresh
+    approvals run ahead of retries; a quiet desk costs no agent runs."""
     import asyncio
     from harness import pipeline, repo, agents
-    fresh_db.upsert_item("may", "issue", 3, "retry", "a", "open", "x")
-    fresh_db.update_item("may", "issue", 3, status="approved", error="tests failed")
-    fresh_db.upsert_item("may", "issue", 7, "fresh", "a", "open", "x")
-    fresh_db.update_item("may", "issue", 7, status="triaged")
-    fixed, planned = [], []
+    fixed, planned, triaged = [], [], []
     monkeypatch.setattr(pipeline, "sync", lambda p: None)
     monkeypatch.setattr(pipeline, "_reconcile_branches", lambda p: None)
     monkeypatch.setattr(repo, "clean_checkout", lambda p, b: "/tmp")
     monkeypatch.setattr(repo, "ensure_test_env", lambda p: None)
     async def fake_fix(project, item, persona="Malcolm"):
         fixed.append(item["number"])
+    async def fake_triage(project, item):
+        triaged.append(item["number"])
+        fresh_db.update_item("may", "issue", item["number"], status="triaged",
+                             verdict="bug", plan="do x")
     async def fake_plan(project, digest, cwd):
-        planned.append(1)
+        planned.append(digest)
         return {"ok": True, "output": {"summary": "s", "tasks": [
-            {"action": "fix", "kind": "issue", "number": 7, "reason": "go"}]}}
-    monkeypatch.setattr(pipeline, "fix_item", fake_fix)
-    monkeypatch.setattr(agents, "lead_plan", fake_plan)
+            {"action": "fix", "kind": "issue", "number": 7, "reason": "go"},
+            {"action": "skip", "kind": "issue", "number": 8, "reason": "later"}]}}
     async def no_q(name=None):
         return None
+    monkeypatch.setattr(pipeline, "fix_item", fake_fix)
+    monkeypatch.setattr(pipeline, "triage_item", fake_triage)
     monkeypatch.setattr(pipeline, "process_questions", no_q)
+    monkeypatch.setattr(agents, "lead_plan", fake_plan)
     fresh_db.set_policy("may", "fix_issues", "lead")
-    asyncio.run(pipeline.run_cycle(may, quick=True))
-    assert planned == [1]            # nothing fresh approved → plan runs
-    assert fixed == [7]              # the lead's fix is the sign-off; #3 waits
-    assert fresh_db.get_item("may", "issue", 7)["status"] in ("approved", "working")
-    # normal cycle, one engineer: the fresh approval goes first; the retry
-    # takes the next wave rather than starving it
-    fixed.clear()
-    fresh_db.update_item("may", "issue", 7, status="approved", error="")
+    fresh_db.upsert_item("may", "issue", 3, "retry", "a", "open", "x")
+    fresh_db.update_item("may", "issue", 3, status="approved", error="tests failed")
+    fresh_db.upsert_item("may", "issue", 7, "fresh", "a", "open", "x")
+    fresh_db.upsert_item("may", "issue", 8, "meh", "a", "open", "x")
+
     asyncio.run(pipeline.run_cycle(may))
-    assert fixed == [7]
+    assert sorted(triaged) == [7, 8]                 # reflex, no plan needed first
+    assert len(planned) == 1 and "sign-off" in planned[0]
+    assert "Plan:" in planned[0]                     # the lead sees the whole case
+    assert fixed == [7]                              # signed off → engineer; #3 waits
+    th = [r["text"] for r in fresh_db.thread("may", "issue#8")]
+    assert any("Not this time" in t for t in th)
+    assert fresh_db.get_item("may", "issue", 8)["status"] == "triaged"
+
+    # second pass: nothing new — no plan, the retry gets its turn
     fixed.clear()
     fresh_db.update_item("may", "issue", 7, status="queued")
     asyncio.run(pipeline.run_cycle(may))
+    assert len(planned) == 1
     assert fixed == [3]
+    assert pipeline.work_ready(may) is False         # quiet desk, no spin
 
 
 def test_unreviewed_pr_merge_runs_the_suite_first(fresh_db, may, monkeypatch):

@@ -301,6 +301,7 @@ def item_page(request: Request, name: str, kind: str, number: int):
     if not (p and item):
         return RedirectResponse(f"/p/{name}", status_code=303)
     return render(request, "item.html", p=p, item=item,
+                  thread=db.thread(name, f"{kind}#{number}"),
                   gh_url=f"https://github.com/{p['repo']}/"
                          f"{'issues' if kind == 'issue' else 'pull'}/{number}")
 
@@ -470,6 +471,7 @@ def run_page(request: Request, run_id: int):
         proj = db.get_project(run["project"])
         lead = proj["lead_name"] if proj else ""
     return render(request, "run.html", run=run, transcript=transcript,
+                  steers=db.run_steers(run_id),
                   display_name=run["agent"] or agent_name(run["role"],
                                                           run["task"], lead))
 
@@ -501,6 +503,21 @@ def run_tail(run_id: int, offset: int = 0):
         })
     except OSError:
         return JSONResponse({"data": "", "offset": offset, "live": live})
+
+
+@app.post("/run/{run_id}/steer")
+def steer_run(run_id: int, text: str = Form(...)):
+    run = db.get_run(run_id)
+    if run and run["finished_at"] is None and text.strip():
+        db.add_steer(run_id, text)
+        if run["project"] and run["item_key"]:
+            db.thread_append(run["project"], run["item_key"], config.OPERATOR,
+                             "direction", f"(to {run['agent'] or run['task']}, "
+                             f"mid-run) {text.strip()}")
+        db.log_event(f"{config.OPERATOR} steered run {run_id} "
+                     f"({run['task']} {run['item_key']}): {text.strip()[:100]}",
+                     project=run["project"])
+    return RedirectResponse(f"/run/{run_id}", status_code=303)
 
 
 @app.post("/run/{run_id}/stop")

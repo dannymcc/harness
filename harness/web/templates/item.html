@@ -39,6 +39,24 @@
 {% endif %}
 
 <section class="card">
+  <h2>Thread{% if thread %} ({{ thread|length }}){% endif %}</h2>
+  <p class="hint">Everything the section has found, decided and been told
+  about this item. Each agent reads it whole before working and writes back
+  to it; your directions below land here too.</p>
+  {% if thread %}
+  <div class="thread">
+  {% for t in thread %}
+    <div class="thread-entry kind-{{ t.kind }}">
+      <p class="thread-meta"><b>{{ t.who }}</b> <span class="pill">{{ t.kind }}</span>
+        <span class="ts">{{ t.created_at }}</span></p>
+      <div class="md">{{ t.text }}</div>
+    </div>
+  {% endfor %}
+  </div>
+  {% else %}<p class="hint">Nothing yet.</p>{% endif %}
+</section>
+
+<section class="card">
   <h2>Tell the team about this item</h2>
   <form method="post" action="/p/{{ p.name }}/tell" class="answer-form">
     <input type="hidden" name="item_key" value="{{ item.kind }}#{{ item.number }}">

@@ -204,3 +204,22 @@ def test_nav_marks_the_project_you_are_looking_at(client, fresh_db):
     fresh_db.update_project("may", enabled=0)
     assert '<a href="/p/may" class="dim" aria-current="page">' in \
         client.get("/p/may").text
+def test_item_thread_and_run_steer(client, fresh_db):
+    fresh_db.upsert_item("may", "issue", 9, "Footer", "a", "open", "x")
+    fresh_db.thread_append("may", "issue#9", "Ruth", "finding", "It is a bug.")
+    html = client.get("/p/may/issue/9").text
+    assert "It is a bug." in html and "Thread (1)" in html
+    # a direction on the item lands in the thread
+    client.post("/p/may/tell", data={"text": "Plain text footer", "item_key": "issue#9"})
+    assert any("Plain text footer" in r["text"] for r in fresh_db.thread("may", "issue#9"))
+    # steering a live run queues the message and mirrors it to the thread
+    rid = fresh_db.start_run("may", "ic", "issue#9", "fix", "m", "Malcolm")
+    html = client.get(f"/run/{rid}").text
+    assert "Tell Malcolm while they work" in html
+    client.post(f"/run/{rid}/steer", data={"text": "skip the git probe"})
+    steers = fresh_db.take_steers(rid)
+    assert [s["text"] for s in steers] == ["skip the git probe"]
+    assert fresh_db.take_steers(rid) == []              # delivered once
+    assert any("skip the git probe" in r["text"] for r in fresh_db.thread("may", "issue#9"))
+    fresh_db.finish_run(rid, True, 0.1, 1, "done")
+    assert "Tell Malcolm while they work" not in client.get(f"/run/{rid}").text

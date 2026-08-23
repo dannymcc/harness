@@ -85,7 +85,10 @@ MAX_TURNS = int(os.environ.get("HARNESS_MAX_TURNS", "80"))
 MAX_BUDGET_USD_PER_RUN = float(os.environ.get("HARNESS_MAX_BUDGET_USD_PER_RUN", "5.0"))
 
 # --- Worker -----------------------------------------------------------------
-POLL_INTERVAL_MINUTES = int(os.environ.get("HARNESS_POLL_INTERVAL_MINUTES", "30"))
+# How often each desk syncs with GitHub when idle. Agent work is event-driven
+# (new items, triage results, directives) so a short interval is cheap: a
+# sync is two gh calls, and a wake with nothing new runs no agents.
+POLL_INTERVAL_MINUTES = int(os.environ.get("HARNESS_POLL_INTERVAL_MINUTES", "5"))
 ADMIN_INTERVAL_MINUTES = int(os.environ.get("HARNESS_ADMIN_INTERVAL_MINUTES", "60"))
 
 # --- Notifications (ntfy) ---------------------------------------------------
@@ -161,6 +164,10 @@ POLICY_DEFAULTS = {
     # Agent work runs only inside these local hours ("HH-HH", or "always").
     # Human-triggered actions (approvals, Run cycle now, answers) override.
     "active_hours": "always",
+    # The desk stops starting agent work once it has spent this much in the
+    # last 24h (USD). The governor that makes "run until the board is clear"
+    # safe to leave unattended. Harry sees the hold at stand-up.
+    "daily_budget_usd": "30",
 }
 
 TIMEZONE = os.environ.get("HARNESS_TZ", "Europe/London")

@@ -23,8 +23,24 @@
   <div class="md">{{ run.summary }}</div></section>{% endif %}
 
 {% if run.finished_at is none and not run.cancel_requested %}
-<form method="post" action="/run/{{ run.id }}/stop">
-  <button class="danger">Stop this run</button></form>
+<section class="card">
+  <h2>Tell {{ display_name }} while they work</h2>
+  <p class="hint">Delivered into the session on its next message — steer
+  the approach, add context, narrow the scope. Stop ends the run instead.</p>
+  <form method="post" action="/run/{{ run.id }}/steer" class="answer-form">
+    <input name="text" placeholder="e.g. skip the git probe, use the stamp file" required>
+    <button class="primary">Send</button>
+    <button formaction="/run/{{ run.id }}/stop" formnovalidate class="danger">Stop this run</button>
+  </form>
+  {% for st in steers %}
+  <p class="q-context">{{ st.created_at }} — {{ st.text }}
+    {% if st.delivered_at %}<span class="pill ok">delivered</span>{% else %}<span class="pill">queued</span>{% endif %}</p>
+  {% endfor %}
+</section>
+{% elif steers %}
+<section class="card"><h2>Steered</h2>
+  {% for st in steers %}<p class="q-context">{{ st.created_at }} — {{ st.text }}</p>{% endfor %}
+</section>
 {% endif %}
 
 <section class="card"><h2>Console
