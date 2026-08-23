@@ -4,6 +4,25 @@ All notable changes to Harness are recorded here. The format is
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project
 follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.3.1] - 2026-08-23
+
+### Fixed
+
+- The footer version was hand-maintained and could name a build that wasn't
+  running (#1). It is derived now: the number from `VERSION` in
+  `harness/config.py`, the SHA from `HARNESS_GIT_SHA`, then the stamp the
+  image build writes to `harness/_build_sha`, then `git HEAD` of the deployed
+  checkout — each step guarded and timeout-bounded, since config is imported
+  everywhere and this resolves once at import. When nothing can identify the
+  build the footer says `(unknown build)` rather than implying a commit it
+  doesn't know. The code for this shipped in the 0.2.0 image but was missed
+  from that release's notes; it is recorded here.
+- The README described the footer as `v0.1.0 (abc1234)` — the very thing #1
+  was about, a version number kept by hand and left behind. The examples no
+  longer carry a number.
+- The README placed **Release now** on the project page only; since 0.3.0 it
+  is on every card on the overview too.
+
 ## [0.3.0] - 2026-08-23
 
 ### Added
