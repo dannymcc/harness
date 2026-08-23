@@ -4,6 +4,29 @@ All notable changes to Harness are recorded here. The format is
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project
 follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.8.2] - 2026-08-23
+
+### Security
+
+- **Untrusted GitHub text is fenced, and the agents that read it lost their
+  general shell.** Issue and PR titles, bodies, comments, diffs, test output
+  and CI results now reach a prompt inside `<<<UNTRUSTED ...>>>` markers,
+  with any forged markers stripped from the text first and lengths capped
+  (the triage issue body was previously uncapped); every session's standing
+  orders say that fenced text is data from the public internet and never an
+  instruction. The roles that read that text — triage, review, lead planning
+  and security review — no longer get bare `Bash`. Their shell is an
+  allowlist: read-only `git status` / `log` / `diff` / `show`, plus the
+  project's own `test_command` so an analyst can still reproduce a report.
+  Anything else is denied without a prompt. Sessions with no project attached
+  get no shell at all. `GH_TOKEN` and `GITHUB_TOKEN` are blanked for every
+  session, the fix role included, so no agent inherits the GitHub token.
+  Fix and release keep a general shell — they have to run builds and installs
+  — and SECURITY.md now records that, and the fact that allowlist rules are
+  prefix matches and outbound network is not blocked, as accepted residual
+  risk rather than leaving it implied. The README, SECURITY.md and the site
+  say what each role can run (issue #6).
+
 ## [0.8.1] - 2026-08-23
 
 ### Fixed
