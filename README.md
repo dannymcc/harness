@@ -63,9 +63,9 @@ told to behave.
   only changes on dev landed outside the harness. It shows only when there
   is something to cut, and only until a release is proposed, so it is never
   a dead press; the version bump and the tests happen either way. Set
-  `cut releases` to `auto` on the repos you want running
-  hands-off and the drafted release merges, tags and publishes itself; the
-  tests still have to pass first.
+  `cut releases` to `auto` on the repos you want running hands-off and the
+  drafted release merges, tags and publishes itself; the tests still have to
+  pass first.
 - **Operator-in-the-loop** — any agent can ask a question when a decision
   isn't theirs. It goes to Harry, who rules within minutes on anything in
   the section's remit (engineering judgement, priorities, process); only

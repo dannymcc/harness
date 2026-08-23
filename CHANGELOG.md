@@ -4,6 +4,25 @@ All notable changes to Harness are recorded here. The format is
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project
 follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.8.3] - 2026-08-23
+
+### Fixed
+
+- **Release now is only offered when there is something to cut.** The button
+  used to show on the project page and on every overview card regardless, so
+  pressing it with dev matching main and nothing queued did nothing visible
+  beyond a "nothing to release" line in the event log. Both views now ask
+  `pipeline.anything_to_release()` — queued items, or dev ahead of main —
+  which is the same question the release cycle itself asks, so the button and
+  the cycle can no longer disagree. Where there is nothing to cut the project
+  page says so plainly instead; the tooltips now describe what the press
+  actually does (drafts and tests a release), and the batching hint stops
+  mentioning a button that isn't there. The POST route re-checks before
+  setting the flag, so a stale page can't sneak a request through, and
+  `repo.dev_ahead_count()` — now on a page-render path — takes a 15-second
+  timeout so a wedged git can't hold the dashboard open. The README says so
+  (issue #10).
+
 ## [0.8.2] - 2026-08-23
 
 ### Security
