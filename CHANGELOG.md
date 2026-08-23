@@ -4,6 +4,25 @@ All notable changes to Harness are recorded here. The format is
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project
 follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.4.0] - 2026-08-23
+
+### Added
+
+- An explicit **Dark** / **Light** button in the nav, and the dashboard now
+  opens light for everyone rather than following the operating system (#2).
+  The choice is kept in a `theme` cookie for a year, so it is remembered per
+  browser. `data-theme` is rendered on the server, so a page arrives already
+  in the right palette — no flash on load — and the toggle is a plain form
+  post, so it works with JavaScript off. The `theme-color` meta follows the
+  chosen theme too. The `/theme` post only redirects back to a referer on
+  this host.
+
+### Changed
+
+- The README gained a short section on the palette and the toggle. The
+  screenshots in the README and on the site still show the dark palette,
+  which is now opt-in rather than what a new install looks like.
+
 ## [0.3.1] - 2026-08-23
 
 ### Fixed

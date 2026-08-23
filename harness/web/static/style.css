@@ -1,33 +1,35 @@
 /* Harness — registry-file theme.
    Sans: IBM Plex Sans (UI). Mono: IBM Plex Mono (dockets, stamps, data). */
 
+/* Light is the default; dark is opt-in through the nav toggle, which sets
+   data-theme on <html> server-side from the `theme` cookie. The OS
+   preference is deliberately not consulted — the operator chose the theme. */
 :root {
   /* brand family (icon): #14352a ink · #1D5741 racing green · #2e7a55 · #6c9a62 · #FFFDF8 paper */
-  --bg: #0e1411;
-  --card: #151d18;
-  --inset: #101814;
-  --border: #263129;
-  --border-strong: #35443b;
-  --text: #dde6df;
-  --dim: #8fa295;
-  --accent: #6c9a62;         /* links, stamps, focus — light enough on ink */
-  --accent-strong: #2e7a55;  /* filled surfaces: primary buttons, the file edge */
+  --bg: #f1ede1;
+  --card: #fffdf8;
+  --inset: #f6f2e7;
+  --border: #ded8c6;
+  --border-strong: #c5bfab;
+  --text: #14352a;
+  --dim: #5c6e62;
+  --accent: #1d5741;         /* links, stamps, focus */
+  --accent-strong: #1d5741;  /* filled surfaces: primary buttons, the file edge */
   --accent-ink: #fffdf8;
-  --ok: #4db69b;
-  --warn: #d98e3f;
-  --err: #d0685a;
+  --ok: #0e7c66;
+  --warn: #a95f13;
+  --err: #b0473a;
   --sans: "IBM Plex Sans", system-ui, -apple-system, "Segoe UI", sans-serif;
   --mono: "IBM Plex Mono", ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
   --page-pad: .9rem;
 }
-@media (prefers-color-scheme: light) {
-  :root {
-    --bg: #f1ede1; --card: #fffdf8; --inset: #f6f2e7;
-    --border: #ded8c6; --border-strong: #c5bfab;
-    --text: #14352a; --dim: #5c6e62;
-    --accent: #1d5741; --accent-strong: #1d5741; --accent-ink: #fffdf8;
-    --ok: #0e7c66; --warn: #a95f13; --err: #b0473a;
-  }
+html[data-theme="dark"] {
+  --bg: #0e1411; --card: #151d18; --inset: #101814;
+  --border: #263129; --border-strong: #35443b;
+  --text: #dde6df; --dim: #8fa295;
+  --accent: #6c9a62;         /* light enough on ink */
+  --accent-strong: #2e7a55; --accent-ink: #fffdf8;
+  --ok: #4db69b; --warn: #d98e3f; --err: #d0685a;
 }
 
 * { box-sizing: border-box; }
@@ -60,6 +62,12 @@ nav {
 }
 .navlinks a:hover { color: var(--accent); text-decoration: none; }
 .who { margin-left: auto; color: var(--dim); font: 400 .78rem var(--mono); }
+.theme-toggle { margin-left: auto; }
+.who + .theme-toggle { margin-left: 0; }  /* .who already took the free space */
+.theme-toggle button {
+  min-height: 36px; min-width: auto; padding: .3rem .7rem;
+  font: 500 .78rem var(--mono); color: var(--dim);
+}
 
 /* --- type --------------------------------------------------------------- */
 main { max-width: 900px; margin: 0 auto; padding: 1rem var(--page-pad) 2rem; }
@@ -343,6 +351,8 @@ footer {
   .cards { grid-template-columns: 1fr; }
   nav { gap: .1rem .4rem; padding: .45rem .6rem; }
   .who { display: none; }
+  /* .who is hidden here, so the toggle takes the free space itself */
+  .who + .theme-toggle { margin-left: auto; }
   .kanban { grid-auto-columns: minmax(220px, 78vw); }
   .card { --card-pad: .8rem; padding: .85rem var(--card-pad); }
   /* the input takes the whole first line; the buttons share the second */

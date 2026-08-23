@@ -1,13 +1,12 @@
 <!doctype html>
-<html lang="en">
+<html lang="en" data-theme="{{ theme }}">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 <title>{% block title %}Harness{% endblock %}</title>
-<meta name="theme-color" content="#1D5741" media="(prefers-color-scheme: dark)">
-<meta name="theme-color" content="#fffdf8" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="{{ '#1D5741' if theme == 'dark' else '#fffdf8' }}">
 <link rel="manifest" href="/static/manifest.json" crossorigin="use-credentials">
 <link rel="icon" href="/static/icon.svg" type="image/svg+xml">
 <link rel="apple-touch-icon" href="/static/icon-192.png">
@@ -27,6 +26,10 @@
     <a href="/add">+ add</a>
   </div>
   {% if who %}<span class="who">{{ who }}</span>{% endif %}
+  <form method="post" action="/theme" class="theme-toggle">
+    <input type="hidden" name="value" value="{{ 'light' if theme == 'dark' else 'dark' }}">
+    <button aria-label="Switch to the {{ 'light' if theme == 'dark' else 'dark' }} theme">{{ 'Light' if theme == 'dark' else 'Dark' }}</button>
+  </form>
 </nav>
 
 {% if worker.stale %}

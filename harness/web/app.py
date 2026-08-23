@@ -5,6 +5,7 @@ Server-rendered, mobile-first, no build step. Meant to sit behind
 Funnel. If Tailscale identity headers are present they are shown in the nav.
 """
 from pathlib import Path
+from urllib.parse import urlparse
 
 from fastapi import FastAPI, Form, Request
 from fastapi.responses import RedirectResponse
@@ -55,6 +56,7 @@ def render(request: Request, template: str, **ctx):
         paused_reason=db.get_setting("paused_reason"),
         worker=worker.status(),
         who=request.headers.get("Tailscale-User-Login", ""),
+        theme="dark" if request.cookies.get("theme") == "dark" else "light",
     )
     return templates.TemplateResponse(request, template, ctx)
 
@@ -503,6 +505,18 @@ def stop_run(run_id: int):
 def run_now():
     worker.trigger()
     return RedirectResponse("/", status_code=303)
+
+
+@app.post("/theme")
+def set_theme(request: Request, value: str = Form(...)):
+    """Remember the chosen palette in a cookie; anything else means light."""
+    back = request.headers.get("referer") or "/"
+    if urlparse(back).netloc not in ("", request.url.netloc):
+        back = "/"  # never bounce off this host on a referer we don't own
+    resp = RedirectResponse(back, status_code=303)
+    resp.set_cookie("theme", "dark" if value == "dark" else "light",
+                    max_age=31536000, path="/", samesite="lax")
+    return resp
 
 
 @app.post("/resume")
