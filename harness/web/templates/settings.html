@@ -1,0 +1,45 @@
+{% extends "base.html" %}
+{% block title %}Settings · {{ p.name }}{% endblock %}
+{% block content %}
+
+<p><a href="/p/{{ p.name }}">← {{ p.name }}</a></p>
+<h1>{{ p.name }} settings <span class="repo">{{ p.repo }}</span></h1>
+
+<section class="card">
+  <h2>Policies</h2>
+  <p class="hint">auto — Harness acts on its own verdict. approve — it
+  prepares everything and waits for your click.</p>
+  <div class="policies">
+  {% for key, value in policies.items() %}
+    <form method="post" action="/p/{{ p.name }}/policy/{{ key }}" class="policy-row">
+      <label>{{ key.replace('_', ' ') }}</label>
+      {% if value in ('auto', 'approve') %}
+        <select name="value" onchange="this.form.submit()">
+          <option value="auto" {% if value == 'auto' %}selected{% endif %}>auto</option>
+          <option value="approve" {% if value == 'approve' %}selected{% endif %}>approve</option>
+        </select>
+      {% else %}
+        <input name="value" value="{{ value }}" size="4">
+        <button>set</button>
+      {% endif %}
+    </form>
+  {% endfor %}
+  </div>
+</section>
+
+<section class="card">
+  <h2>Staffing (managed by Harry)</h2>
+  <p>Extra engineers: {{ staff.extra|join(', ') if staff.extra else 'none' }}</p>
+  <p>Stood down: {{ staff.benched|join(', ') if staff.benched else 'nobody' }}</p>
+  <p class="hint">Harry hires and stands people down at stand-up based on
+  utilisation. If you disagree, direct the team from the project page.</p>
+</section>
+
+<section class="card">
+  <h2>Harness</h2>
+  <form method="post" action="/p/{{ p.name }}/toggle">
+    <button>{{ 'Disable' if p.enabled else 'Enable' }} this harness</button>
+  </form>
+</section>
+
+{% endblock %}

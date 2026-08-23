@@ -4,6 +4,29 @@
 
 <h1>All harnesses</h1>
 
+{% if questions %}
+<section class="card accent-border">
+  <h2>Danny-in-the-loop ({{ questions|length }})</h2>
+  {% for q in questions %}
+  <div class="question">
+    <p><b>{{ q.asked_by }}</b>
+       {% if q.status == 'escalated' %}<span class="pill accent">escalated by Harry</span>
+       {% else %}<span class="pill">with Harry</span>{% endif %}
+       {% if q.project %}<a href="/p/{{ q.project }}" class="pill">{{ q.project }}</a>{% endif %}
+       {% if q.item_key %}<span class="pill">{{ q.item_key }}</span>{% endif %}
+       <span class="ts">{{ q.created_at }}</span></p>
+    <p class="q-text">{{ q.question }}</p>
+    <form method="post" action="/p/{{ q.project or '-' }}/question/{{ q.id }}/answer" class="answer-form">
+      <input name="answer" placeholder="Your decision…" required>
+      <button class="primary">Answer</button>
+      <button formaction="/p/{{ q.project or '-' }}/question/{{ q.id }}/dismiss"
+              formnovalidate class="danger">Dismiss</button>
+    </form>
+  </div>
+  {% endfor %}
+</section>
+{% endif %}
+
 <div class="cards">
 {% for c in cards %}
   <a class="card project-card {% if not c.project.enabled %}dim{% endif %}" href="/p/{{ c.project.name }}">
@@ -24,26 +47,7 @@
 {% endif %}
 </div>
 
-{% if questions %}
-<section class="card accent-border">
-  <h2>Danny-in-the-loop ({{ questions|length }})</h2>
-  {% for q in questions %}
-  <div class="question">
-    <p><b>{{ q.asked_by }}</b>
-       {% if q.project %}<a href="/p/{{ q.project }}" class="pill">{{ q.project }}</a>{% endif %}
-       {% if q.item_key %}<span class="pill">{{ q.item_key }}</span>{% endif %}
-       <span class="ts">{{ q.created_at }}</span></p>
-    <p class="q-text">{{ q.question }}</p>
-    <form method="post" action="/p/{{ q.project or '-' }}/question/{{ q.id }}/answer" class="answer-form">
-      <input name="answer" placeholder="Your decision…" required>
-      <button class="primary">Answer</button>
-      <button formaction="/p/{{ q.project or '-' }}/question/{{ q.id }}/dismiss"
-              formnovalidate class="danger">Dismiss</button>
-    </form>
-  </div>
-  {% endfor %}
-</section>
-{% endif %}
+
 
 <section class="card">
   <h2>The section — who's doing what</h2>

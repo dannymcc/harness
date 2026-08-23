@@ -38,6 +38,15 @@
   <pre class="diff">{{ item.diff }}</pre></section>
 {% endif %}
 
+<section class="card">
+  <h2>Tell the team about this item</h2>
+  <form method="post" action="/p/{{ p.name }}/tell" class="answer-form">
+    <input type="hidden" name="item_key" value="{{ item.kind }}#{{ item.number }}">
+    <input name="text" placeholder="Your direction on {{ item.kind }}#{{ item.number }}…" required>
+    <button class="primary">Send</button>
+  </form>
+</section>
+
 <div class="actions">
   {% if item.status in ('waiting_human', 'triaged', 'blocked') %}
   <form method="post" action="/p/{{ p.name }}/{{ item.kind }}/{{ item.number }}/approve">
