@@ -55,3 +55,12 @@ def test_staff_chip_states_and_links(client, fresh_db):
     b = _member_status("Beth", runs, lambda r: r["agent"] == "Beth")
     assert b["state"] == "failed" and "tests failed" in b["detail"]
     assert f"/run/{rid}" in client.get("/").text  # Malcolm is on-roster
+
+
+def test_directions_visible_after_tell(client, fresh_db):
+    r = client.post("/p/may/tell", data={"text": "Focus on bugs this week"},
+                    follow_redirects=False)
+    assert r.status_code == 303
+    html = client.get("/p/may").text
+    assert "Focus on bugs this week" in html
+    assert "directions-list" in html

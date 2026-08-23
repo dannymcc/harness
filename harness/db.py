@@ -549,6 +549,14 @@ def add_direction(project: str, text: str, item_key: str = "") -> None:
     log_event(f"Operator direction: {text[:120]}", project=project)
 
 
+def recent_directions(project: str, limit: int = 3):
+    with conn() as c:
+        return c.execute(
+            "SELECT * FROM questions WHERE project = ? "
+            "AND question = '(standing direction)' "
+            "ORDER BY id DESC LIMIT ?", (project, limit)).fetchall()
+
+
 def answers_for(project: str, item_key: str):
     with conn() as c:
         return c.execute(

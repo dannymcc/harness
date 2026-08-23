@@ -109,6 +109,13 @@
     <input name="text" placeholder="Direct the team…" required>
     <button class="primary">Send</button>
   </form>
+  <ul class="events directions" id="directions-list">
+    {% for d in directions %}
+    <li><span class="ts">{{ d.created_at }}</span> {{ d.answer }}</li>
+    {% endfor %}
+  </ul>
+  <p class="hint">Directions are delivered into {{ p.lead_name }}'s next plan
+  and Harry's next stand-up.</p>
 </section>
 
 {% if lead_report %}

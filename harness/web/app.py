@@ -254,6 +254,7 @@ def project_page(request: Request, name: str):
         desk_notes=db.latest_report("notes", name),
         security_report=db.latest_report("security", name),
         security_pending=db.get_setting(f"security_requested.{name}") == "1",
+        directions=db.recent_directions(name),
         questions=_enrich_questions(db.open_questions(name)),
         policies=db.all_policies(name),
         runs=runs[:15],

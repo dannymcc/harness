@@ -18,7 +18,18 @@ document.addEventListener("submit", async (e) => {
 
     const textInput = form.querySelector('input[name="text"]');
     if (textInput) {
-      // "Direct the team" style form: clear and confirm in place.
+      // "Direct the team" style form: confirm in place and show the
+      // direction in the standing list immediately.
+      const list = document.getElementById("directions-list");
+      if (list && textInput.value && !form.querySelector('input[name="item_key"]')) {
+        const li = document.createElement("li");
+        const ts = document.createElement("span");
+        ts.className = "ts";
+        ts.textContent = "just now";
+        li.append(ts, " " + textInput.value);
+        list.prepend(li);
+        while (list.children.length > 3) list.lastChild.remove();
+      }
       textInput.value = "";
       const btn = submitter || buttons[0];
       if (btn) {
