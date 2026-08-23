@@ -4,6 +4,45 @@ All notable changes to Harness are recorded here. The format is
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project
 follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.6.0] - 2026-08-23
+
+### Added
+
+- **Item threads.** Every issue and PR now has one running conversation —
+  Ruth's findings and plan, Harry's rulings, the operator's directions, the
+  engineer's notes and test results. Each agent that touches the item reads
+  the whole thread before starting and appends to it as it goes, so context
+  hands over intact rather than living in scattered columns. The thread is
+  shown on the item page.
+- **The section talks while it works.** Every agent session gets two
+  in-process tools: `ask_harry`, which files a question and returns Harry's
+  ruling inside the same run (escalating to the operator only where he
+  would), and `note`, which appends to the item thread. Agents are still
+  barred from the network and GitHub; both tools are deterministic code on
+  the harness side.
+- **Steer a running agent.** The run page has a "Tell <agent>" box while a
+  run is live; the message is delivered into the conversation on the next
+  turn, echoed into the console and mirrored to the item thread. Stop now
+  interrupts the session cleanly rather than abandoning it.
+- **Reproduction tests from triage.** When Ruth finds a fixable bug she
+  writes a test that fails on the current code. The harness places it in
+  the engineer's worktree, proves it fails before the fix, and tells the
+  engineer to make it pass without weakening it.
+- **Daily budget governor.** A per-desk `daily_budget_usd` policy (default
+  $30) stops a desk starting new agent work once it has spent that much in
+  24 hours — the guard that makes "run until the board is clear" safe to
+  leave unattended.
+- Optional sandbox/env isolation hook for agent sessions.
+
+### Changed
+
+- Agent sessions run on the SDK client rather than one-shot `query`, which
+  is what makes steering and interruption possible.
+- The idle poll is now 5 minutes (was 30) and a desk with work it can carry
+  on with re-wakes in seconds, so the section keeps going without anyone's
+  click. A wake with nothing new runs no agents.
+- Operator answers and directions on an item are recorded in its thread.
+
 ## [0.5.0] - 2026-08-23
 
 ### Added
