@@ -1,0 +1,38 @@
+# Changelog
+
+All notable changes to Harness are recorded here. The format is
+[Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project
+follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
+
+## [0.2.0] - 2026-08-23
+
+### Added
+
+- **Release now** on the project page cuts a release without waiting for the
+  batch thresholds — including when the only changes on dev landed outside
+  the harness, which previously did nothing at all.
+- **Merge now** on an unreviewed pull request, for when you already know the
+  answer and do not need Ruth's. The harness still merges it onto dev in its
+  own clone and runs the suite before landing it, and still refuses drafts.
+- Projects running `cut_release: auto` are marked as such on the overview and
+  the project page, so hands-off repos are visible at a glance.
+
+### Fixed
+
+- The live console showed nothing for the whole of a run, under the words
+  "Streaming — output appears as the agent works", which read as a stalled
+  agent. A run's `log_path`, `turns` and `cost_usd` were only written when it
+  finished, so the tail endpoint reported `live: false` and the poller gave
+  up. Progress is recorded as it happens now.
+- An auto release sat in `proposed` while it was being finalised, so the GUI
+  offered a Merge & tag button for a release already on its way out; a click
+  would have tried to merge a merged PR. It is marked `merging` first.
+- An approved PR was merged on the strength of a test run from review time,
+  which may have been several dev commits earlier. Every merge now re-runs
+  the suite against the actual merge result.
+- An auto release no longer counts toward the "needs your decision" tally on
+  the overview, because it does not need one.
+
+## [0.1.0] - 2026-08-22
+
+First tagged release.
