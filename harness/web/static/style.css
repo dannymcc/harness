@@ -104,6 +104,11 @@ h2 a { letter-spacing: .14em; }
   display: block; color: var(--text);
 }
 .cards .card { margin-bottom: 0; }
+/* The card is one big link, so the release control has to live beside it
+   rather than inside it — a form nested in an anchor is not valid markup. */
+.project-slot { display: flex; flex-direction: column; gap: .4rem; }
+.project-slot > .card { flex: 1; }
+.slot-action button { width: 100%; }
 a.card { transition: border-color .12s ease; }
 a.card:hover { border-color: var(--accent); text-decoration: none; }
 .accent-border { border-color: var(--accent); }

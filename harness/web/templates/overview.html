@@ -96,6 +96,7 @@
 
 <div class="cards">
 {% for c in cards %}
+  <div class="project-slot">
   <a class="card project-card {% if not c.project.enabled %}dim{% endif %}" href="/p/{{ c.project.name }}">
     <h2>{{ c.project.name }}</h2>
     <p class="repo">{{ c.project.repo }}</p>
@@ -104,11 +105,19 @@
       {% if c.queued %}<span class="pill ok">{{ c.queued }} queued for release</span>{% endif %}
       {% if c.release %}<span class="pill accent">release v{{ c.release.version }} {{ 'going out' if c.release_auto else 'proposed' }}</span>{% endif %}
       {% if c.release_auto %}<span class="pill ok">auto release</span>{% endif %}
+      {% if c.release_pending %}<span class="pill accent">release requested</span>{% endif %}
       {% if not c.waiting and not c.queued and not c.release %}<span class="pill">all quiet</span>{% endif %}
     </div>
     {% if c.lead_report %}<p class="report-snippet clamp3"><b>{{ c.project.lead_name }}:</b> {{ c.lead_report.content[:300] }}</p>{% endif %}
     <p class="cost">{{ c.cost|money }} spent</p>
   </a>
+  {% if not c.release and not c.release_pending %}
+  <form class="slot-action" method="post"
+        action="/p/{{ c.project.name }}/release/request">
+    <button title="Cut a release now, whatever the batch thresholds say">
+      Release now</button></form>
+  {% endif %}
+  </div>
 {% endfor %}
 {% if not cards %}
   <div class="card"><p>No harnesses yet. <a href="/add">Add the first one</a>.</p></div>
