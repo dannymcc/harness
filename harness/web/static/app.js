@@ -26,9 +26,13 @@ document.addEventListener("submit", async (e) => {
         const ts = document.createElement("span");
         ts.className = "ts";
         ts.textContent = "just now";
-        li.append(ts, " " + textInput.value);
+        const rep = document.createElement("div");
+        rep.className = "direction-reply pending";
+        rep.textContent = "Harry is on it…";
+        li.append(ts, " " + textInput.value, rep);
         list.prepend(li);
         while (list.children.length > 3) list.lastChild.remove();
+        pollDirections(list);
       }
       textInput.value = "";
       const btn = submitter || buttons[0];
@@ -158,4 +162,47 @@ document.addEventListener("DOMContentLoaded", () => {
   }
   pre.scrollTop = pre.scrollHeight;
   tick();
+});
+
+
+// Poll for Harry's acknowledgements while any direction is pending.
+let directionsPoller = null;
+function pollDirections(list) {
+  if (directionsPoller) return;
+  const project = list.dataset.project;
+  let tries = 0;
+  directionsPoller = setInterval(async () => {
+    tries += 1;
+    try {
+      const res = await fetch(`/p/${project}/directions.json`);
+      if (!res.ok) return;
+      const j = await res.json();
+      const pending = j.directions.some((d) => d.pending);
+      list.replaceChildren(...j.directions.map((d) => {
+        const li = document.createElement("li");
+        const ts = document.createElement("span");
+        ts.className = "ts";
+        ts.textContent = d.ts;
+        li.append(ts, " " + d.text);
+        const rep = document.createElement("div");
+        rep.className = "direction-reply" + (d.pending ? " pending" : "");
+        if (d.pending) rep.textContent = "Harry is on it…";
+        else if (d.reply) { const b = document.createElement("b");
+          b.textContent = "Harry: "; rep.append(b, d.reply); }
+        if (d.pending || d.reply) li.append(rep);
+        return li;
+      }));
+      if (!pending || tries > 60) {
+        clearInterval(directionsPoller);
+        directionsPoller = null;
+      }
+    } catch {}
+  }, 4000);
+}
+
+document.addEventListener("DOMContentLoaded", () => {
+  const list = document.getElementById("directions-list");
+  if (list && list.querySelector(".direction-reply.pending")) {
+    pollDirections(list);
+  }
 });

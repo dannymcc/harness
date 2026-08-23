@@ -317,13 +317,16 @@ async def merge_pr_item(project, item) -> None:
 # --- release flow -----------------------------------------------------------
 
 def _release_due(project) -> list:
-    """Queued items, if the batch thresholds say a release is due."""
+    """Queued items, if thresholds (or an operator request) say it's time."""
     name = project["name"]
     queued = db.items_by_status(name, "queued")
     if not queued:
         return []
     if db.open_release(name):
         return []
+    if db.get_setting(f"release_requested.{name}") == "1":
+        db.set_setting(f"release_requested.{name}", "")
+        return queued
     min_changes = int(db.policy(name, "release_min_changes"))
     max_age_days = float(db.policy(name, "release_max_age_days"))
     if len(queued) >= min_changes:
@@ -832,3 +835,85 @@ async def run_security_review(project) -> None:
                      f"({f['location']})", "warn", project=name)
     db.log_event(f"Security review complete: {len(out.get('findings', []))} "
                  f"finding(s), {len(serious)} serious", project=name)
+
+
+# --- operator directives -----------------------------------------------------
+
+def _apply_directive_actions(project, actions: list) -> list[str]:
+    """Deterministically execute Harry's directive actions. Every action is
+    something the GUI could already do — no new privileges."""
+    name = project["name"]
+    done = []
+    for a in actions or []:
+        act = a.get("action")
+        try:
+            if act in ("approve_item", "reject_item", "hold_item", "retry_item"):
+                kind, num = a.get("kind"), a.get("number")
+                if not (kind and num and db.get_item(name, kind, num)):
+                    continue
+                status = {"approve_item": "approved", "reject_item": "rejected",
+                          "hold_item": "waiting_human",
+                          "retry_item": "approved"}[act]
+                fields = {"status": status}
+                if act == "retry_item":
+                    fields.update(error="", session_id="")
+                db.update_item(name, kind, num, **fields)
+                done.append(f"{act} {kind}#{num}")
+            elif act in ("hire", "stand_down", "reinstate"):
+                if a.get("name"):
+                    _apply_staffing([{"project": name, "action": act,
+                                      "name": a["name"],
+                                      "reason": "operator directive"}])
+                    done.append(f"{act} {a['name']}")
+            elif act == "security_review":
+                db.set_setting(f"security_requested.{name}", "1")
+                done.append("security review queued")
+            elif act == "propose_release":
+                db.set_setting(f"release_requested.{name}", "1")
+                done.append("release proposal queued")
+            elif act == "set_policy":
+                if a.get("key") in config.POLICY_DEFAULTS and a.get("value"):
+                    db.set_policy(name, a["key"], a["value"].strip())
+                    done.append(f"policy {a['key']}={a['value'].strip()}")
+            elif act == "tell_desk":
+                if a.get("text"):
+                    prev = db.get_setting(f"directives.{name}", "")
+                    db.set_setting(f"directives.{name}",
+                                   (prev + "\n- " if prev else "- ")
+                                   + a["text"].strip()[:400])
+                    done.append("tasked the lead")
+            elif act == "answer_question":
+                if a.get("question_id") and a.get("text"):
+                    db.answer_question(a["question_id"], a["text"].strip(),
+                                       by="Harry")
+                    done.append(f"answered q{a['question_id']}")
+        except Exception as e:
+            db.log_event(f"Directive action {act} failed: {e}", "warn",
+                         project=name)
+    for d in done:
+        db.log_event(f"Directive: {d}", project=name)
+    return done
+
+
+async def process_directives() -> None:
+    """Turn pending operator directions into actions, promptly."""
+    for q in db.pending_directives():
+        project = db.get_project(q["project"])
+        if not project:
+            db.resolve_directive(q["id"], "project no longer exists")
+            continue
+        try:
+            res = await agents.execute_directive(
+                project, q["question"], q["item_key"], _state_digest(project))
+        except AgentStalled:
+            return  # stays pending; retried when limits clear
+        if not res["ok"]:
+            db.log_event(f"Directive processing failed: {res['error'][:120]}",
+                         "warn", project=q["project"])
+            continue  # stays pending for the next wake
+        out = res["output"]
+        done = _apply_directive_actions(project, out.get("actions", []))
+        reply = out.get("reply", "").strip() or             ("Done: " + ", ".join(done) if done else "Noted.")
+        db.resolve_directive(q["id"], reply)
+        db.log_event(f"Harry actioned the direction: {reply[:140]}",
+                     project=q["project"])

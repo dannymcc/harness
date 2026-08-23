@@ -95,3 +95,44 @@ def test_fix_failures_retry_then_breaker(fresh_db, may):
     fresh_db.finish_run(rid2, False, 0.1, 1, "transport crash again")
     assert pipeline._breaker_tripped(may, item) is True
     assert fresh_db.get_item("may", "issue", 20)["status"] == "waiting_human"
+
+
+def test_directive_actions_executor(fresh_db, may):
+    from harness import pipeline
+    fresh_db.upsert_item("may", "issue", 30, "t", "a", "open", "x")
+    fresh_db.update_item("may", "issue", 30, status="waiting_human")
+    fresh_db.upsert_item("may", "issue", 31, "t2", "a", "open", "x")
+    fresh_db.update_item("may", "issue", 31, status="queued",
+                         queued_at=fresh_db.now())
+    fresh_db.ask_question("may", "Ruth", "", "Which way?")
+    qid = fresh_db.open_questions("may")[0]["id"]
+    done = pipeline._apply_directive_actions(may, [
+        {"action": "approve_item", "kind": "issue", "number": 30},
+        {"action": "hire", "name": "Erin"},
+        {"action": "security_review"},
+        {"action": "propose_release"},
+        {"action": "set_policy", "key": "merge_prs", "value": "auto"},
+        {"action": "set_policy", "key": "bogus", "value": "x"},
+        {"action": "tell_desk", "text": "Prioritise the API work"},
+        {"action": "answer_question", "question_id": qid, "text": "This way"},
+        {"action": "approve_item", "kind": "issue", "number": 999},
+    ])
+    assert fresh_db.get_item("may", "issue", 30)["status"] == "approved"
+    assert "Erin" in fresh_db.staff_get("may")["extra"]
+    assert fresh_db.get_setting("security_requested.may") == "1"
+    assert pipeline._release_due(may)  # operator request forces it
+    assert fresh_db.policy("may", "merge_prs") == "auto"
+    assert fresh_db.policy("may", "fix_issues") == "auto"  # bogus key ignored
+    assert "Prioritise the API work" in fresh_db.get_setting("directives.may")
+    assert fresh_db.answers_for("may", "")[0]["answered_by"] == "Harry"
+    assert len(done) == 7  # two invalid actions skipped
+
+
+def test_directive_lifecycle(fresh_db, may):
+    fresh_db.add_direction("may", "Hold everything until Monday")
+    pend = fresh_db.pending_directives("may")
+    assert len(pend) == 1 and pend[0]["question"] == "Hold everything until Monday"
+    fresh_db.resolve_directive(pend[0]["id"], "Held the queue; nothing lands before Monday.")
+    assert not fresh_db.pending_directives("may")
+    d = fresh_db.recent_directions("may")[0]
+    assert d["answer"].startswith("Held the queue")

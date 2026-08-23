@@ -403,3 +403,6 @@ a.agent-chip { text-decoration: none; }
 a.agent-chip:hover { border-color: var(--accent); text-decoration: none; }
 .agent-chip.restarted { border-style: dashed; color: var(--dim); }
 .agent-chip.restarted b { color: var(--dim); }
+
+.direction-reply { margin: .25rem 0 0 1.1rem; font-size: .86rem; }
+.direction-reply.pending { color: var(--dim); font-style: italic; }

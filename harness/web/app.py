@@ -375,6 +375,16 @@ def dismiss_question(name: str, qid: int):
                             status_code=303)
 
 
+@app.get("/p/{name}/directions.json")
+def directions_json(name: str):
+    from fastapi.responses import JSONResponse
+    rows = db.recent_directions(name)
+    return JSONResponse({"directions": [
+        {"id": r["id"], "text": r["question"], "reply": r["answer"],
+         "pending": r["status"] == "directive", "ts": r["created_at"]}
+        for r in rows]})
+
+
 @app.post("/p/{name}/tell")
 def tell_team(name: str, text: str = Form(...), item_key: str = Form("")):
     if db.get_project(name):

@@ -742,6 +742,78 @@ digest above.
         prompt=prompt, cwd=cwd, schema=PLAN_SCHEMA, readonly=True)
 
 
+DIRECTIVE_SCHEMA = {
+    "type": "object",
+    "additionalProperties": False,
+    "required": ["reply", "actions", "summary"],
+    "properties": {
+        "summary": {"type": "string"},
+        "reply": {"type": "string",
+                  "description": "Brief acknowledgement to the operator: what you did and anything you couldn't do."},
+        "actions": {
+            "type": "array",
+            "maxItems": 10,
+            "items": {
+                "type": "object",
+                "additionalProperties": False,
+                "required": ["action"],
+                "properties": {
+                    "action": {"type": "string",
+                               "enum": ["approve_item", "reject_item",
+                                        "hold_item", "retry_item",
+                                        "hire", "stand_down", "reinstate",
+                                        "security_review", "propose_release",
+                                        "set_policy", "tell_desk",
+                                        "answer_question"]},
+                    "kind": {"type": "string", "enum": ["issue", "pr"]},
+                    "number": {"type": "integer"},
+                    "name": {"type": "string",
+                             "description": "Engineer name for staffing actions."},
+                    "key": {"type": "string",
+                            "description": "Policy key for set_policy."},
+                    "value": {"type": "string"},
+                    "question_id": {"type": "integer"},
+                    "text": {"type": "string",
+                             "description": "For tell_desk (instruction to the lead) or answer_question."},
+                },
+            },
+        },
+    },
+}
+
+
+async def execute_directive(project, directive_text: str, item_key: str,
+                            state_digest: str) -> dict:
+    prompt = f"""You are Harry, head of section. The operator has just issued
+a direction for the {project['repo']} desk through the dashboard. Turn it
+into concrete actions NOW using the actions list — you have the authority.
+
+The direction{f" (about {item_key})" if item_key else ""}:
+{directive_text}
+
+Current desk state:
+{state_digest}
+
+Available actions: approve_item / reject_item / hold_item / retry_item
+(kind+number); hire / stand_down / reinstate (name); security_review;
+propose_release (batches whatever is queued now); set_policy (key+value —
+keys: fix_issues, merge_prs, merge_dependabot, post_comments, cut_release,
+release_min_changes, release_max_age_days, active_hours; values auto/approve
+or numbers/hours as appropriate); tell_desk (text — an instruction the team
+lead must action in their next plan, for anything needing real engineering
+work or judgement); answer_question (question_id+text, for open questions
+the direction resolves).
+
+Rules: execute what the operator asked, don't re-litigate it; use tell_desk
+for work you cannot do with the other actions; if part of the direction is
+impossible or ambiguous, say so plainly in the reply. The reply should read
+like a competent deputy reporting back in one or two sentences."""
+    return await run_agent(
+        project_name=project["name"], role="cto",
+        item_key=item_key or "", task="directive",
+        prompt=prompt, cwd=None, schema=DIRECTIVE_SCHEMA, readonly=True)
+
+
 # --- CTO ---------------------------------------------------------------------
 
 async def standup(digest: str) -> dict:

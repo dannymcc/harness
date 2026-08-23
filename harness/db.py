@@ -535,25 +535,45 @@ def recent_answers(project: str, limit: int = 8):
 
 
 def add_direction(project: str, text: str, item_key: str = "") -> None:
-    """A standing direction from the operator — stored as a pre-answered question so
-    it flows into prompts exactly like answered questions do."""
+    """An operator direction: pending until Harry turns it into actions.
+
+    The direction text is the question; Harry's acknowledgement becomes the
+    answer, after which it flows into prompt digests like any ruling."""
     text = text.strip()
     if not text:
         return
     with conn() as c:
         c.execute(
             "INSERT INTO questions (project, asked_by, item_key, question, "
-            "status, answer, answered_by, created_at, answered_at) VALUES "
-            "(?, 'operator', ?, '(standing direction)', 'answered', ?, 'operator', ?, ?)",
-            (project, item_key, text, now(), now()))
+            "status, answer, answered_by, created_at) VALUES "
+            "(?, 'operator', ?, ?, 'directive', '', '', ?)",
+            (project, item_key, text, now()))
     log_event(f"Operator direction: {text[:120]}", project=project)
+
+
+def pending_directives(project: str | None = None):
+    q = "SELECT * FROM questions WHERE status = 'directive' ORDER BY id"
+    with conn() as c:
+        if project is None:
+            return c.execute(q).fetchall()
+        return c.execute(q.replace("WHERE", "WHERE project = ? AND"),
+                         (project,)).fetchall()
+
+
+def resolve_directive(qid: int, reply: str) -> None:
+    with conn() as c:
+        c.execute(
+            "UPDATE questions SET status = 'answered', answered_by = 'Harry', "
+            "answer = ?, answered_at = ? WHERE id = ? AND status = 'directive'",
+            (reply.strip()[:1500], now(), qid))
 
 
 def recent_directions(project: str, limit: int = 3):
     with conn() as c:
         return c.execute(
             "SELECT * FROM questions WHERE project = ? "
-            "AND question = '(standing direction)' "
+            "AND asked_by = 'operator' "
+            "AND status IN ('directive', 'answered') "
             "ORDER BY id DESC LIMIT ?", (project, limit)).fetchall()
 
 

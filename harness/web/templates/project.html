@@ -109,13 +109,18 @@
     <input name="text" placeholder="Direct the team…" required>
     <button class="primary">Send</button>
   </form>
-  <ul class="events directions" id="directions-list">
+  <ul class="events directions" id="directions-list" data-project="{{ p.name }}">
     {% for d in directions %}
-    <li><span class="ts">{{ d.created_at }}</span> {{ d.answer }}</li>
+    <li><span class="ts">{{ d.created_at }}</span> {{ d.question }}
+      {% if d.status == 'directive' %}
+      <div class="direction-reply pending">Harry is on it…</div>
+      {% elif d.answer %}
+      <div class="direction-reply"><b>Harry:</b> {{ d.answer }}</div>
+      {% endif %}</li>
     {% endfor %}
   </ul>
-  <p class="hint">Directions are delivered into {{ p.lead_name }}'s next plan
-  and Harry's next stand-up.</p>
+  <p class="hint">Harry actions directions within moments; his reply appears
+  here.</p>
 </section>
 
 {% if lead_report %}

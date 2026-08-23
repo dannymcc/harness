@@ -45,6 +45,7 @@ def _loop() -> None:
                 raise _Maintenance()
             force = db.get_setting("force_cycle") == "1"
             db.set_setting("force_cycle", "")
+            asyncio.run(pipeline.process_directives())
             if housekeeping.due():
                 asyncio.run(housekeeping.run(allow_agent=not db.paused_until()))
             # Stand-up has its own clock and runs BEFORE the sweep, so a
