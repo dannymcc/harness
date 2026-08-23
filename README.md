@@ -156,7 +156,10 @@ defaults match a Flask-style project (`config.py`, pytest). Setup and test
 commands run in a deliberately bare environment — `PATH`, locale, `TERM`,
 a scratch `HOME`/`TMPDIR`, and nothing else — because on a community PR they
 are the contributor's code. A suite that needs its own variables (a private
-package index, say) has to set them itself.
+package index, say) has to set them itself. The test command doubles as the
+one command the triage and review agents are allowed to run — they read text
+from the internet, so their shell is an allowlist of that command plus
+read-only `git` (see [SECURITY.md](SECURITY.md)).
 
 Costs shown in the GUI are the SDK's API-equivalent estimates (`≈US$`) — on
 a subscription plan nothing is billed per token; read them as a burn meter.

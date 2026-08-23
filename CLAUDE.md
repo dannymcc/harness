@@ -19,6 +19,11 @@
   un-escalated questions in front of the operator as if they were theirs.
 - Agent sessions must keep `disallowed_tools` blocking `git push`, `gh`, and
   network tools. Prompts alone are not a security boundary.
+- Sessions are built through `agents.build_options`. Readonly roles (triage,
+  review, planning, security) must not get bare `Bash` — only the allowlist
+  from `_bash_rules`, and no session may see `GH_TOKEN`/`GITHUB_TOKEN`.
+  Untrusted GitHub text goes through `_fenced` before it reaches a prompt.
+  `tests/test_agent_safety.py` guards all three.
 - The harness re-runs tests itself before pushing or merging anything.
   Never trust an agent's claim that tests pass.
 - The GUI has no auth: it must stay tailnet-only. Don't add features that
