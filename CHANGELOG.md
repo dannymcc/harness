@@ -4,6 +4,35 @@ All notable changes to Harness are recorded here. The format is
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project
 follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.7.0] - 2026-08-23
+
+Less talking, more landing. Yesterday's numbers: 62% of spend was the section
+talking to itself (plans, triage, stand-up) and seven restarts orphaned 30
+runs. This release goes at both.
+
+### Added
+
+- **Graceful drain on SIGTERM.** A deploy, `docker compose down` or a
+  watchtower update no longer kills agents mid-run. The first SIGTERM asks
+  the worker to finish what is in flight and start nothing new (`run_agent`
+  refuses with the same "pause, resume later" path as API limits), keeps
+  the GUI up with a banner, and exits once drained or after
+  `HARNESS_DRAIN_TIMEOUT_S` (default 25 minutes). A second SIGTERM exits
+  at once. The compose file sets `stop_grace_period: 30m` to match; give
+  watchtower `WATCHTOWER_TIMEOUT=30m`.
+- `HARNESS_TRIAGE_MODEL` (default `claude-sonnet-5`): Ruth's triage and PR
+  review run on a mid-tier model. The reproduction test is proven against
+  the code either way and the engineer on the main model has the final say.
+
+### Changed
+
+- **Leads plan only when the desk actually changes.** "Backlog exceeds
+  engineers" re-planned every sweep, because a retry, a failed attempt or a
+  restart requeue bumps `updated_at`; it now fires only when an approved
+  item appears that the lead has not ordered before. A forced cycle (Run
+  now, an approval, an answer) no longer makes every lead re-plan — it syncs
+  and starts ready work.
+
 ## [0.6.1] - 2026-08-23
 
 ### Fixed
