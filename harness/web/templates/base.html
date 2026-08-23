@@ -21,9 +21,9 @@
   <a class="brand" href="/">Harness</a>
   <div class="navlinks">
     {% for pr in projects %}
-      <a href="/p/{{ pr.name }}" {% if not pr.enabled %}class="dim"{% endif %}>{{ pr.name }}</a>
+      <a href="/p/{{ pr.name }}"{% if not pr.enabled %} class="dim"{% endif %}{% if pr.name == active_project %} aria-current="page"{% endif %}>{{ pr.name }}</a>
     {% endfor %}
-    <a href="/add">+ add</a>
+    <a class="nav-add" href="/add" aria-label="Add a project" title="Add a project">+</a>
   </div>
   {% if who %}<span class="who">{{ who }}</span>{% endif %}
   <form method="post" action="/theme" class="theme-toggle">

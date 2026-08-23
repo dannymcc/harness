@@ -4,6 +4,27 @@ All notable changes to Harness are recorded here. The format is
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project
 follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.5.0] - 2026-08-23
+
+### Added
+
+- The nav now marks the project you are looking at (#3). The link carries
+  `aria-current="page"` and accent styling, worked out once when the page is
+  rendered, so it holds on the project board, its settings, an item and a run
+  page alike — a run with no project of its own highlights nothing. A disabled
+  project still reads as dim while it is the one in view.
+
+### Changed
+
+- The **+ add** control in the nav is now a plain **+** icon (#3), with an
+  `aria-label` and a hover title so it still announces itself, sized to a 44px
+  tap target. On a narrow phone the nav was mostly taken up by the word "add".
+- The README's install steps say "click **+** in the nav" to match.
+- The screenshots in the README and on the site are hand-made and now trail
+  the app twice over: they show the dark palette, which stopped being the
+  default in 0.4.0, and the old **+ add** control. There is no screenshot
+  tooling in the repo to regenerate them from.
+
 ## [0.4.0] - 2026-08-23
 
 ### Added
