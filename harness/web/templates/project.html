@@ -10,7 +10,7 @@
 <section class="card accent-border">
   <h2>Danny-in-the-loop ({{ questions|length }})</h2>
   {% for q in questions %}
-  <div class="question">
+  <div class="question {{ q.status }}">
     <p><b>{{ q.asked_by }}</b>
        {% if q.status == 'escalated' %}<span class="pill accent">escalated by Harry</span>
        {% else %}<span class="pill">with Harry</span>{% endif %}
