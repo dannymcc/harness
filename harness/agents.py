@@ -47,13 +47,15 @@ Ground rules, non-negotiable:
   a wrong "success" is far worse than a "needs a human".
 - British English, plain and understated, in anything user-facing.
 - Never invent facts about the project. Read the code before concluding.
-- Every schema has an optional question_for_human field. Use it when you
-  need a decision you cannot make yourself. It goes to Harry first, who
-  either decides or escalates to " + config.OPERATOR + ", the project operator. One short, specific
-  question; empty string otherwise. When the answer is a choice between
-  clear alternatives, also fill question_options with up to 3 short options
-  — they become one-tap buttons on the operator's phone. Never re-ask something
-  already listed as waiting.
+- Every schema has an optional question_for_human field. It is for
+  decisions genuinely outside your remit — not for how to do your own job.
+  Anything in it goes to Harry, head of section, who rules within minutes;
+  he escalates to the operator only product direction, breaking changes and
+  consequences outside the codebase. Prefer deciding: make the sensible
+  call, state it in your summary, and carry on. When you do ask: one short,
+  specific question; empty string otherwise. When the answer is a choice
+  between clear alternatives, also fill question_options with up to 3 short
+  options. Never re-ask something already listed as waiting or decided.
 """
 
 
@@ -302,6 +304,21 @@ PLAN_SCHEMA = {
                              "description": "Optional: up to 3 short answer choices when the question has discrete options."},
         "memory_note": {"type": "string",
                         "description": "Optional: one line worth remembering for future work on this project, else empty."},
+        "new_issues": {
+            "type": "array",
+            "maxItems": 3,
+            "description": "Optional: tracking issues to open on the repo for work that has no issue yet (directives, maintenance you have decided to do). They enter the normal triage and fix flow.",
+            "items": {
+                "type": "object",
+                "additionalProperties": False,
+                "required": ["title", "body"],
+                "properties": {
+                    "title": {"type": "string"},
+                    "body": {"type": "string",
+                             "description": "A good issue: concrete, scoped, with acceptance criteria."},
+                },
+            },
+        },
         "tasks": {
             "type": "array",
             "maxItems": 10,
@@ -457,8 +474,10 @@ def _danny_answers(project_name: str, item_key: str) -> str:
     rows = db.answers_for(project_name, item_key)
     if not rows:
         return ""
-    lines = ["\nThe operator has already decided the following about this item:"]
-    lines += [f"- Q: {r['question'][:150]}\n  A: {r['answer'][:250]}" for r in rows]
+    lines = ["\nDecisions already made about this item (binding — do not re-ask):"]
+    lines += [f"- Q ({r['asked_by']}): {r['question'][:150]}\n"
+              f"  A ({r['answered_by'] or 'operator'}): {r['answer'][:250]}"
+              for r in rows]
     return "\n".join(lines) + "\n"
 
 
@@ -716,6 +735,14 @@ would make. Do not modify any files.
 # --- Team Lead ---------------------------------------------------------------
 
 async def lead_plan(project, state_digest: str, cwd: str) -> dict:
+    fix_policy = {
+        "auto": "auto — Ruth's fixable verdict starts a fix without waiting for you",
+        "lead": "lead — nothing is fixed until you plan it",
+        "approve": ("approve — the operator must click approve before an "
+                    "engineer starts, so a fix task on a triaged item does "
+                    "nothing until they do; it shows as awaiting them — do "
+                    "not re-plan it every cycle"),
+    }.get(db.policy(project["name"], "fix_issues"), "")
     prompt = f"""You are {project['lead_name']}, the team lead running the
 {project['repo']} desk in the Harness harness. Your officers can: triage
 issues (Ruth), fix triaged bugs (Malcolm), and review PRs (Ruth). The
@@ -728,6 +755,16 @@ If the state digest lists directives from Harry, address them first — your
 plan is how they get actioned. If your backlog exceeds what the desk's
 engineers can clear, request staffing from Harry via staffing_request; he
 weighs it against spend.
+
+You own execution on this desk. Ordering, which item gets an engineer,
+whether a triage plan is sound enough to act on, what to file, how to
+sequence work — those are your calls; make them and say so in your summary
+rather than asking. A "fix" task on a triaged item is your sign-off: it puts
+an engineer on it this cycle{" (this desk's fix policy is " + fix_policy + ")" if fix_policy else ""}. Directives or maintenance that need
+engineering but have no issue yet: open tracking issues via new_issues
+(title + a properly scoped body) — they are created on GitHub and enter
+triage like any other issue. Ask Harry (question_for_human) only for what
+is genuinely above the desk: product direction, spend, breaking changes.
 
 Produce this cycle's work plan: up to 10 tasks, most important first.
 Prioritise: regressions and data-loss bugs, then community PRs waiting on
@@ -801,6 +838,7 @@ Available actions: approve_item / reject_item / hold_item / retry_item
 propose_release (batches whatever is queued now); set_policy (key+value —
 keys: fix_issues, merge_prs, merge_dependabot, post_comments, cut_release,
 release_min_changes, release_max_age_days, active_hours; values auto/approve
+— fix_issues also takes lead, meaning the team lead's plan is the sign-off —
 or numbers/hours as appropriate); tell_desk (text — an instruction the team
 lead must action in their next plan, for anything needing real engineering
 work or judgement); answer_question (question_id+text, for open questions
@@ -817,6 +855,63 @@ like a competent deputy reporting back in one or two sentences."""
         project_name=project["name"], role="cto",
         item_key=item_key or "", task="directive",
         prompt=prompt, cwd=None, schema=DIRECTIVE_SCHEMA, readonly=True)
+
+
+# --- Harry's rulings ---------------------------------------------------------
+
+RULINGS_SCHEMA = {
+    "type": "object",
+    "additionalProperties": False,
+    "required": ["decisions", "summary"],
+    "properties": {
+        "summary": {"type": "string"},
+        "memory_note": {"type": "string",
+                        "description": "Optional: one line worth remembering, else empty."},
+        "decisions": {
+            "type": "array",
+            "description": "One ruling per open question in the inbox.",
+            "items": {
+                "type": "object",
+                "additionalProperties": False,
+                "required": ["question_id", "action", "answer"],
+                "properties": {
+                    "question_id": {"type": "integer"},
+                    "action": {"type": "string",
+                               "enum": ["answer", "escalate"]},
+                    "answer": {"type": "string",
+                               "description": "Your ruling, in one or two plain sentences the asker can act on (empty when escalating)."},
+                },
+            },
+        },
+    },
+}
+
+
+async def rule_questions(inbox_digest: str, context_digest: str) -> dict:
+    """Harry rules on whatever his people have asked, promptly."""
+    prompt = f"""You are Harry, head of section. Your people have asked you
+the questions below. Rule on each one now — they are waiting on you to get
+on with their work.
+
+{inbox_digest}
+
+Context on the desks involved:
+{context_digest}
+
+Answer yourself whenever the question is within the section's remit:
+engineering judgement, priorities, process, naming, scope of a fix, which
+of two reasonable approaches to take, what to do about branch or repo
+hygiene. Be decisive and concrete — an answer the asker can act on without
+coming back. Where the options given are sensible, pick one. Escalate to
+{config.OPERATOR}, the operator, only what is genuinely theirs: product
+direction, breaking changes, spend beyond the ordinary, anything with
+consequences outside the codebase. If a question shows the asker is stuck
+on something you cannot unblock with an answer, say so in your ruling and
+what they should do instead."""
+    return await run_agent(
+        project_name="", role="cto",
+        item_key="", task="rulings",
+        prompt=prompt, cwd=None, schema=RULINGS_SCHEMA, readonly=True)
 
 
 # --- CTO ---------------------------------------------------------------------

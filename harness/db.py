@@ -468,10 +468,11 @@ def latest_report(scope: str, project: str = ""):
 # --- operator-in-the-loop -------------------------------------------------------
 
 def ask_question(project: str, asked_by: str, item_key: str,
-                 question: str, options: list[str] | None = None) -> None:
+                 question: str, options: list[str] | None = None) -> int | None:
+    """File a question. Returns its id, or None if empty/duplicate."""
     question = question.strip()
     if not question:
-        return
+        return None
     opts = json.dumps([o.strip()[:80] for o in (options or []) if o.strip()][:3])
     with conn() as c:
         dup = c.execute(
@@ -479,14 +480,15 @@ def ask_question(project: str, asked_by: str, item_key: str,
             "('open', 'escalated') AND question = ?",
             (project, question)).fetchone()
         if dup:
-            return
-        c.execute(
+            return None
+        cur = c.execute(
             "INSERT INTO questions (project, asked_by, item_key, question, "
             "options, created_at) VALUES (?, ?, ?, ?, ?, ?)",
             (project, asked_by, item_key, question,
              opts if opts != "[]" else "", now()))
-    log_event(f"{asked_by} has a question for the operator: {question[:120]}",
-              "warn", project=project)
+        qid = cur.lastrowid
+    log_event(f"{asked_by} has asked Harry: {question[:120]}", project=project)
+    return qid
 
 
 def answer_question(qid: int, answer: str, by: str = "operator") -> None:
@@ -500,6 +502,12 @@ def escalate_question(qid: int) -> None:
     with conn() as c:
         c.execute("UPDATE questions SET status = 'escalated' WHERE id = ? "
                   "AND status = 'open'", (qid,))
+
+
+def question(qid: int):
+    with conn() as c:
+        return c.execute("SELECT * FROM questions WHERE id = ?",
+                         (qid,)).fetchone()
 
 
 def dismiss_question(qid: int) -> None:
@@ -520,11 +528,25 @@ def open_questions(project: str | None = None):
                          (project,)).fetchall()
 
 
-def harry_inbox():
+def harry_inbox(project: str | None = None):
+    """Questions sitting with Harry (not yet ruled on or escalated)."""
+    q = ("SELECT * FROM questions WHERE status = 'open' "
+         "AND asked_by != 'Harry' ORDER BY id")
     with conn() as c:
-        return c.execute(
-            "SELECT * FROM questions WHERE status = 'open' ORDER BY id"
-        ).fetchall()
+        if project is None:
+            return c.execute(q).fetchall()
+        return c.execute(q.replace("WHERE", "WHERE project = ? AND"),
+                         (project,)).fetchall()
+
+
+def escalated_questions(project: str | None = None):
+    """Questions Harry has escalated — the only ones that need the operator."""
+    q = "SELECT * FROM questions WHERE status = 'escalated' ORDER BY id DESC"
+    with conn() as c:
+        if project is None:
+            return c.execute(q).fetchall()
+        return c.execute(q.replace("WHERE", "WHERE project = ? AND"),
+                         (project,)).fetchall()
 
 
 def recent_answers(project: str, limit: int = 8):

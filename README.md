@@ -53,11 +53,13 @@ told to behave.
   README check, credited notes, then a dev → main PR. You approve; it
   merges, tags, and publishes the GitHub Release. One fix never means one
   release.
-- **Operator-in-the-loop** — any agent can ask you a question when a
-  decision isn't theirs. Harry rules on what's in the section's remit;
+- **Operator-in-the-loop** — any agent can ask a question when a decision
+  isn't theirs. It goes to Harry, who rules within minutes on anything in
+  the section's remit (engineering judgement, priorities, process); only
   what he escalates reaches your queue and (via ntfy) your phone — with
   one-tap answer buttons when the question has discrete options. You can
-  also issue standing directions, desk-wide or per-item.
+  also issue standing directions, desk-wide or per-item, and Harry turns
+  them into actions straight away.
 - **Mid-run control** — live transcripts for every agent run, a Stop
   button, and a circuit breaker that holds any item after two consecutive
   failures instead of burning retries.
@@ -110,7 +112,8 @@ Per-repo policies, editable live in Settings:
 
 | Policy | Default |
 |---|---|
-| fix issues (and land on dev) | auto |
+| fix issues (and land on dev) | auto (also: `lead` — the team lead's plan is the sign-off) |
+| leads open tracking issues from their plan | auto (capped at 3/day per desk; `off` to disable) |
 | merge community PRs | approve |
 | merge dependabot PRs | approve |
 | post comments/reviews publicly | approve |

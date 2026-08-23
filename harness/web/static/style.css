@@ -410,3 +410,7 @@ a.agent-chip:hover { border-color: var(--accent); text-decoration: none; }
 .compose { margin: 0; }
 .compose select { flex: 0 1 auto; }
 .compose input { flex: 1 1 200px; }
+
+.question details.override { margin-top: .2rem; }
+.question details.override summary { font-size: .8rem; color: var(--dim); cursor: pointer; }
+.question details.override[open] summary { margin-bottom: .4rem; }

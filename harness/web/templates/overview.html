@@ -19,14 +19,17 @@
   feed and on the project page.</p>
 </section>
 
-{% if questions %}
+{% set escalated = questions|selectattr('status', 'equalto', 'escalated')|list %}
+{% set with_harry = questions|rejectattr('status', 'equalto', 'escalated')|list %}
+{% if escalated %}
 <section class="card accent-border">
-  <h2>{{ operator|title }}-in-the-loop ({{ questions|length }})</h2>
-  {% for q in questions %}
+  <h2>Needs your decision ({{ escalated|length }})</h2>
+  <p class="hint">Harry has ruled these are yours — product direction, breaking
+  changes, or consequences outside the code. Everything else he settles himself.</p>
+  {% for q in escalated %}
   <div class="question {{ q.status }}">
     <p><b>{{ q.asked_by }}</b>
-       {% if q.status == 'escalated' %}<span class="pill accent">escalated by Harry</span>
-       {% else %}<span class="pill">with Harry</span>{% endif %}
+       <span class="pill accent">escalated by Harry</span>
        {% if q.project %}<a href="/p/{{ q.project }}" class="pill">{{ q.project }}</a>{% endif %}
        {% if q.item_key %}{% if q.item_url %}<a class="pill" href="{{ q.item_url }}">{{ q.item_key }}</a>{% else %}<span class="pill">{{ q.item_key }}</span>{% endif %}{% endif %}
        <span class="ts">{{ q.created_at }}</span></p>
@@ -49,6 +52,43 @@
       <button formaction="/p/{{ q.project or '-' }}/question/{{ q.id }}/dismiss"
               formnovalidate class="danger">Dismiss</button>
     </form>
+  </div>
+  {% endfor %}
+</section>
+{% endif %}
+
+{% if with_harry %}
+<section class="card">
+  <h2>With Harry ({{ with_harry|length }})</h2>
+  <p class="hint">Questions from the section waiting on Harry's ruling. He
+  answers within the next few minutes of worker time; nothing needed from you.</p>
+  {% for q in with_harry %}
+  <div class="question {{ q.status }}">
+    <p><b>{{ q.asked_by }}</b>
+       <span class="pill">with Harry</span>
+       {% if q.project %}<a href="/p/{{ q.project }}" class="pill">{{ q.project }}</a>{% endif %}
+       {% if q.item_key %}{% if q.item_url %}<a class="pill" href="{{ q.item_url }}">{{ q.item_key }}</a>{% else %}<span class="pill">{{ q.item_key }}</span>{% endif %}{% endif %}
+       <span class="ts">{{ q.created_at }}</span></p>
+    <p class="q-text">{{ q.question }}</p>
+    <details class="override">
+      <summary>Answer it yourself instead</summary>
+      {% if q.options_list %}
+      <div class="actions option-row">
+        {% for opt in q.options_list %}
+        <form method="post" action="/p/{{ q.project or '-' }}/question/{{ q.id }}/answer" class="answer-form option-form">
+          <input type="hidden" name="answer" value="{{ opt }}">
+          <button>{{ opt }}</button>
+        </form>
+        {% endfor %}
+      </div>
+      {% endif %}
+      <form method="post" action="/p/{{ q.project or '-' }}/question/{{ q.id }}/answer" class="answer-form">
+        <input name="answer" placeholder="Your decision…" required>
+        <button>Answer</button>
+        <button formaction="/p/{{ q.project or '-' }}/question/{{ q.id }}/dismiss"
+                formnovalidate class="danger">Dismiss</button>
+      </form>
+    </details>
   </div>
   {% endfor %}
 </section>

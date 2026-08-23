@@ -148,3 +148,178 @@ def test_directive_create_issue(fresh_db, may, monkeypatch):
     ])
     assert done == ["opened issue#41: Add CSV export"]
     assert fresh_db.get_item("may", "issue", 41)["status"] == "new"
+
+
+def test_lead_policy_work_ready_guard(fresh_db, may):
+    """Under the lead policy, a freshly triaged issue asks the worker to
+    come back soon; once the lead has planned and left it, it does not."""
+    from harness import pipeline
+    fresh_db.set_policy("may", "fix_issues", "lead")
+    fresh_db.upsert_item("may", "issue", 3, "bug", "a", "open", "x")
+    fresh_db.update_item("may", "issue", 3, status="triaged")
+    assert pipeline.work_ready(may) is True
+    # the lead has since been asked to plan (whether or not the plan worked)
+    fresh_db.set_setting("last_plan_at.may", "2999-01-01T00:00:00Z")
+    assert pipeline.work_ready(may) is False
+    fresh_db.set_setting("last_plan_at.may", "")
+    # a retry (approved with an error) must not spin the worker either
+    fresh_db.update_item("may", "issue", 3, status="approved", error="tests failed")
+    assert pipeline.work_ready(may) is False
+    fresh_db.update_item("may", "issue", 3, status="approved", error="")
+    assert pipeline.work_ready(may) is True
+    fresh_db.set_policy("may", "fix_issues", "approve")
+    fresh_db.update_item("may", "issue", 3, status="triaged")
+    assert pipeline.work_ready(may) is False
+    # and never outside active hours
+    fresh_db.set_policy("may", "fix_issues", "auto")
+    fresh_db.update_item("may", "issue", 3, status="approved", error="")
+    assert pipeline.work_ready(may) is True
+    import datetime as dt
+    from unittest.mock import patch
+
+    class At3(dt.datetime):
+        @classmethod
+        def now(cls, tz=None):
+            return dt.datetime(2026, 1, 1, 3, 0, tzinfo=tz)
+    fresh_db.set_policy("may", "active_hours", "08-23")
+    with patch.object(pipeline, "datetime", At3):
+        assert pipeline.work_ready(may) is False
+
+
+def test_harrys_own_question_goes_to_operator(fresh_db, may):
+    from harness import pipeline
+    pipeline._file_question("", "Harry", "", {"question_for_human": "Budget?"})
+    assert fresh_db.harry_inbox() == []
+    assert [q["question"] for q in fresh_db.escalated_questions()] == ["Budget?"]
+
+
+def test_undecided_questions_escalate_after_two_passes(fresh_db, may, monkeypatch):
+    import asyncio
+    from harness import pipeline, agents
+    fresh_db.ask_question("may", "Ruth", "", "Dodged")
+    async def dodge(inbox, ctx):
+        return {"ok": True, "error": "", "output": {"summary": "", "decisions": []}}
+    monkeypatch.setattr(agents, "rule_questions", dodge)
+    monkeypatch.setattr(pipeline.notify, "send", lambda *a, **k: None)
+    asyncio.run(pipeline.process_questions("may"))
+    assert len(fresh_db.harry_inbox("may")) == 1
+    asyncio.run(pipeline.process_questions("may"))
+    assert fresh_db.harry_inbox("may") == []
+    assert len(fresh_db.escalated_questions("may")) == 1
+
+
+def test_harry_rules_promptly_and_escalates(fresh_db, may, monkeypatch):
+    """Questions go to Harry first; his rulings bind the asker, and only
+    escalations reach the operator."""
+    import asyncio
+    from harness import pipeline, agents
+    fresh_db.ask_question("may", "Ruth", "issue#1", "Link or plain text?",
+                          options=["Link", "Plain"])
+    fresh_db.ask_question("may", "Adam", "", "Drop the old API?")
+    ids = {q["question"]: q["id"] for q in fresh_db.harry_inbox("may")}
+    seen = {}
+
+    async def fake_rule(inbox, ctx):
+        seen["inbox"] = inbox
+        return {"ok": True, "error": "", "output": {
+            "summary": "ruled",
+            "decisions": [
+                {"question_id": ids["Link or plain text?"], "action": "answer",
+                 "answer": "Plain text."},
+                {"question_id": ids["Drop the old API?"], "action": "escalate",
+                 "answer": ""}]}}
+    monkeypatch.setattr(agents, "rule_questions", fake_rule)
+    monkeypatch.setattr(pipeline.notify, "send", lambda *a, **k: None)
+    asyncio.run(pipeline.process_questions("may"))
+    assert "Link or plain text?" in seen["inbox"]
+    assert fresh_db.harry_inbox("may") == []
+    esc = fresh_db.escalated_questions("may")
+    assert [q["question"] for q in esc] == ["Drop the old API?"]
+    ans = fresh_db.answers_for("may", "issue#1")
+    assert ans[0]["answer"] == "Plain text." and ans[0]["answered_by"] == "Harry"
+    # the engineer's prompt carries Harry's ruling as binding
+    assert "Plain text." in agents._danny_answers("may", "issue#1")
+    # nothing to do → no agent call
+    async def boom(*a, **k):
+        raise AssertionError("should not be called")
+    monkeypatch.setattr(agents, "rule_questions", boom)
+    asyncio.run(pipeline.process_questions("may"))
+
+
+def test_lead_opens_tracking_issues(fresh_db, may, monkeypatch):
+    from harness import pipeline, gh
+    created = []
+    monkeypatch.setattr(gh, "create_issue",
+                        lambda repo, t, b: created.append((t, b)) or 41 + len(created))
+    pipeline._open_tracking_issues(may, [
+        {"title": "Cover policy gates with tests", "body": "Acceptance: ..."},
+        {"title": "", "body": "no title"},
+        {"title": "Cover policy gates with tests", "body": "dup"}])
+    assert len(created) == 1
+    item = fresh_db.get_item("may", "issue", 42)
+    assert item["status"] == "new" and item["author"] == may["lead_name"]
+    # a second plan naming the same open issue does not file it again
+    pipeline._open_tracking_issues(may, [
+        {"title": "Cover policy-gates with tests!", "body": "again"}])
+    assert len(created) == 1
+    # the daily cap holds, and the policy can switch it off entirely
+    pipeline._open_tracking_issues(may, [
+        {"title": f"Issue {n}", "body": "b"} for n in range(3)])
+    assert len(created) == 3   # 1 + 2 more = cap of 3 per day
+    fresh_db.set_policy("may", "file_issues", "off")
+    pipeline._open_tracking_issues(may, [{"title": "Nope", "body": "b"}])
+    assert len(created) == 3
+
+
+def test_reconcile_branches_logs(fresh_db, may, monkeypatch):
+    from harness import pipeline, repo
+    monkeypatch.setattr(repo, "reconcile_dev", lambda p: "fast-forwarded")
+    pipeline._reconcile_branches(may)
+    assert any("fast-forwarded" in e["message"]
+               for e in fresh_db.recent_events(5, "may"))
+    monkeypatch.setattr(repo, "reconcile_dev", lambda p: "diverged")
+    pipeline._reconcile_branches(may)
+    assert any("diverged" in e["message"] and e["level"] == "warn"
+               for e in fresh_db.recent_events(5, "may"))
+
+
+def test_quick_cycle_runs_fresh_approvals_only(fresh_db, may, monkeypatch):
+    """A quick re-wake must not retry an errored approval (that would
+    skip the plan forever and burn an engineer run a minute)."""
+    import asyncio
+    from harness import pipeline, repo, agents
+    fresh_db.upsert_item("may", "issue", 3, "retry", "a", "open", "x")
+    fresh_db.update_item("may", "issue", 3, status="approved", error="tests failed")
+    fresh_db.upsert_item("may", "issue", 7, "fresh", "a", "open", "x")
+    fresh_db.update_item("may", "issue", 7, status="triaged")
+    fixed, planned = [], []
+    monkeypatch.setattr(pipeline, "sync", lambda p: None)
+    monkeypatch.setattr(pipeline, "_reconcile_branches", lambda p: None)
+    monkeypatch.setattr(repo, "clean_checkout", lambda p, b: "/tmp")
+    monkeypatch.setattr(repo, "ensure_test_env", lambda p: None)
+    async def fake_fix(project, item, persona="Malcolm"):
+        fixed.append(item["number"])
+    async def fake_plan(project, digest, cwd):
+        planned.append(1)
+        return {"ok": True, "output": {"summary": "s", "tasks": [
+            {"action": "fix", "kind": "issue", "number": 7, "reason": "go"}]}}
+    monkeypatch.setattr(pipeline, "fix_item", fake_fix)
+    monkeypatch.setattr(agents, "lead_plan", fake_plan)
+    async def no_q(name=None):
+        return None
+    monkeypatch.setattr(pipeline, "process_questions", no_q)
+    fresh_db.set_policy("may", "fix_issues", "lead")
+    asyncio.run(pipeline.run_cycle(may, quick=True))
+    assert planned == [1]            # nothing fresh approved → plan runs
+    assert fixed == [7]              # the lead's fix is the sign-off; #3 waits
+    assert fresh_db.get_item("may", "issue", 7)["status"] in ("approved", "working")
+    # normal cycle, one engineer: the fresh approval goes first; the retry
+    # takes the next wave rather than starving it
+    fixed.clear()
+    fresh_db.update_item("may", "issue", 7, status="approved", error="")
+    asyncio.run(pipeline.run_cycle(may))
+    assert fixed == [7]
+    fixed.clear()
+    fresh_db.update_item("may", "issue", 7, status="queued")
+    asyncio.run(pipeline.run_cycle(may))
+    assert fixed == [3]

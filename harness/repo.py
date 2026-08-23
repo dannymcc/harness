@@ -109,6 +109,9 @@ def add_worktree(project, branch: str) -> Path:
         if wt.exists():
             run(["git", "worktree", "remove", "--force", str(wt)], cwd=d,
                 check=False)
+        # A deleted worktree dir leaves a stale registration that makes
+        # `worktree add -B` refuse forever; prune first.
+        run(["git", "worktree", "prune"], cwd=d, check=False)
         wt.parent.mkdir(parents=True, exist_ok=True)
         run(["git", "worktree", "add", "-B", branch, str(wt),
              f"origin/{project['dev_branch']}"], cwd=d)
@@ -174,6 +177,32 @@ def push_worktree_to_dev(project, wt: Path,
                 continue  # dev moved again while we were testing; go around
             return False, f"push failed: {e}"
     return False, f"could not land on {dev} after 3 attempts"
+
+
+def reconcile_dev(project) -> str:
+    """Keep dev from going stale behind main.
+
+    Operators commit and release straight to main sometimes; every agent
+    branch is cut from dev, so a stale dev means fixes built on old code and
+    release PRs that re-propose what already shipped. If origin/dev is a
+    strict ancestor of origin/main, fast-forward it (a pure pointer move —
+    no content decision). Returns "" (nothing to do), "fast-forwarded", or
+    "diverged" (both moved; needs a human merge — never guessed at here).
+    """
+    dev, main = project["dev_branch"], project["main_branch"]
+    d = ensure_clone(project)
+    run(["git", "fetch", "origin", "--prune"], cwd=d)
+    behind = run(["git", "rev-list", "--count",
+                  f"origin/{dev}..origin/{main}"], cwd=d).strip()
+    ahead = run(["git", "rev-list", "--count",
+                 f"origin/{main}..origin/{dev}"], cwd=d).strip()
+    if behind == "0":
+        return ""
+    if ahead != "0":
+        return "diverged"
+    run(["git", "push", "origin", f"origin/{main}:refs/heads/{dev}"], cwd=d)
+    run(["git", "fetch", "origin", "--prune"], cwd=d)
+    return "fast-forwarded"
 
 
 def fetch_pr_branch(project, number: int, branch: str) -> Path:

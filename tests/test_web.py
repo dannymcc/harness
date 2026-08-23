@@ -91,3 +91,17 @@ def test_overview_composer_files_direction(client, fresh_db):
     pend = fresh_db.pending_directives("may")
     assert pend and pend[0]["question"] == "Add CSV export to reports"
     assert "Send to Harry" in client.get("/").text
+
+
+def test_only_escalations_get_primary_buttons(client, fresh_db):
+    fresh_db.ask_question("may", "Ruth", "", "Harrys call", options=["A", "B"])
+    fresh_db.ask_question("may", "Adam", "", "Dannys call", options=["X", "Y"])
+    adam = [q for q in fresh_db.harry_inbox("may") if q["asked_by"] == "Adam"][0]
+    fresh_db.escalate_question(adam["id"])
+    html = client.get("/p/may").text
+    assert "Needs your decision (1)" in html and "With Harry (1)" in html
+    # the operator's own question is answerable at a tap; Harry's is tucked away
+    assert html.index("Dannys call") < html.index("Harrys call")
+    assert "Answer it yourself instead" in html
+    html = client.get("/").text
+    assert "Needs your decision (1)" in html

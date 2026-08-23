@@ -81,7 +81,14 @@ PROJECT_DEFAULTS = {
 
 POLICY_DEFAULTS = {
     # Investigate valid bug reports, fix on a branch, run tests, push to dev.
+    # "auto"    – Ruth's fixable verdict starts the fix straight away
+    # "lead"    – the team lead's plan is the sign-off (the section decides;
+    #             the operator's gate moves to the release)
+    # "approve" – the operator clicks approve before an engineer starts
     "fix_issues": "auto",
+    # Team leads may open tracking issues on the repo from their plan
+    # (capped per day). "off" disables it.
+    "file_issues": "auto",
     # Merge community PRs (always validated + tested locally first).
     "merge_prs": "approve",
     # Dependabot dependency bumps (tested locally before merge).
