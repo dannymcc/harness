@@ -60,23 +60,56 @@ document.addEventListener("submit", async (e) => {
 });
 
 
-// Render ISO-UTC timestamps in the viewer's own locale and timezone.
-// Server keeps emitting ISO strings; presentation is the browser's job.
+// Timestamps: relative ("4 min ago"), live-updating, with the absolute
+// local time on hover. Server keeps emitting ISO-UTC; presentation is the
+// browser's job.
+const ISO_RE = /\b\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z\b/g;
+
+function relativeTime(d, now) {
+  const s = Math.floor((now - d) / 1000);
+  if (s < 45) return "just now";
+  if (s < 90) return "1 min ago";
+  const m = Math.floor(s / 60);
+  if (m < 60) return `${m} min ago`;
+  const h = Math.floor(m / 60);
+  if (h < 24) return h === 1 ? "1 hr ago" : `${h} hrs ago`;
+  const days = Math.floor(h / 24);
+  if (days < 7) return days === 1 ? "yesterday" : `${days} days ago`;
+  const opts = { day: "numeric", month: "short" };
+  if (d.getFullYear() !== new Date(now).getFullYear()) opts.year = "numeric";
+  return d.toLocaleDateString(undefined, opts);
+}
+
 document.addEventListener("DOMContentLoaded", () => {
-  const ISO = /\b\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z\b/g;
-  const now = new Date();
-  const fmt = (d) => {
-    const opts = { day: "numeric", month: "short",
-                   hour: "2-digit", minute: "2-digit" };
-    if (d.getFullYear() !== now.getFullYear()) opts.year = "numeric";
-    return d.toLocaleString(undefined, opts);
-  };
+  const now = Date.now();
   document.querySelectorAll(".ts").forEach((el) => {
-    for (const node of el.childNodes) {
-      if (node.nodeType === Node.TEXT_NODE && ISO.test(node.nodeValue)) {
-        node.nodeValue = node.nodeValue.replace(ISO, (m) => fmt(new Date(m)));
+    for (const node of [...el.childNodes]) {
+      if (node.nodeType !== Node.TEXT_NODE || !ISO_RE.test(node.nodeValue)) {
+        ISO_RE.lastIndex = 0;
+        continue;
       }
-      ISO.lastIndex = 0;
+      ISO_RE.lastIndex = 0;
+      const frag = document.createDocumentFragment();
+      let last = 0;
+      for (const m of node.nodeValue.matchAll(ISO_RE)) {
+        frag.append(node.nodeValue.slice(last, m.index));
+        const d = new Date(m[0]);
+        const t = document.createElement("time");
+        t.dateTime = m[0];
+        t.title = d.toLocaleString();
+        t.textContent = relativeTime(d, now);
+        frag.append(t);
+        last = m.index + m[0].length;
+      }
+      frag.append(node.nodeValue.slice(last));
+      node.replaceWith(frag);
     }
   });
+
+  setInterval(() => {
+    const tick = Date.now();
+    document.querySelectorAll(".ts time[datetime]").forEach((t) => {
+      t.textContent = relativeTime(new Date(t.dateTime), tick);
+    });
+  }, 30_000);
 });
