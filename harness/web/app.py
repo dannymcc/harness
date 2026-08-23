@@ -78,7 +78,7 @@ def overview(request: Request):
         })
     return render(request, "overview.html",
                   cards=cards,
-                  questions=db.open_questions(),
+                  questions=_enrich_questions(db.open_questions()),
                   staff=_staff_board(),
                   cto_report=db.latest_report("cto"),
                   events=db.recent_events(20),
@@ -117,6 +117,23 @@ def _member_status(display, runs, match):
     return {"name": display, "state": "ok" if last["ok"] else "failed",
             "detail": (f"{last['task']} {last['item_key']}".strip()
                        + f" · {last['started_at']}")}
+
+
+def _enrich_questions(qs):
+    """Attach the referenced item's title/link so Danny can see what a
+    question is actually about."""
+    out = []
+    for q in qs:
+        d = dict(q)
+        d["item_title"], d["item_url"] = "", ""
+        if q["item_key"] and "#" in q["item_key"] and q["project"]:
+            kind, _, num = q["item_key"].partition("#")
+            item = db.get_item(q["project"], kind, int(num))
+            if item:
+                d["item_title"] = item["title"]
+                d["item_url"] = f"/p/{q['project']}/{kind}/{num}"
+        out.append(d)
+    return out
 
 
 def _staff_board():
@@ -205,7 +222,7 @@ def project_page(request: Request, name: str):
         desk_notes=db.latest_report("notes", name),
         security_report=db.latest_report("security", name),
         security_pending=db.get_setting(f"security_requested.{name}") == "1",
-        questions=db.open_questions(name),
+        questions=_enrich_questions(db.open_questions(name)),
         policies=db.all_policies(name),
         runs=runs[:15],
         events=db.recent_events(30, name),

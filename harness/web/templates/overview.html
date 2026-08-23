@@ -13,8 +13,10 @@
        {% if q.status == 'escalated' %}<span class="pill accent">escalated by Harry</span>
        {% else %}<span class="pill">with Harry</span>{% endif %}
        {% if q.project %}<a href="/p/{{ q.project }}" class="pill">{{ q.project }}</a>{% endif %}
-       {% if q.item_key %}<span class="pill">{{ q.item_key }}</span>{% endif %}
+       {% if q.item_key %}{% if q.item_url %}<a class="pill" href="{{ q.item_url }}">{{ q.item_key }}</a>{% else %}<span class="pill">{{ q.item_key }}</span>{% endif %}{% endif %}
        <span class="ts">{{ q.created_at }}</span></p>
+    {% if q.item_title %}<p class="q-context">Re: {{ q.item_title[:90] }}
+      {% if q.item_url %}— <a href="{{ q.item_url }}">details</a>{% endif %}</p>{% endif %}
     <p class="q-text">{{ q.question }}</p>
     <form method="post" action="/p/{{ q.project or '-' }}/question/{{ q.id }}/answer" class="answer-form">
       <input name="answer" placeholder="Your decision…" required>

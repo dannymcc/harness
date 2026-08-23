@@ -314,3 +314,5 @@ footer {
 /* open questions are still with Harry — muted until he escalates them */
 .question.open .q-text { color: var(--dim); }
 .question.open > p:first-child b { color: var(--dim); }
+
+.q-context { font-size: .84rem; color: var(--dim); margin: .15rem 0 0; }
