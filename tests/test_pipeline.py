@@ -502,3 +502,43 @@ def test_draft_pr_is_never_merged(fresh_db, may, monkeypatch):
     monkeypatch.setattr(gh, "merge_pr", _no)
     asyncio.run(pipeline.merge_pr_item(may, item))
     assert fresh_db.get_item("may", "pr", 10)["status"] == "waiting_human"
+
+
+def test_lead_plans_only_when_the_backlog_changes(fresh_db, may):
+    """Retries, restart requeues and failed attempts bump updated_at on
+    approved items; none of that needs the lead. New approved items do."""
+    from harness import pipeline
+    fresh_db.set_setting("last_plan_at.may", "2999-01-01T00:00:00Z")
+    for n in (1, 2, 3):
+        fresh_db.upsert_item("may", "issue", n, f"t{n}", "a", "open", "x")
+        fresh_db.update_item("may", "issue", n, status="approved")
+    assert any("ordering" in r for r in pipeline.desk_events(may))
+    # the lead planned over this backlog
+    fresh_db.set_setting("plan_backlog.may", "[1, 2, 3]")
+    assert pipeline.desk_events(may) == []
+    # a retry / requeue touches the items but does not change the backlog
+    fresh_db.update_item("may", "issue", 2, status="working")
+    fresh_db.update_item("may", "issue", 2, status="approved")
+    assert pipeline.desk_events(may) == []
+    # a genuinely new approved item does
+    fresh_db.upsert_item("may", "issue", 4, "t4", "a", "open", "x")
+    fresh_db.update_item("may", "issue", 4, status="approved")
+    assert any("ordering" in r for r in pipeline.desk_events(may))
+
+
+def test_forced_cycle_does_not_make_the_lead_plan(fresh_db, may, monkeypatch):
+    import asyncio
+    from harness import pipeline, repo, agents
+    planned = []
+    async def fake_plan(project, digest, cwd):
+        planned.append(1)
+        return {"ok": True, "output": {"summary": "", "tasks": []}}
+    monkeypatch.setattr(agents, "lead_plan", fake_plan)
+    monkeypatch.setattr(pipeline, "sync", lambda p: None)
+    monkeypatch.setattr(pipeline, "_reconcile_branches", lambda p: None)
+    monkeypatch.setattr(pipeline, "_release_due", lambda p: None)
+    monkeypatch.setattr(repo, "clean_checkout", lambda p, b: "/tmp")
+    monkeypatch.setattr(repo, "ensure_test_env", lambda p: None)
+    fresh_db.set_setting("last_plan_at.may", "2999-01-01T00:00:00Z")
+    asyncio.run(pipeline.run_cycle(may, force=True))
+    assert planned == []

@@ -648,6 +648,20 @@ def _budget_hold(project) -> bool:
     return False
 
 
+def _backlog_key(approved) -> str:
+    return json.dumps(sorted(i["number"] for i in approved))
+
+
+def _backlog_grew(name: str, approved) -> bool:
+    """True if an approved item exists that was not in the backlog the lead
+    last planned over."""
+    try:
+        seen = set(json.loads(db.get_setting(f"plan_backlog.{name}", "[]")))
+    except ValueError:
+        seen = set()
+    return any(i["number"] not in seen for i in approved)
+
+
 def desk_events(project) -> list[str]:
     """Why the lead should plan now. Empty means nothing has changed since
     the last plan that needs a lead's judgement — no plan, no cost."""
@@ -664,8 +678,12 @@ def desk_events(project) -> list[str]:
     approved = [i for i in db.items_by_status(name, "approved")
                 if i["kind"] == "issue" and not i["error"]]
     engineers = 1 + len(db.staff_get(name)["extra"])
-    if len(approved) > engineers and any(i["updated_at"] > since for i in approved):
-        reasons.append("backlog exceeds engineers — ordering needed")
+    # Ordering is a judgement call only when the backlog has *new* members
+    # since the lead last ordered it. A retry, a restart requeue or a
+    # failed attempt bumps updated_at but changes nothing the lead must
+    # decide — those used to re-plan the desk every sweep.
+    if len(approved) > engineers and _backlog_grew(name, approved):
+        reasons.append("backlog has new items beyond the engineers — ordering needed")
     open_items = [i for i in db.project_items(name) if i["gh_state"] == "open"]
     if open_items and not since:
         reasons.append("first look at this desk")
@@ -722,15 +740,18 @@ async def run_cycle(project, force: bool = False) -> None:
             await process_questions(name)
 
         # 2. The lead plans when there is something to decide.
+        # A forced cycle ("Run cycle now", an approval, an answer) syncs and
+        # starts ready work; it is not a reason for every lead to re-plan.
         reasons = desk_events(project)
-        if force and not reasons:
-            reasons = ["operator ran the desk by hand"]
         staff = db.staff_get(name)
         engineers = ["Malcolm"] + staff["extra"]
         fix_policy = db.policy(name, "fix_issues")
         if reasons:
             cwd = str(repo.clean_checkout(project, project["dev_branch"]))
             db.set_setting(f"last_plan_at.{name}", db.now())
+            db.set_setting(f"plan_backlog.{name}", _backlog_key(
+                [i for i in db.items_by_status(name, "approved")
+                 if i["kind"] == "issue" and not i["error"]]))
             digest = _state_digest(project) + \
                 "\n\nYou are planning because: " + "; ".join(reasons) + "."
             plan_res = await agents.lead_plan(project, digest, cwd)
