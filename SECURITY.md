@@ -8,6 +8,14 @@ runs on. Bind it to loopback (the shipped compose does) and reach it over a
 private network: a tailnet/VPN, an SSH tunnel, or an authenticating reverse
 proxy. Never expose it to the public internet.
 
+Because there is no session to check, every state-changing request is instead
+checked for where it came from: the app refuses any POST a browser marks as
+`cross-site` or `same-site` (`Sec-Fetch-Site`), or whose `Origin` is not this
+host, so a page on another site cannot drive the dashboard from the operator's
+browser. Clients that send neither header — the ntfy notification action
+buttons, `curl`, health checks — are deliberately still accepted; keeping them
+working is the point of checking headers rather than issuing form tokens.
+
 ## What the agents can and cannot do
 
 Agent sessions run with a restricted tool set: they can read and edit files
