@@ -119,6 +119,7 @@ def now() -> str:
 MIGRATIONS = [
     "ALTER TABLE runs ADD COLUMN agent TEXT NOT NULL DEFAULT ''",
     "ALTER TABLE questions ADD COLUMN answered_by TEXT NOT NULL DEFAULT ''",
+    "ALTER TABLE runs ADD COLUMN cancel_requested INTEGER NOT NULL DEFAULT 0",
 ]
 
 
@@ -579,3 +580,39 @@ def staff_get(project: str) -> dict:
 
 def staff_set(project: str, staff: dict) -> None:
     set_setting(f"staff.{project}", json.dumps(staff))
+
+
+# --- run control -------------------------------------------------------------
+
+def request_cancel(run_id: int) -> None:
+    with conn() as c:
+        c.execute("UPDATE runs SET cancel_requested = 1 "
+                  "WHERE id = ? AND finished_at IS NULL", (run_id,))
+
+
+def cancel_requested(run_id: int) -> bool:
+    with conn() as c:
+        row = c.execute("SELECT cancel_requested FROM runs WHERE id = ?",
+                        (run_id,)).fetchone()
+        return bool(row and row["cancel_requested"])
+
+
+def get_run(run_id: int):
+    with conn() as c:
+        return c.execute("SELECT * FROM runs WHERE id = ?", (run_id,)).fetchone()
+
+
+def consecutive_failures(project: str, item_key: str) -> int:
+    """Trailing count of failed runs for this item (cancellations count)."""
+    with conn() as c:
+        rows = c.execute(
+            "SELECT ok FROM runs WHERE project = ? AND item_key = ? "
+            "AND finished_at IS NOT NULL ORDER BY id DESC LIMIT 5",
+            (project, item_key)).fetchall()
+    n = 0
+    for r in rows:
+        if r["ok"] == 0:
+            n += 1
+        else:
+            break
+    return n

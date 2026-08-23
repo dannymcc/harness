@@ -151,8 +151,12 @@
   {% for r in runs %}
     <li class="{{ 'info' if r.ok else 'error' }}">
       <span class="ts">{{ r.started_at }}</span>
-      <span class="pill">{{ r.agent or agent_name(r.role, r.task, p.lead_name) }}</span> {{ r.task }} {{ r.item_key }}
-      {% if r.ok is not none %}{{ '✓' if r.ok else '✗' }}{% endif %}
+      <span class="pill">{{ r.agent or agent_name(r.role, r.task, p.lead_name) }}</span>
+      <a href="/run/{{ r.id }}">{{ r.task }} {{ r.item_key }}</a>
+      {% if r.finished_at is none %}<span class="pill warn">live</span>
+        <form method="post" action="/run/{{ r.id }}/stop" style="display:inline">
+          <button class="danger">Stop</button></form>
+      {% elif r.ok is not none %}{{ '✓' if r.ok else '✗' }}{% endif %}
       {{ r.cost_usd|money }} {{ r.summary[:120] }}</li>
   {% endfor %}
   </ul>

@@ -14,6 +14,22 @@ from .agents import AgentStalled
 from .gh import CmdError
 
 MAX_AGENT_TASKS_PER_CYCLE = 5
+BREAKER_THRESHOLD = 2  # consecutive failed runs before an item is held
+
+
+def _breaker_tripped(project, item) -> bool:
+    """Hold items that keep failing instead of burning retries forever."""
+    name = project["name"]
+    key = f"{item['kind']}#{item['number']}"
+    if db.consecutive_failures(name, key) >= BREAKER_THRESHOLD:
+        db.update_item(name, item["kind"], item["number"],
+                       status="waiting_human",
+                       error=f"circuit breaker: {BREAKER_THRESHOLD} consecutive "
+                             "failed runs — held for a human decision")
+        db.log_event(f"Circuit breaker held {key} after repeated failures",
+                     "warn", project=name)
+        return True
+    return False
 
 
 def _file_question(project_name: str, asked_by: str, item_key: str,
@@ -64,6 +80,8 @@ def sync(project) -> None:
 
 async def triage_item(project, item) -> None:
     name = project["name"]
+    if _breaker_tripped(project, item):
+        return
     detail = gh.issue_detail(project["repo"], item["number"])
     with repo.clone_lock(project):
         cwd = str(repo.clean_checkout(project, project["dev_branch"]))
@@ -97,6 +115,8 @@ async def triage_item(project, item) -> None:
 
 async def fix_item(project, item, persona: str = "Malcolm") -> None:
     name = project["name"]
+    if _breaker_tripped(project, item):
+        return
     detail = gh.issue_detail(project["repo"], item["number"])
     branch = f"harness/issue-{item['number']}"
     cwd = str(repo.create_branch(project, branch, project["dev_branch"]))
@@ -164,6 +184,8 @@ async def fix_item(project, item, persona: str = "Malcolm") -> None:
 
 async def review_item(project, item) -> None:
     name = project["name"]
+    if _breaker_tripped(project, item):
+        return
     detail = gh.pr_detail(project["repo"], item["number"])
     if detail.get("isDraft"):
         db.update_item(name, "pr", item["number"], status="waiting_human",

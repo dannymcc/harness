@@ -350,6 +350,39 @@ def request_security_review(name: str):
     return RedirectResponse(f"/p/{name}", status_code=303)
 
 
+@app.get("/run/{run_id}")
+def run_page(request: Request, run_id: int):
+    run = db.get_run(run_id)
+    if not run:
+        return RedirectResponse("/", status_code=303)
+    transcript = ""
+    if run["log_path"]:
+        try:
+            from pathlib import Path as _P
+            text = _P(run["log_path"]).read_text(errors="replace")
+            transcript = text[-60_000:]
+        except OSError:
+            transcript = "(transcript file not available)"
+    lead = ""
+    if run["project"]:
+        proj = db.get_project(run["project"])
+        lead = proj["lead_name"] if proj else ""
+    return render(request, "run.html", run=run, transcript=transcript,
+                  display_name=run["agent"] or agent_name(run["role"],
+                                                          run["task"], lead))
+
+
+@app.post("/run/{run_id}/stop")
+def stop_run(run_id: int):
+    run = db.get_run(run_id)
+    if run and run["finished_at"] is None:
+        db.request_cancel(run_id)
+        db.log_event(f"Danny pressed Stop on run {run_id} "
+                     f"({run['task']} {run['item_key']})", "warn",
+                     project=run["project"])
+    return RedirectResponse(f"/run/{run_id}", status_code=303)
+
+
 @app.post("/run-now")
 def run_now():
     worker.trigger()

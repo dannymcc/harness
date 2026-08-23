@@ -1,0 +1,30 @@
+{% extends "base.html" %}
+{% block title %}Run {{ run.id }} · {{ run.task }}{% endblock %}
+{% block content %}
+
+<p><a href="{{ '/p/' + run.project if run.project else '/' }}">← back</a></p>
+<h1>Run {{ run.id }}: {{ display_name }} · {{ run.task }} {{ run.item_key }}</h1>
+<p>
+  {% if run.finished_at is none %}
+    <span class="pill warn">live</span>
+    {% if run.cancel_requested %}<span class="pill">stopping…</span>{% endif %}
+  {% elif run.ok %}<span class="pill ok">succeeded</span>
+  {% else %}<span class="pill">failed</span>{% endif %}
+  started {{ run.started_at }}
+  {% if run.finished_at %}· finished {{ run.finished_at }}{% endif %}
+  · {{ run.cost_usd|money }} · {{ run.turns }} messages · {{ run.model }}
+</p>
+{% if run.summary %}<section class="card"><h2>Summary</h2>
+  <div class="md">{{ run.summary }}</div></section>{% endif %}
+
+{% if run.finished_at is none and not run.cancel_requested %}
+<form method="post" action="/run/{{ run.id }}/stop">
+  <button class="danger">Stop this run</button></form>
+{% endif %}
+
+<section class="card"><h2>Transcript</h2>
+<pre class="diff">{{ transcript or "(empty)" }}</pre>
+<p class="hint">Reload for updates while the run is live. Showing the last
+60k characters.</p></section>
+
+{% endblock %}

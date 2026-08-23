@@ -88,6 +88,10 @@ class AgentStalled(RuntimeError):
     """API rate/usage limit hit; work is paused and will resume later."""
 
 
+class RunCancelled(RuntimeError):
+    """A human pressed Stop on this run in the GUI."""
+
+
 # --- core runner -------------------------------------------------------------
 
 async def run_agent(*, project_name: str, role: str, item_key: str, task: str,
@@ -132,6 +136,8 @@ async def run_agent(*, project_name: str, role: str, item_key: str, task: str,
             log.write(f"# {task} {item_key} ({role})\n\n{prompt}\n\n---\n\n")
             async for message in query(prompt=prompt, options=options):
                 db.touch_heartbeat()
+                if db.cancel_requested(run_id):
+                    raise RunCancelled(f"run {run_id} stopped from the GUI")
                 if isinstance(message, AssistantMessage):
                     turns += 1
                     for block in message.content:
@@ -142,6 +148,10 @@ async def run_agent(*, project_name: str, role: str, item_key: str, task: str,
                     result = message
                     session_id = getattr(message, "session_id", "") or ""
                     cost = message.total_cost_usd or 0.0
+    except RunCancelled as e:
+        db.finish_run(run_id, False, cost, turns, "stopped by Danny", str(log_path))
+        return {"ok": False, "output": None, "session_id": session_id,
+                "error": "stopped by Danny", "cancelled": True}
     except Exception as e:  # SDK/process/transport failures
         err = f"{type(e).__name__}: {e}"
         db.finish_run(run_id, False, cost, turns, err, str(log_path))
