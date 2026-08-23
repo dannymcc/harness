@@ -837,7 +837,9 @@
             <p>Every push, merge, comment and release is performed by plain code
               acting on an agent's verdict — never by the agent. Agents are blocked
               by tool policy, not just prompt, from <code>git push</code>,
-              <code>gh</code>, and anything network-facing.</p>
+              <code>gh</code>, and the web tools. Sessions that read issue and
+              pull request text — triage, review — get no general shell at all:
+              their commands are an allowlist.</p>
           </div>
           <div class="safety-item">
             <h3>Tests, always, by the harness</h3>

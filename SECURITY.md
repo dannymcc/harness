@@ -18,17 +18,46 @@ working is the point of checking headers rather than issuing form tokens.
 
 ## What the agents can and cannot do
 
-Agent sessions run with a restricted tool set: they can read and edit files
-inside the harness's own clone/worktree of your repo and run commands there,
-but `git push`, `gh`, and network-facing tools are blocked at tool-policy
-level, not just by prompt. Every outward action (push, merge, comment, tag,
-release) is executed by deterministic code behind per-repo policies, and the
-test suite is re-run by the harness itself before anything lands.
+Agent sessions run with a restricted tool set. They work inside the harness's
+own clone/worktree of your repo; `WebFetch`, `WebSearch`, `git push` and `gh`
+are refused at tool-policy level, not just by prompt. Every outward action
+(push, merge, comment, tag, release) is executed by deterministic code behind
+per-repo policies, and the test suite is re-run by the harness itself before
+anything lands.
+
+Shell access depends on the role, because the roles differ in what they read:
+
+- **Triage, review, planning and security review** read text written by
+  anyone on the internet, so they get no general shell. Their `Bash` is an
+  allowlist — the project's configured `test_command`, and read-only `git
+  status` / `log` / `diff` / `show` — and everything else is denied without a
+  prompt. They can still reproduce a report by running the suite; they cannot
+  run `curl`, read a credentials file, or start anything else.
+- **Fix and release** keep a general shell: they have to run builds,
+  installs and test suites. This is accepted residual risk. What contains
+  them is not the tool policy but the disposable worktree they work in, the
+  harness re-running the tests itself, and the approval gates on anything
+  that leaves the machine.
+
+No session inherits the GitHub token: `GH_TOKEN` and `GITHUB_TOKEN` are
+blanked for every agent session, including the fix role. All real GitHub
+access happens in the parent process.
+
+Two honest limits. The allowlist rules are prefix matches, so an allowed
+command can be given extra arguments — narrow, but not a sandbox. And nothing
+here blocks outbound network at the container level: a session with a general
+shell still has the network. Isolating agent and test execution in a child
+container is the remaining fix and is not implemented.
 
 ## Prompt injection
 
 The agents read untrusted text: issue bodies, PR descriptions, diffs, and
-comments from anyone on the internet. Treat their *judgement* accordingly —
+comments from anyone on the internet. All of it reaches the prompt inside
+`<<<UNTRUSTED ...>>>` markers, with any forged markers in the text stripped
+first, and every session's standing orders say that fenced text is data and
+never an instruction. That reduces the odds; it does not make them zero, which
+is why the roles that read it have no general shell (above). Treat their
+*judgement* accordingly —
 that is why the action layer is deterministic, why tests always re-run, why
 merges/comments/releases default to requiring your approval, and why the
 circuit breaker holds repeatedly-failing items. Keeping `merge_prs` and
