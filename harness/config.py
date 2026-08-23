@@ -27,6 +27,14 @@ MAX_BUDGET_USD_PER_RUN = float(os.environ.get("HARNESS_MAX_BUDGET_USD_PER_RUN", 
 POLL_INTERVAL_MINUTES = int(os.environ.get("HARNESS_POLL_INTERVAL_MINUTES", "30"))
 ADMIN_INTERVAL_MINUTES = int(os.environ.get("HARNESS_ADMIN_INTERVAL_MINUTES", "60"))
 
+# --- Notifications (ntfy) ---------------------------------------------------
+# Disabled unless a topic is set. On the public ntfy.sh server the topic
+# name is effectively a password — pick something unguessable.
+NTFY_URL = os.environ.get("HARNESS_NTFY_URL", "https://ntfy.sh")
+NTFY_TOPIC = os.environ.get("HARNESS_NTFY_TOPIC", "")
+# Base URL used for tap-through links in notifications.
+PUBLIC_URL = os.environ.get("HARNESS_PUBLIC_URL", "")
+
 # --- Web --------------------------------------------------------------------
 BIND_HOST = os.environ.get("HARNESS_BIND_HOST", "0.0.0.0")
 BIND_PORT = int(os.environ.get("HARNESS_BIND_PORT", "8300"))

@@ -237,6 +237,9 @@ def pause_until(ts_iso: str, reason: str) -> None:
     set_setting("paused_until", ts_iso)
     set_setting("paused_reason", reason)
     log_event(f"Agent work paused until {ts_iso}: {reason}", "warn")
+    from . import notify
+    notify.send("Agent work paused", f"Until {ts_iso}: {reason[:200]}",
+                tags="pause_button")
 
 
 def paused_until() -> str | None:

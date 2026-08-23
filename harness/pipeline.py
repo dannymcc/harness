@@ -9,7 +9,7 @@ import asyncio
 import json
 from datetime import datetime, timezone
 
-from . import agents, config, db, gh, repo
+from . import agents, config, db, gh, repo, notify
 from .agents import AgentStalled
 from .gh import CmdError
 
@@ -28,6 +28,9 @@ def _breaker_tripped(project, item) -> bool:
                              "failed runs — held for a human decision")
         db.log_event(f"Circuit breaker held {key} after repeated failures",
                      "warn", project=name)
+        notify.send(f"Held: {key} ({name})",
+                    "Two consecutive failed runs — needs your look.",
+                    tags="warning", click_path=f"/p/{name}/{item['kind']}/{item['number']}")
         return True
     return False
 
@@ -339,6 +342,11 @@ async def _propose_release_locked(project, queued) -> int | None:
     db.log_event(f"Proposed release v{version} (PR #{pr_number}, "
                  f"{len(queued)} changes)", project=name)
     db.update_release(rid, pr_number=pr_number)
+    if db.policy(name, "cut_release") != "auto":
+        notify.send(f"Release v{version} proposed ({name})",
+                    f"{len(queued)} changes batched and tested — approve to "
+                    f"merge and tag.", priority="high", tags="rocket",
+                    click_path=f"/p/{name}")
     return rid
 
 
@@ -375,6 +383,8 @@ def finalize_release(project, release) -> None:
                 except CmdError:
                     pass
     db.log_event(f"Released v{version} 🎉", project=name)
+    notify.send(f"{name} v{version} released", "Tagged and published; CI is "
+                "building the images.", tags="tada", click_path=f"/p/{name}")
 
 
 # --- cycle ------------------------------------------------------------------
@@ -652,6 +662,11 @@ def _apply_decisions(decisions: list) -> None:
             db.escalate_question(q["id"])
             db.log_event(f"Harry escalated {q['asked_by']}'s question to Danny",
                          "warn", project=q["project"])
+            notify.send(
+                f"Harry needs your decision ({q['project'] or 'section'})",
+                f"{q['asked_by']} asks: {q['question'][:300]}",
+                priority="high", tags="question",
+                click_path=f"/p/{q['project']}" if q["project"] else "/")
 
 
 def _apply_staffing(actions: list) -> None:
