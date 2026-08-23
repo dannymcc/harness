@@ -89,12 +89,9 @@
       {% if harry_line %}
         <p class="harry-line">{{ harry_line.content }}</p>
         <p class="ts">as of {{ harry_line.created_at }}</p>
-      {% elif harry_report %}
-        <p class="harry-line">{{ harry_report.content[:220] }}</p>
-        <p class="ts">from the section stand-up, {{ harry_report.created_at }}</p>
       {% else %}
-        <p class="harry-line">Awaiting the first stand-up. Harry reviews every
-        desk hourly and decides what gets escalated.</p>
+        <p class="harry-line">This desk hasn't been through a stand-up yet —
+        Harry meets hourly and will report on it then.</p>
       {% endif %}
     </div>
   </div>
