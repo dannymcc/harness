@@ -300,7 +300,17 @@ footer {
 }
 
 
-/* --- settings link + tell form --- */
-.settings-link { font-size: .8rem; margin-left: auto; float: right; }
-h1 .settings-link { font-weight: 400; }
-.tell-form { margin-top: .8rem; }
+/* --- settings link + tell form ------------------------------------------ */
+.settings-link {
+  float: right; display: inline-flex; align-items: center;
+  min-height: 44px; padding: 0 .75rem; margin-left: .5rem;
+  font: 500 .72rem var(--mono); letter-spacing: .1em; text-transform: uppercase;
+  color: var(--dim); border: 1px solid var(--border-strong); border-radius: 4px;
+}
+.settings-link:hover { color: var(--accent); border-color: var(--accent); text-decoration: none; }
+
+.tell-form { margin-top: .9rem; padding-top: .9rem; border-top: 1px dashed var(--border-strong); }
+
+/* open questions are still with Harry — muted until he escalates them */
+.question.open .q-text { color: var(--dim); }
+.question.open > p:first-child b { color: var(--dim); }
