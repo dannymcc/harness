@@ -39,6 +39,11 @@ PUBLIC_URL = os.environ.get("HARNESS_PUBLIC_URL", "")
 BIND_HOST = os.environ.get("HARNESS_BIND_HOST", "0.0.0.0")
 BIND_PORT = int(os.environ.get("HARNESS_BIND_PORT", "8300"))
 
+# --- Operator ----------------------------------------------------------------
+# The human the section answers to. Escalations, approvals and directions
+# are addressed to this name throughout the GUI and agent prompts.
+OPERATOR = os.environ.get("HARNESS_OPERATOR_NAME", "the maintainer")
+
 # --- Agent personas (Spooks) ------------------------------------------------
 # Harry runs the section. Each harness gets a senior officer as team lead;
 # the ICs are the specialists.

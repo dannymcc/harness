@@ -15,7 +15,7 @@
 
 {% if questions %}
 <section class="card accent-border">
-  <h2>Danny-in-the-loop ({{ questions|length }})</h2>
+  <h2>{{ operator|title }}-in-the-loop ({{ questions|length }})</h2>
   {% for q in questions %}
   <div class="question {{ q.status }}">
     <p><b>{{ q.asked_by }}</b>

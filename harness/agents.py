@@ -47,12 +47,12 @@ Ground rules, non-negotiable:
   a wrong "success" is far worse than a "needs a human".
 - British English, plain and understated, in anything user-facing.
 - Never invent facts about the project. Read the code before concluding.
-- Every schema has an optional question_for_danny field. Use it when you
+- Every schema has an optional question_for_human field. Use it when you
   need a decision you cannot make yourself. It goes to Harry first, who
-  either decides or escalates to Danny, the maintainer. One short, specific
+  either decides or escalates to " + config.OPERATOR + ", the project operator. One short, specific
   question; empty string otherwise. When the answer is a choice between
   clear alternatives, also fill question_options with up to 3 short options
-  — they become one-tap buttons on Danny's phone. Never re-ask something
+  — they become one-tap buttons on the operator's phone. Never re-ask something
   already listed as waiting.
 """
 
@@ -151,9 +151,9 @@ async def run_agent(*, project_name: str, role: str, item_key: str, task: str,
                     session_id = getattr(message, "session_id", "") or ""
                     cost = message.total_cost_usd or 0.0
     except RunCancelled as e:
-        db.finish_run(run_id, False, cost, turns, "stopped by Danny", str(log_path))
+        db.finish_run(run_id, False, cost, turns, "stopped by the operator", str(log_path))
         return {"ok": False, "output": None, "session_id": session_id,
-                "error": "stopped by Danny", "cancelled": True}
+                "error": "stopped by the operator", "cancelled": True}
     except Exception as e:  # SDK/process/transport failures
         err = f"{type(e).__name__}: {e}"
         db.finish_run(run_id, False, cost, turns, err, str(log_path))
@@ -203,7 +203,7 @@ TRIAGE_SCHEMA = {
                     "description": "Could an automated fix be attempted safely?"},
         "summary": {"type": "string",
                     "description": "2-3 sentences: what this is and your assessment."},
-        "question_for_danny": {"type": "string", "description": "Optional: one question needing Danny's decision, else empty."},
+        "question_for_human": {"type": "string", "description": "Optional: one question needing the operator's decision, else empty."},
         "question_options": {"type": "array", "maxItems": 3,
                              "items": {"type": "string"},
                              "description": "Optional: up to 3 short answer choices when the question has discrete options."},
@@ -223,8 +223,8 @@ FIX_SCHEMA = {
         "success": {"type": "boolean",
                     "description": "True only if the fix is complete and tests pass."},
         "summary": {"type": "string"},
-        "question_for_danny": {"type": "string",
-                               "description": "Optional: one question needing Danny's decision, else empty."},
+        "question_for_human": {"type": "string",
+                               "description": "Optional: one question needing the operator's decision, else empty."},
         "question_options": {"type": "array", "maxItems": 3,
                              "items": {"type": "string"},
                              "description": "Optional: up to 3 short answer choices when the question has discrete options."},
@@ -248,8 +248,8 @@ REVIEW_SCHEMA = {
         "valuable": {"type": "boolean",
                      "description": "Is this a worthwhile addition to the product?"},
         "summary": {"type": "string"},
-        "question_for_danny": {"type": "string",
-                               "description": "Optional: one question needing Danny's decision, else empty."},
+        "question_for_human": {"type": "string",
+                               "description": "Optional: one question needing the operator's decision, else empty."},
         "question_options": {"type": "array", "maxItems": 3,
                              "items": {"type": "string"},
                              "description": "Optional: up to 3 short answer choices when the question has discrete options."},
@@ -271,8 +271,8 @@ RELEASE_SCHEMA = {
         "notes_markdown": {"type": "string",
                            "description": "Release notes / changelog markdown."},
         "summary": {"type": "string"},
-        "question_for_danny": {"type": "string",
-                               "description": "Optional: one question needing Danny's decision, else empty."},
+        "question_for_human": {"type": "string",
+                               "description": "Optional: one question needing the operator's decision, else empty."},
         "question_options": {"type": "array", "maxItems": 3,
                              "items": {"type": "string"},
                              "description": "Optional: up to 3 short answer choices when the question has discrete options."},
@@ -290,8 +290,8 @@ PLAN_SCHEMA = {
                     "description": "Team lead's read on the project this cycle."},
         "staffing_request": {"type": "string",
                              "description": "Optional: ask Harry for staffing (e.g. 'one more engineer until the backlog clears'), else empty."},
-        "question_for_danny": {"type": "string",
-                               "description": "Optional: one question needing Danny's decision, else empty."},
+        "question_for_human": {"type": "string",
+                               "description": "Optional: one question needing the operator's decision, else empty."},
         "question_options": {"type": "array", "maxItems": 3,
                              "items": {"type": "string"},
                              "description": "Optional: up to 3 short answer choices when the question has discrete options."},
@@ -323,8 +323,8 @@ STANDUP_SCHEMA = {
                  "summary"],
     "properties": {
         "summary": {"type": "string"},
-        "question_for_danny": {"type": "string",
-                               "description": "Optional: one question needing Danny's decision, else empty."},
+        "question_for_human": {"type": "string",
+                               "description": "Optional: one question needing the operator's decision, else empty."},
         "question_options": {"type": "array", "maxItems": 3,
                              "items": {"type": "string"},
                              "description": "Optional: up to 3 short answer choices when the question has discrete options."},
@@ -416,8 +416,8 @@ CTO_SCHEMA = {
     "required": ["report_markdown", "escalations", "summary"],
     "properties": {
         "summary": {"type": "string"},
-        "question_for_danny": {"type": "string",
-                               "description": "Optional: one question needing Danny's decision, else empty."},
+        "question_for_human": {"type": "string",
+                               "description": "Optional: one question needing the operator's decision, else empty."},
         "question_options": {"type": "array", "maxItems": 3,
                              "items": {"type": "string"},
                              "description": "Optional: up to 3 short answer choices when the question has discrete options."},
@@ -452,7 +452,7 @@ def _danny_answers(project_name: str, item_key: str) -> str:
     rows = db.answers_for(project_name, item_key)
     if not rows:
         return ""
-    lines = ["\nDanny has already decided the following about this item:"]
+    lines = ["\nThe operator has already decided the following about this item:"]
     lines += [f"- Q: {r['question'][:150]}\n  A: {r['answer'][:250]}" for r in rows]
     return "\n".join(lines) + "\n"
 
@@ -599,8 +599,8 @@ NOTES_SCHEMA = {
         "notes_markdown": {"type": "string",
                            "description": "The updated rolling desk notes."},
         "summary": {"type": "string"},
-        "question_for_danny": {"type": "string",
-                               "description": "Optional: one question needing Danny's decision, else empty."},
+        "question_for_human": {"type": "string",
+                               "description": "Optional: one question needing the operator's decision, else empty."},
         "question_options": {"type": "array", "maxItems": 3,
                              "items": {"type": "string"},
                              "description": "Optional: up to 3 short answer choices when the question has discrete options."},
@@ -655,8 +655,8 @@ SECURITY_SCHEMA = {
     "required": ["report_markdown", "findings", "summary"],
     "properties": {
         "summary": {"type": "string"},
-        "question_for_danny": {"type": "string",
-                               "description": "Optional: one question needing Danny's decision, else empty."},
+        "question_for_human": {"type": "string",
+                               "description": "Optional: one question needing the operator's decision, else empty."},
         "question_options": {"type": "array", "maxItems": 3,
                              "items": {"type": "string"},
                              "description": "Optional: up to 3 short answer choices when the question has discrete options."},
@@ -759,7 +759,7 @@ a reason.
 You make the decisions. The digest lists open questions from your people,
 each with an id. Rule on each: answer it yourself when it is within the
 section's remit (engineering judgement, priorities, process). Escalate to
-Danny only what is genuinely his — product direction, breaking changes,
+the operator only what is genuinely theirs — product direction, breaking changes,
 anything with consequences outside the codebase. Your answers reach the
 team automatically.
 
@@ -772,7 +772,7 @@ they can be reinstated any time. Only make changes utilisation justifies.
 
 Run the stand-up: one line per desk on whether it's moving. Then call out
 anything genuinely stuck — an item blocked for a reason nobody is acting on,
-work waiting on the maintainer for days, repeated failures, unusual spend —
+work waiting on the operator for days, repeated failures, unusual spend —
 as blockers, each with a concrete next step. Set all_clear only if there is
 truly nothing needing attention. Be brief; this happens every hour."""
     return await run_agent(

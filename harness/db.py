@@ -465,7 +465,7 @@ def latest_report(scope: str, project: str = ""):
         ).fetchone()
 
 
-# --- Danny-in-the-loop -------------------------------------------------------
+# --- operator-in-the-loop -------------------------------------------------------
 
 def ask_question(project: str, asked_by: str, item_key: str,
                  question: str, options: list[str] | None = None) -> None:
@@ -485,11 +485,11 @@ def ask_question(project: str, asked_by: str, item_key: str,
             "options, created_at) VALUES (?, ?, ?, ?, ?, ?)",
             (project, asked_by, item_key, question,
              opts if opts != "[]" else "", now()))
-    log_event(f"{asked_by} has a question for Danny: {question[:120]}",
+    log_event(f"{asked_by} has a question for the operator: {question[:120]}",
               "warn", project=project)
 
 
-def answer_question(qid: int, answer: str, by: str = "Danny") -> None:
+def answer_question(qid: int, answer: str, by: str = "operator") -> None:
     with conn() as c:
         c.execute("UPDATE questions SET status = 'answered', answer = ?, "
                   "answered_by = ?, answered_at = ? WHERE id = ?",
@@ -509,7 +509,7 @@ def dismiss_question(qid: int) -> None:
 
 
 def open_questions(project: str | None = None):
-    """Questions still pending: escalated (for Danny) first, then those
+    """Questions still pending: escalated (for the operator) first, then those
     sitting with Harry."""
     q = ("SELECT * FROM questions WHERE status IN ('open', 'escalated') "
          "ORDER BY status = 'escalated' DESC, id DESC")
@@ -535,7 +535,7 @@ def recent_answers(project: str, limit: int = 8):
 
 
 def add_direction(project: str, text: str, item_key: str = "") -> None:
-    """A standing direction from Danny — stored as a pre-answered question so
+    """A standing direction from the operator — stored as a pre-answered question so
     it flows into prompts exactly like answered questions do."""
     text = text.strip()
     if not text:
@@ -544,9 +544,9 @@ def add_direction(project: str, text: str, item_key: str = "") -> None:
         c.execute(
             "INSERT INTO questions (project, asked_by, item_key, question, "
             "status, answer, answered_by, created_at, answered_at) VALUES "
-            "(?, 'Danny', ?, '(standing direction)', 'answered', ?, 'Danny', ?, ?)",
+            "(?, 'operator', ?, '(standing direction)', 'answered', ?, 'operator', ?, ?)",
             (project, item_key, text, now(), now()))
-    log_event(f"Danny directed the team: {text[:120]}", project=project)
+    log_event(f"Operator direction: {text[:120]}", project=project)
 
 
 def answers_for(project: str, item_key: str):

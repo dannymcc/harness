@@ -1,7 +1,7 @@
 """Harness GUI.
 
 Server-rendered, mobile-first, no build step. Meant to sit behind
-`tailscale serve` on hyperion — no auth of its own, so never expose it with
+`tailscale serve` (or similar) — no auth of its own, so never expose it with
 Funnel. If Tailscale identity headers are present they are shown in the nav.
 """
 from pathlib import Path
@@ -47,6 +47,7 @@ def health():
 def render(request: Request, template: str, **ctx):
     ctx.update(
         request=request,
+        operator=config.OPERATOR,
         projects=db.all_projects(),
         paused=db.paused_until(),
         maintenance=db.maintenance(),
@@ -121,7 +122,7 @@ def _member_status(display, runs, match):
 
 
 def _enrich_questions(qs):
-    """Attach the referenced item's title/link so Danny can see what a
+    """Attach the referenced item's title/link so the operator can see what a
     question is actually about."""
     out = []
     for q in qs:
@@ -257,7 +258,7 @@ def item_page(request: Request, name: str, kind: str, number: int):
 @app.post("/p/{name}/{kind}/{number}/approve")
 def approve(name: str, kind: str, number: int):
     db.update_item(name, kind, number, status="approved", error="")
-    db.log_event(f"Human approved {kind}#{number}", project=name)
+    db.log_event(f"Operator approved {kind}#{number}", project=name)
     worker.trigger()
     return RedirectResponse(f"/p/{name}", status_code=303)
 
@@ -320,7 +321,7 @@ def set_policy(name: str, key: str, value: str = Form(...)):
 def answer_question(name: str, qid: int, answer: str = Form(...),
                     via: str = ""):
     db.answer_question(qid, answer.strip())
-    db.log_event(f"Danny answered a question: {answer.strip()[:100]}",
+    db.log_event(f"{config.OPERATOR} answered a question: {answer.strip()[:100]}",
                  project=name)
     worker.trigger()
     if via == "ntfy":  # ntfy http actions want a plain 2xx, not a redirect
@@ -382,7 +383,7 @@ def stop_run(run_id: int):
     run = db.get_run(run_id)
     if run and run["finished_at"] is None:
         db.request_cancel(run_id)
-        db.log_event(f"Danny pressed Stop on run {run_id} "
+        db.log_event(f"{config.OPERATOR} pressed Stop on run {run_id} "
                      f"({run['task']} {run['item_key']})", "warn",
                      project=run["project"])
     return RedirectResponse(f"/run/{run_id}", status_code=303)

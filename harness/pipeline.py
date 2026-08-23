@@ -62,9 +62,9 @@ def _file_question(project_name: str, asked_by: str, item_key: str,
                    out: dict | None) -> None:
     if not out:
         return
-    if out.get("question_for_danny"):
+    if out.get("question_for_human"):
         db.ask_question(project_name, asked_by, item_key,
-                        out["question_for_danny"],
+                        out["question_for_human"],
                         options=out.get("question_options"))
     if out.get("memory_note") and project_name:
         key = PERSONA_MEMORY_KEY.get(asked_by)
@@ -434,9 +434,9 @@ def _state_digest(project) -> str:
         lines += [f"- ({q['asked_by']}) {q['question'][:150]}" for q in open_qs]
     answered = db.recent_answers(name)
     if answered:
-        lines.append("\nDanny's recent decisions:")
+        lines.append(f"\n{config.OPERATOR}'s recent decisions:")
         lines += [f"- Q ({q['asked_by']}): {q['question'][:120]}\n"
-                  f"  A ({q['answered_by'] or 'Danny'}): {q['answer'][:200]}"
+                  f"  A ({q['answered_by'] or 'operator'}): {q['answer'][:200]}"
                   for q in answered]
     queued = db.items_by_status(name, "queued")
     lines.append(f"\nQueued for next release: {len(queued)} change(s). "
@@ -623,7 +623,7 @@ def _standup_digest() -> str:
                          f"({age_days(it['updated_at'])}): {it['error'][:200]}")
         for it in db.items_by_status(name, "waiting_human"):
             if it["gh_state"] == "open":
-                lines.append(f"waiting on maintainer {it['kind']}#{it['number']} "
+                lines.append(f"waiting on operator {it['kind']}#{it['number']} "
                              f"for {age_days(it['updated_at'])}: "
                              f"{it['verdict']} — {it['title'][:80]}")
         for it in db.items_by_status(name, "queued"):
@@ -721,7 +721,7 @@ def _apply_decisions(decisions: list) -> None:
                          f"{d['answer'][:150]}", project=q["project"])
         elif d["action"] == "escalate":
             db.escalate_question(q["id"])
-            db.log_event(f"Harry escalated {q['asked_by']}'s question to Danny",
+            db.log_event(f"Harry escalated {q['asked_by']}'s question to {config.OPERATOR}",
                          "warn", project=q["project"])
             from urllib.parse import urlencode
             opts = db.question_options(q)

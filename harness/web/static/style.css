@@ -323,7 +323,7 @@ footer {
 .kcard-title { line-height: 1.35; }
 .kcard-meta { display: flex; align-items: center; gap: .3rem; flex-wrap: wrap; margin-top: .1rem; }
 
-/* --- Danny-in-the-loop -------------------------------------------------- */
+/* --- operator-in-the-loop -------------------------------------------------- */
 .question { border-top: 1px solid var(--border); padding: .7rem 0; }
 .question:first-of-type { border-top: 0; }
 .question > p:first-child { margin: 0 0 .1rem; }
