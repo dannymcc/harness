@@ -2,6 +2,7 @@
    Sans: IBM Plex Sans (UI). Mono: IBM Plex Mono (dockets, stamps, data). */
 
 :root {
+  /* brand family (icon): #14352a ink · #1D5741 racing green · #2e7a55 · #6c9a62 · #FFFDF8 paper */
   --bg: #0e1411;
   --card: #151d18;
   --inset: #101814;
@@ -9,9 +10,10 @@
   --border-strong: #35443b;
   --text: #dde6df;
   --dim: #8fa295;
-  --accent: #c9a45c;
-  --accent-ink: #171207;
-  --ok: #57b284;
+  --accent: #6c9a62;         /* links, stamps, focus — light enough on ink */
+  --accent-strong: #2e7a55;  /* filled surfaces: primary buttons, the file edge */
+  --accent-ink: #fffdf8;
+  --ok: #4db69b;
   --warn: #d98e3f;
   --err: #d0685a;
   --sans: "IBM Plex Sans", system-ui, -apple-system, "Segoe UI", sans-serif;
@@ -20,11 +22,11 @@
 }
 @media (prefers-color-scheme: light) {
   :root {
-    --bg: #eef0ea; --card: #fbfbf7; --inset: #f2f3ec;
-    --border: #d8dcd0; --border-strong: #c1c8ba;
-    --text: #1d2822; --dim: #5f6f65;
-    --accent: #8a6c2c; --accent-ink: #fdfaf2;
-    --ok: #2e7d54; --warn: #a95f13; --err: #b0473a;
+    --bg: #f1ede1; --card: #fffdf8; --inset: #f6f2e7;
+    --border: #ded8c6; --border-strong: #c5bfab;
+    --text: #14352a; --dim: #5c6e62;
+    --accent: #1d5741; --accent-strong: #1d5741; --accent-ink: #fffdf8;
+    --ok: #0e7c66; --warn: #a95f13; --err: #b0473a;
   }
 }
 
@@ -38,11 +40,11 @@ a { color: var(--accent); text-decoration: none; }
 a:hover { text-decoration: underline; }
 :focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 
-/* --- nav: file header with brass edge ----------------------------------- */
+/* --- nav: file header with racing-green edge ---------------------------- */
 nav {
   display: flex; align-items: center; gap: .4rem 1rem; flex-wrap: wrap;
   padding: .55rem .9rem; background: var(--card);
-  border-top: 3px solid var(--accent);
+  border-top: 3px solid var(--accent-strong);
   border-bottom: 1px solid var(--border);
   position: sticky; top: 0; z-index: 5;
 }
@@ -157,7 +159,7 @@ button {
 }
 button:hover { border-color: var(--accent); }
 button.primary {
-  background: var(--accent); border-color: var(--accent);
+  background: var(--accent-strong); border-color: var(--accent-strong);
   color: var(--accent-ink);
 }
 button.primary:hover { filter: brightness(1.08); }
