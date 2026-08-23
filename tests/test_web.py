@@ -17,7 +17,8 @@ def test_pages_render(client, fresh_db):
 
 def test_version_in_footer(client):
     from harness import config
-    assert f"harness v{config.VERSION}" in client.get("/").text
+    html = client.get("/").text
+    assert f"v{config.VERSION}" in html and "harness/commit/" in html
 
 
 def test_question_buttons_and_ntfy_answer(client, fresh_db):
