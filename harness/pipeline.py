@@ -319,6 +319,7 @@ async def review_item(project, item) -> None:
         cwd = str(repo.fetch_pr_branch(project, item["number"], branch))
         # (lock held by caller for the whole review below)
     except CmdError:
+        repo.remove_pr_run(project, item["number"])
         db.update_item(
             name, "pr", item["number"], status="waiting_human",
             verdict="needs_work",
@@ -327,11 +328,17 @@ async def review_item(project, item) -> None:
                            f"`{project['dev_branch']}` — could you rebase it? "
                            "Happy to take another look after that."))
         return
-    passed, test_out = await asyncio.to_thread(repo.run_tests, project)
-    diff = gh.pr_diff(project["repo"], item["number"])
-    res = await agents.review_pr(project, detail, diff,
-                                 ("PASSED\n" if passed else "FAILED\n") + test_out,
-                                 cwd)
+    # The contributor's tests and Ruth's read of them happen in the throwaway
+    # checkout; it goes whatever the verdict, and nothing after here needs it.
+    try:
+        passed, test_out = await asyncio.to_thread(
+            repo.run_pr_tests, project, item["number"])
+        diff = gh.pr_diff(project["repo"], item["number"])
+        res = await agents.review_pr(project, detail, diff,
+                                     ("PASSED\n" if passed else "FAILED\n") + test_out,
+                                     cwd)
+    finally:
+        repo.remove_pr_run(project, item["number"])
     if not res["ok"]:
         db.update_item(name, "pr", item["number"], error=res["error"])
         return
@@ -382,7 +389,8 @@ async def _pr_merges_clean_and_passes(project, item) -> bool:
     try:
         with repo.clone_lock(project):
             repo.fetch_pr_branch(project, number, f"harness/pr-{number}")
-            passed, out = await asyncio.to_thread(repo.run_tests, project)
+            passed, out = await asyncio.to_thread(repo.run_pr_tests, project,
+                                                  number)
     except CmdError as e:
         db.update_item(name, "pr", number, status="blocked",
                        error=f"does not merge cleanly onto "
@@ -390,6 +398,8 @@ async def _pr_merges_clean_and_passes(project, item) -> bool:
         db.log_event(f"PR #{number} does not merge cleanly onto "
                      f"{project['dev_branch']}", "warn", project=name)
         return False
+    finally:
+        repo.remove_pr_run(project, number)
     if not passed:
         db.update_item(name, "pr", number, status="waiting_human",
                        verdict="needs_work",

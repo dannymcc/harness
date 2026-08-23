@@ -18,9 +18,15 @@ class CmdError(RuntimeError):
 
 
 def run(cmd: list[str], cwd: Path | None = None, check: bool = True,
-        timeout: int = 600) -> str:
+        timeout: int = 600, env: dict | None = None) -> str:
+    """Run a command and return stdout.
+
+    env=None inherits harness's own environment — right for git and gh, which
+    need the token. Pass an explicit env for anything project-supplied: see
+    repo._sandbox_env.
+    """
     p = subprocess.run(cmd, cwd=cwd, capture_output=True, text=True,
-                       timeout=timeout)
+                       timeout=timeout, env=env)
     if check and p.returncode != 0:
         raise CmdError(cmd, p.returncode, p.stdout, p.stderr)
     return p.stdout

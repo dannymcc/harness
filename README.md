@@ -45,7 +45,10 @@ told to behave.
   suite, then lands the branch on your dev branch (rebasing and re-testing
   if dev moved). Everything else gets a drafted reply and waits for you.
 - **Pull requests** — merged onto dev locally, tested, then reviewed for
-  value and quality. Verdicts: merge / needs work / reject, each with a
+  value and quality. A PR's tests are the contributor's code, so they run in
+  a throwaway clone with their own virtualenv and no credentials in the
+  environment (see [SECURITY.md](SECURITY.md) for what that does and does not
+  protect). Verdicts: merge / needs work / reject, each with a
   courteous drafted review. Nothing merges without passing tests; by default
   nothing merges without your click. **Merge now** on an unreviewed PR skips
   Ruth's opinion when you already know the answer — the harness still merges
@@ -146,7 +149,11 @@ Per-repo policies, editable live in Settings:
 
 Repo expectations (all configurable per harness): a dev branch flowing to a
 main branch by PR, a version string in a file, and a test command. The
-defaults match a Flask-style project (`config.py`, pytest).
+defaults match a Flask-style project (`config.py`, pytest). Setup and test
+commands run in a deliberately bare environment — `PATH`, locale, `TERM`,
+a scratch `HOME`/`TMPDIR`, and nothing else — because on a community PR they
+are the contributor's code. A suite that needs its own variables (a private
+package index, say) has to set them itself.
 
 Costs shown in the GUI are the SDK's API-equivalent estimates (`≈US$`) — on
 a subscription plan nothing is billed per token; read them as a burn meter.
@@ -168,8 +175,9 @@ python run.py            # GUI + worker on :8300
 ```
 
 Run the tests with `python -m pytest -q`. State lives in `data/` (SQLite,
-clones, worktrees, per-run transcripts). Deleting `data/repos` or
-`data/worktrees` is always safe — they're rebuilt.
+clones, worktrees, per-run transcripts). Deleting `data/repos`,
+`data/worktrees`, `data/pr-runs` or `data/sandbox` is always safe — they're
+rebuilt.
 
 Harness can maintain itself — add this repo as a harness with version file
 `harness/config.py`, version pattern `VERSION\s*=\s*"(?P<version>[^"]+)"`,

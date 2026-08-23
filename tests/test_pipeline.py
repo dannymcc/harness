@@ -476,15 +476,15 @@ def test_unreviewed_pr_merge_runs_the_suite_first(fresh_db, may, monkeypatch):
     monkeypatch.setattr(gh, "merge_pr",
                         lambda repo_, number, **kw: merged.append(number))
 
-    monkeypatch.setattr(repo, "run_tests",
-                        lambda project, cwd=None: (False, "2 failed"))
+    monkeypatch.setattr(repo, "run_pr_tests",
+                        lambda project, number: (False, "2 failed"))
     asyncio.run(pipeline.merge_pr_item(may, item))
     assert merged == []
     after = fresh_db.get_item("may", "pr", 9)
     assert after["status"] == "waiting_human" and "2 failed" in after["error"]
 
-    monkeypatch.setattr(repo, "run_tests",
-                        lambda project, cwd=None: (True, "ok"))
+    monkeypatch.setattr(repo, "run_pr_tests",
+                        lambda project, number: (True, "ok"))
     asyncio.run(pipeline.merge_pr_item(may, item))
     assert merged == [9]
     assert fresh_db.get_item("may", "pr", 9)["status"] == "queued"

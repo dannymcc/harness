@@ -1,0 +1,135 @@
+"""Project-supplied commands must not see harness's credentials.
+
+setup_command and test_command are the project's own build hooks, so on a
+community PR they are the contributor's code. These tests run them for real
+(bash, git — no network) and check what they can reach.
+"""
+import subprocess
+import sys
+from pathlib import Path
+
+import pytest
+
+
+@pytest.fixture()
+def project(fresh_db, monkeypatch):
+    """A project whose test runs use the ambient python, not a fresh venv.
+
+    Building a venv per test would add seconds and prove nothing: the point
+    here is the environment the command lands in.
+    """
+    from harness import repo
+    monkeypatch.setattr(repo, "_venv_python",
+                        lambda project, vdir=None: Path(sys.executable))
+    monkeypatch.setenv("GH_TOKEN", "ghp_secret_token")
+    monkeypatch.setenv("CLAUDE_CODE_OAUTH_TOKEN", "sk-ant-secret")
+    from harness import config
+    fresh_db.create_project("may", "example/may")
+    (config.REPOS_DIR / "may").mkdir(parents=True, exist_ok=True)
+    return dict(fresh_db.get_project("may"))
+
+
+def test_test_command_cannot_read_the_github_token(project):
+    from harness import repo
+    project["test_command"] = 'echo "seen=[$GH_TOKEN][$CLAUDE_CODE_OAUTH_TOKEN]"'
+    passed, out = repo.run_tests(project, setup=False)
+    assert passed
+    assert "seen=[][]" in out
+    assert "ghp_secret_token" not in out and "sk-ant-secret" not in out
+
+
+def test_setup_command_cannot_read_the_github_token(project):
+    from harness import repo
+    project["setup_command"] = 'echo "setup=[$GH_TOKEN]"'
+    project["test_command"] = "true"
+    passed, out = repo.run_tests(project)
+    assert passed and "setup=[]" in out
+
+
+def test_ensure_test_env_is_sandboxed_too(project):
+    from harness import config, repo
+    marker = config.REPOS_DIR / "may" / "leaked"
+    project["setup_command"] = f'printenv GH_TOKEN > "{marker}"; true'
+    repo.ensure_test_env(project)
+    assert marker.read_text() == ""
+
+
+def test_home_points_at_scratch_not_the_harness_home(project):
+    """~/.config/gh/hosts.yml, ~/.claude and ~/.git-credentials live in the
+    real HOME; the run must not be able to reach them."""
+    from harness import config, repo
+    project["test_command"] = "echo HOME=$HOME TMPDIR=$TMPDIR"
+    passed, out = repo.run_tests(project, setup=False)
+    scratch = config.DATA_DIR / "sandbox" / "may"
+    assert passed
+    assert f"HOME={scratch}" in out and f"TMPDIR={scratch / 'tmp'}" in out
+
+
+def test_a_normal_run_still_passes_and_reports_output(project):
+    from harness import repo
+    project["test_command"] = "echo '3 passed'"
+    passed, out = repo.run_tests(project, setup=False)
+    assert passed and "3 passed" in out
+    project["test_command"] = "echo '1 failed'; exit 1"
+    passed, out = repo.run_tests(project, setup=False)
+    assert not passed and "1 failed" in out
+
+
+# --- the throwaway PR checkout ----------------------------------------------
+
+def _git(*args, cwd):
+    subprocess.run(["git", *args], cwd=cwd, check=True, capture_output=True)
+
+
+@pytest.fixture()
+def origin(tmp_path):
+    """A local bare repo with a dev branch and a refs/pull/1/head, so the PR
+    flow can be exercised without a network or gh."""
+    work, bare = tmp_path / "work", tmp_path / "origin.git"
+    work.mkdir()
+    _git("init", "-q", "-b", "dev", cwd=work)
+    _git("config", "user.email", "t@example.com", cwd=work)
+    _git("config", "user.name", "T", cwd=work)
+    (work / "README.md").write_text("hello\n")
+    _git("add", "-A", cwd=work)
+    _git("commit", "-qm", "base", cwd=work)
+    _git("checkout", "-qb", "contrib", cwd=work)
+    (work / "contributed.txt").write_text("from the PR\n")
+    _git("add", "-A", cwd=work)
+    _git("commit", "-qm", "contribution", cwd=work)
+    _git("checkout", "-q", "dev", cwd=work)
+    _git("clone", "-q", "--bare", str(work), str(bare), cwd=tmp_path)
+    head = subprocess.run(["git", "rev-parse", "contrib"], cwd=work,
+                          capture_output=True, text=True).stdout.strip()
+    _git("update-ref", "refs/pull/1/head", head, cwd=bare)
+    _git("branch", "-D", "contrib", cwd=bare)
+    return bare
+
+
+def test_pr_code_is_tested_in_a_disposable_clone(project, origin):
+    """The merged PR is tested outside harness's clone, and the directory is
+    gone afterwards."""
+    from harness import repo
+    clone = repo.repo_dir(project)
+    subprocess.run(["git", "clone", "-q", str(origin), str(clone)], check=True)
+
+    checkout = repo.fetch_pr_branch(project, 1, "harness/pr-1")
+    assert checkout == repo.pr_run_dir(project, 1) / "repo"
+    assert (checkout / "contributed.txt").read_text() == "from the PR\n"
+    assert checkout != clone and not str(checkout).startswith(str(clone))
+
+    # Its .git is its own, and no hook the clone might carry can fire in it.
+    hooks = subprocess.run(["git", "config", "core.hooksPath"], cwd=checkout,
+                           capture_output=True, text=True).stdout.strip()
+    assert hooks and list(Path(hooks).iterdir()) == []
+    assert not (checkout / ".git").is_file()   # not a worktree pointer
+
+    project["test_command"] = 'echo "run=[$GH_TOKEN]"; cat contributed.txt'
+    passed, out = repo.run_pr_tests(project, 1)
+    assert passed and "run=[]" in out and "from the PR" in out
+
+    repo.remove_pr_run(project, 1)
+    assert not repo.pr_run_dir(project, 1).exists()
+    # harness's own clone is untouched by any of it
+    assert (clone / ".git").is_dir()
+    assert not (clone / ".git" / "hooks" / "pre-commit").exists()
