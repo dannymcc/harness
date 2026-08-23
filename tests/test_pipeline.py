@@ -542,3 +542,41 @@ def test_forced_cycle_does_not_make_the_lead_plan(fresh_db, may, monkeypatch):
     fresh_db.set_setting("last_plan_at.may", "2999-01-01T00:00:00Z")
     asyncio.run(pipeline.run_cycle(may, force=True))
     assert planned == []
+
+
+def test_directions_are_actioned_during_an_engineer_wave(fresh_db, may, monkeypatch):
+    """A direction typed while engineers are busy reaches Harry within the
+    attendant interval, not after the sweep."""
+    import asyncio, time
+    from harness import pipeline, repo, agents
+    monkeypatch.setattr(pipeline, "ATTEND_INTERVAL_S", 0.05)
+    monkeypatch.setattr(pipeline, "sync", lambda p: None)
+    monkeypatch.setattr(pipeline, "_reconcile_branches", lambda p: None)
+    monkeypatch.setattr(pipeline, "_release_due", lambda p: None)
+    monkeypatch.setattr(pipeline, "desk_events", lambda p: [])
+    monkeypatch.setattr(repo, "clean_checkout", lambda p, b: "/tmp")
+    monkeypatch.setattr(repo, "ensure_test_env", lambda p: None)
+    fresh_db.upsert_item("may", "issue", 9, "t", "a", "open", "x")
+    fresh_db.update_item("may", "issue", 9, status="approved")
+    timeline = []
+
+    async def slow_fix(project, item, persona="Malcolm"):
+        # the direction arrives while the engineer is mid-fix
+        await asyncio.sleep(0.1)
+        fresh_db.add_direction("may", "make the footer blue")
+        await asyncio.sleep(0.6)
+        timeline.append(("fix_done", time.monotonic()))
+        fresh_db.update_item("may", "issue", 9, status="queued")
+    monkeypatch.setattr(pipeline, "fix_item", slow_fix)
+
+    async def fake_directive(project, text, item_key, digest):
+        timeline.append(("harry", time.monotonic()))
+        return {"ok": True, "output": {"actions": [], "reply": "Noted, blue it is."}}
+    monkeypatch.setattr(agents, "execute_directive", fake_directive)
+
+    asyncio.run(pipeline.run_cycle(may, force=True))
+    kinds = [k for k, _ in timeline]
+    assert kinds.index("harry") < kinds.index("fix_done")
+    assert fresh_db.pending_directives() == []
+    assert any("Noted, blue it is." in e["message"]
+               for e in fresh_db.recent_events(10, "may"))
