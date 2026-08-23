@@ -882,6 +882,13 @@ def _apply_directive_actions(project, actions: list) -> list[str]:
                                    (prev + "\n- " if prev else "- ")
                                    + a["text"].strip()[:400])
                     done.append("tasked the lead")
+            elif act == "create_issue":
+                if a.get("title") and a.get("text"):
+                    num = gh.create_issue(project["repo"], a["title"].strip(),
+                                          a["text"].strip())
+                    db.upsert_item(name, "issue", num, a["title"].strip(),
+                                   "operator", "open", db.now())
+                    done.append(f"opened issue#{num}: {a['title'][:50]}")
             elif act == "answer_question":
                 if a.get("question_id") and a.get("text"):
                     db.answer_question(a["question_id"], a["text"].strip(),

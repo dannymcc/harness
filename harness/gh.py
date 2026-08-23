@@ -80,6 +80,12 @@ def comment_pr(repo: str, number: int, body: str) -> None:
     run(["gh", "pr", "comment", str(number), "-R", repo, "--body", body])
 
 
+def create_issue(repo: str, title: str, body: str) -> int:
+    out = run(["gh", "issue", "create", "-R", repo,
+               "--title", title, "--body", body])
+    return int(out.strip().rstrip("/").rsplit("/", 1)[-1])
+
+
 def close_issue(repo: str, number: int, comment: str = "") -> None:
     args = ["gh", "issue", "close", str(number), "-R", repo]
     if comment:

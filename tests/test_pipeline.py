@@ -136,3 +136,15 @@ def test_directive_lifecycle(fresh_db, may):
     assert not fresh_db.pending_directives("may")
     d = fresh_db.recent_directions("may")[0]
     assert d["answer"].startswith("Held the queue")
+
+
+def test_directive_create_issue(fresh_db, may, monkeypatch):
+    from harness import pipeline, gh
+    monkeypatch.setattr(gh, "create_issue", lambda repo, t, b: 41)
+    done = pipeline._apply_directive_actions(may, [
+        {"action": "create_issue", "title": "Add CSV export",
+         "text": "Export the cost report as CSV."},
+        {"action": "create_issue", "title": "no body"},  # skipped
+    ])
+    assert done == ["opened issue#41: Add CSV export"]
+    assert fresh_db.get_item("may", "issue", 41)["status"] == "new"

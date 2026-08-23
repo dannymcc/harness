@@ -764,7 +764,7 @@ DIRECTIVE_SCHEMA = {
                                         "hire", "stand_down", "reinstate",
                                         "security_review", "propose_release",
                                         "set_policy", "tell_desk",
-                                        "answer_question"]},
+                                        "answer_question", "create_issue"]},
                     "kind": {"type": "string", "enum": ["issue", "pr"]},
                     "number": {"type": "integer"},
                     "name": {"type": "string",
@@ -774,7 +774,9 @@ DIRECTIVE_SCHEMA = {
                     "value": {"type": "string"},
                     "question_id": {"type": "integer"},
                     "text": {"type": "string",
-                             "description": "For tell_desk (instruction to the lead) or answer_question."},
+                             "description": "For tell_desk, answer_question, or create_issue (the issue body)."},
+                    "title": {"type": "string",
+                              "description": "Issue title for create_issue."},
                 },
             },
         },
@@ -805,7 +807,10 @@ work or judgement); answer_question (question_id+text, for open questions
 the direction resolves).
 
 Rules: execute what the operator asked, don't re-litigate it; use tell_desk
-for work you cannot do with the other actions; if part of the direction is
+for work you cannot do with the other actions; create_issue (title+text) when the operator describes
+NEW work — it becomes a real GitHub issue and enters the normal triage and
+fix flow, so write the title and body as a good issue: concrete, scoped,
+with acceptance criteria where the direction implies them. If part of the direction is
 impossible or ambiguous, say so plainly in the reply. The reply should read
 like a competent deputy reporting back in one or two sentences."""
     return await run_agent(
