@@ -109,6 +109,14 @@ items, and usage-limit pauses — with one-tap answer buttons. On the public
 ntfy.sh server the topic name is effectively a password; pick something
 unguessable. The dashboard also installs as a PWA.
 
+### Light and dark
+
+The dashboard opens light, whatever the operating system prefers. The **Dark**
+/ **Light** button in the nav switches palette; the choice is kept in a
+`theme` cookie for a year, so it survives reloads and is remembered per
+browser. It is a plain form post, so it works with JavaScript off and the
+page arrives already in the right palette — no flash on load.
+
 ## Configuration
 
 Environment (see `.env.example`): `HARNESS_MODEL` (default `claude-opus-5`),

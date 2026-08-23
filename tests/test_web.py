@@ -57,6 +57,31 @@ def test_directions_visible_after_tell(client, fresh_db):
     assert "directions-list" in html
 
 
+def test_theme_defaults_to_light_and_persists(client):
+    """No cookie means light, whatever the operating system prefers."""
+    html = client.get("/").text
+    assert 'data-theme="light"' in html
+    assert '<meta name="theme-color" content="#fffdf8">' in html
+    assert 'action="/theme"' in html
+
+    r = client.post("/theme", data={"value": "dark"}, follow_redirects=False)
+    assert r.status_code == 303
+    assert client.cookies.get("theme") == "dark"
+    html = client.get("/").text
+    assert 'data-theme="dark"' in html
+    assert '<meta name="theme-color" content="#1D5741">' in html
+
+    client.cookies.set("theme", "chartreuse")  # junk falls back to light
+    assert 'data-theme="light"' in client.get("/").text
+
+
+def test_theme_post_ignores_a_foreign_referer(client):
+    r = client.post("/theme", data={"value": "dark"},
+                    headers={"referer": "https://example.com/evil"},
+                    follow_redirects=False)
+    assert r.status_code == 303 and r.headers["location"] == "/"
+
+
 def test_run_tail_streams_increments(client, fresh_db, tmp_path):
     rid = fresh_db.start_run("may", "ic", "issue#3", "fix", "m", "Malcolm")
     log = tmp_path / "run.log"
