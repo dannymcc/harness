@@ -27,9 +27,13 @@
   <button class="danger">Stop this run</button></form>
 {% endif %}
 
-<section class="card"><h2>Transcript</h2>
-<pre class="diff">{{ transcript or "(empty)" }}</pre>
-<p class="hint">Reload for updates while the run is live. Showing the last
-60k characters.</p></section>
+<section class="card"><h2>Console
+  {% if run.finished_at is none %}<span class="pill warn">live</span>{% endif %}</h2>
+<pre class="diff console" id="console"
+     {% if run.finished_at is none %}data-tail-run="{{ run.id }}"{% endif %}
+>{{ transcript or "" }}</pre>
+<p class="hint">{% if run.finished_at is none %}Streaming — output appears as
+the agent works.{% else %}Showing the last 60k characters.{% endif %}</p>
+</section>
 
 {% endblock %}

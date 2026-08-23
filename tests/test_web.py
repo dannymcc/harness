@@ -64,3 +64,19 @@ def test_directions_visible_after_tell(client, fresh_db):
     html = client.get("/p/may").text
     assert "Focus on bugs this week" in html
     assert "directions-list" in html
+
+
+def test_run_tail_streams_increments(client, fresh_db, tmp_path):
+    rid = fresh_db.start_run("may", "ic", "issue#3", "fix", "m", "Malcolm")
+    log = tmp_path / "run.log"
+    log.write_text("hello ")
+    with fresh_db.conn() as c:
+        c.execute("UPDATE runs SET log_path = ? WHERE id = ?", (str(log), rid))
+    j = client.get(f"/run/{rid}/tail?offset=0").json()
+    assert j["data"] == "hello " and j["live"] is True
+    log.write_text("hello world")
+    j2 = client.get(f"/run/{rid}/tail?offset={j['offset']}").json()
+    assert j2["data"] == "world"
+    fresh_db.finish_run(rid, True, 0.1, 1, "done")
+    j3 = client.get(f"/run/{rid}/tail?offset={j2['offset']}").json()
+    assert j3["live"] is False

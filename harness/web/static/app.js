@@ -124,3 +124,38 @@ document.addEventListener("DOMContentLoaded", () => {
     });
   }, 30_000);
 });
+
+
+// Live console: tail the run transcript while the run is in flight.
+document.addEventListener("DOMContentLoaded", () => {
+  const pre = document.querySelector("[data-tail-run]");
+  if (!pre) return;
+  const runId = pre.dataset.tailRun;
+  let offset = new Blob([pre.textContent]).size;
+  let stopped = false;
+  const nearBottom = () =>
+    pre.scrollHeight - pre.scrollTop - pre.clientHeight < 60;
+  async function tick() {
+    if (stopped) return;
+    try {
+      const res = await fetch(`/run/${runId}/tail?offset=${offset}`);
+      if (res.ok) {
+        const j = await res.json();
+        if (j.data) {
+          const follow = nearBottom();
+          pre.append(j.data);
+          offset = j.offset;
+          if (follow) pre.scrollTop = pre.scrollHeight;
+        }
+        if (!j.live) {
+          stopped = true;
+          setTimeout(() => location.reload(), 1500); // pick up final status
+          return;
+        }
+      }
+    } catch {}
+    setTimeout(tick, 2500);
+  }
+  pre.scrollTop = pre.scrollHeight;
+  tick();
+});

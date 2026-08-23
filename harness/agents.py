@@ -146,6 +146,11 @@ async def run_agent(*, project_name: str, role: str, item_key: str, task: str,
                         text = getattr(block, "text", None)
                         if text:
                             log.write(text + "\n")
+                        tool = getattr(block, "name", None)
+                        if tool:
+                            arg = json.dumps(getattr(block, "input", {}))[:300]
+                            log.write(f"\n▸ {tool} {arg}\n")
+                    log.flush()
                 elif isinstance(message, ResultMessage):
                     result = message
                     session_id = getattr(message, "session_id", "") or ""

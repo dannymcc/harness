@@ -415,6 +415,30 @@ def run_page(request: Request, run_id: int):
                                                           run["task"], lead))
 
 
+@app.get("/run/{run_id}/tail")
+def run_tail(run_id: int, offset: int = 0):
+    """Incremental transcript bytes for the live console view."""
+    from fastapi.responses import JSONResponse
+    run = db.get_run(run_id)
+    if not run or not run["log_path"]:
+        return JSONResponse({"data": "", "offset": 0, "live": False})
+    from pathlib import Path as _P
+    try:
+        f = _P(run["log_path"])
+        size = f.stat().st_size
+        offset = max(0, min(offset, size))
+        with open(f, "rb") as fh:
+            fh.seek(offset)
+            chunk = fh.read(65536)
+        return JSONResponse({
+            "data": chunk.decode("utf-8", errors="replace"),
+            "offset": offset + len(chunk),
+            "live": run["finished_at"] is None,
+        })
+    except OSError:
+        return JSONResponse({"data": "", "offset": offset, "live": False})
+
+
 @app.post("/run/{run_id}/stop")
 def stop_run(run_id: int):
     run = db.get_run(run_id)
