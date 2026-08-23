@@ -523,6 +523,22 @@ def answers_for(project: str, item_key: str):
             (project, item_key)).fetchall()
 
 
+# --- maintenance mode --------------------------------------------------------
+
+def set_maintenance(reason: str) -> None:
+    set_setting("maintenance_reason", reason)
+    if reason:
+        log_event(f"Maintenance mode on: {reason}", "warn")
+    else:
+        log_event("Maintenance mode off")
+
+
+def maintenance() -> str:
+    """Non-empty reason while maintenance mode is active. Unlike the API-limit
+    pause this has no expiry and no GUI resume — only the operator clears it."""
+    return get_setting("maintenance_reason", "")
+
+
 # --- heartbeat ---------------------------------------------------------------
 
 _last_hb = 0.0

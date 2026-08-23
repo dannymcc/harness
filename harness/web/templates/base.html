@@ -33,6 +33,10 @@
 {% if not worker.alive %}
 <div class="banner warn">⚠ The worker thread is not running. Restart the container.</div>
 {% endif %}
+{% if maintenance %}
+<div class="banner warn">🔧 Maintenance in progress — {{ maintenance }}. The section is
+holding; no action needed from you.</div>
+{% endif %}
 {% if paused %}
 <div class="banner warn">
   ⏸ Agent work paused until {{ paused }} — {{ paused_reason }}

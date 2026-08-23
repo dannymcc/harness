@@ -3,12 +3,32 @@
 The clone under data/repos/<project> belongs to harness: agents edit it, the
 pipeline resets it. It is never the user's own working copy.
 """
+import fcntl
 import re
 import venv
+from contextlib import contextmanager
 from pathlib import Path
 
 from . import config
 from .gh import run, CmdError
+
+
+@contextmanager
+def clone_lock(project):
+    """Cross-process lock over a project's clone.
+
+    Everything that mutates the checkout (pipeline cycles, salvage or other
+    maintenance scripts) must hold this. flock, so it works across docker
+    exec sessions, not just threads.
+    """
+    config.REPOS_DIR.mkdir(parents=True, exist_ok=True)
+    lockfile = config.REPOS_DIR / f".{project['name']}.lock"
+    with open(lockfile, "w") as fh:
+        fcntl.flock(fh, fcntl.LOCK_EX)
+        try:
+            yield
+        finally:
+            fcntl.flock(fh, fcntl.LOCK_UN)
 
 
 def repo_dir(project) -> Path:

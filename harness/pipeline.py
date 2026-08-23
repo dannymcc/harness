@@ -65,8 +65,9 @@ def sync(project) -> None:
 async def triage_item(project, item) -> None:
     name = project["name"]
     detail = gh.issue_detail(project["repo"], item["number"])
-    cwd = str(repo.clean_checkout(project, project["dev_branch"]))
-    res = await agents.triage_issue(project, detail, cwd)
+    with repo.clone_lock(project):
+        cwd = str(repo.clean_checkout(project, project["dev_branch"]))
+        res = await agents.triage_issue(project, detail, cwd)
     if not res["ok"]:
         db.update_item(name, "issue", item["number"], error=res["error"])
         return
@@ -171,6 +172,7 @@ async def review_item(project, item) -> None:
     branch = f"harness/pr-{item['number']}"
     try:
         cwd = str(repo.fetch_pr_branch(project, item["number"], branch))
+        # (lock held by caller for the whole review below)
     except CmdError:
         db.update_item(
             name, "pr", item["number"], status="waiting_human",
@@ -256,6 +258,15 @@ def _release_due(project) -> list:
 
 async def propose_release(project, queued) -> None:
     name = project["name"]
+    with repo.clone_lock(project):
+        rid = await _propose_release_locked(project, queued)
+    # finalize outside the lock: it re-acquires it, and flock is not reentrant
+    if rid is not None and db.policy(project["name"], "cut_release") == "auto":
+        finalize_release(project, db.get_release(rid))
+
+
+async def _propose_release_locked(project, queued) -> int | None:
+    name = project["name"]
     cwd = str(repo.clean_checkout(project, project["dev_branch"]))
     version_before = repo.current_version(project)
     log = gh.run(["git", "log", "--oneline",
@@ -290,8 +301,7 @@ async def propose_release(project, queued) -> None:
     db.log_event(f"Proposed release v{version} (PR #{pr_number}, "
                  f"{len(queued)} changes)", project=name)
     db.update_release(rid, pr_number=pr_number)
-    if db.policy(name, "cut_release") == "auto":
-        finalize_release(project, db.get_release(rid))
+    return rid
 
 
 def finalize_release(project, release) -> None:
@@ -300,10 +310,11 @@ def finalize_release(project, release) -> None:
     version = release["version"]
     try:
         gh.merge_pr(project["repo"], release["pr_number"], squash=False)
-        d = repo.clean_checkout(project, project["main_branch"])
-        gh.run(["git", "tag", "-a", f"v{version}", "-m", f"Release v{version}"],
-               cwd=d)
-        gh.run(["git", "push", "origin", f"v{version}"], cwd=d)
+        with repo.clone_lock(project):
+            d = repo.clean_checkout(project, project["main_branch"])
+            gh.run(["git", "tag", "-a", f"v{version}", "-m", f"Release v{version}"],
+                   cwd=d)
+            gh.run(["git", "push", "origin", f"v{version}"], cwd=d)
     except CmdError as e:
         db.log_event(f"Release v{version} failed: {e}", "error", project=name)
         return
@@ -377,7 +388,8 @@ async def run_cycle(project) -> None:
         # Anything a human approved in the GUI runs first.
         for item in db.items_by_status(name, "approved"):
             if item["kind"] == "issue":
-                await fix_item(project, item)
+                with repo.clone_lock(project):
+                    await fix_item(project, item)
             else:
                 await merge_pr_item(project, item)
 
@@ -407,20 +419,23 @@ async def run_cycle(project) -> None:
                 item = db.get_item(name, t["kind"], t["number"])
                 if item["status"] == "approved" and done < MAX_AGENT_TASKS_PER_CYCLE \
                         and fixes_done < len(engineers):
-                    await fix_item(project, item,
-                                   engineers[fixes_done % len(engineers)])
+                    with repo.clone_lock(project):
+                        await fix_item(project, item,
+                                       engineers[fixes_done % len(engineers)])
                     fixes_done += 1
                     done += 1
             elif t["action"] == "fix" and item["status"] in ("triaged", "approved"):
                 if (db.policy(name, "fix_issues") == "auto" or
                         item["status"] == "approved") and \
                         fixes_done < len(engineers):
-                    await fix_item(project, item,
-                                   engineers[fixes_done % len(engineers)])
+                    with repo.clone_lock(project):
+                        await fix_item(project, item,
+                                       engineers[fixes_done % len(engineers)])
                     fixes_done += 1
                     done += 1
             elif t["action"] == "review" and item["status"] == "new":
-                await review_item(project, item)
+                with repo.clone_lock(project):
+                    await review_item(project, item)
                 done += 1
 
         # Fallback: triage anything new the lead didn't mention.
@@ -430,7 +445,8 @@ async def run_cycle(project) -> None:
             if item["kind"] == "issue":
                 await triage_item(project, item)
             else:
-                await review_item(project, item)
+                with repo.clone_lock(project):
+                    await review_item(project, item)
             done += 1
 
         queued = _release_due(project)
@@ -629,7 +645,8 @@ def _apply_staffing(actions: list) -> None:
 
 async def run_security_review(project) -> None:
     name = project["name"]
-    cwd = str(repo.clean_checkout(project, project["dev_branch"]))
+    with repo.clone_lock(project):
+        cwd = str(repo.clean_checkout(project, project["dev_branch"]))
     db.log_event("Security review started (Zaf)", project=name)
     try:
         res = await agents.security_review(project, cwd)

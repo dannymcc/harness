@@ -92,17 +92,33 @@ def _prune_files(root: Path, days: int) -> int:
     return n
 
 
+ORPHAN_RUN_HOURS = 3
+
+
+def _close_orphaned_runs(c) -> int:
+    from datetime import datetime, timezone, timedelta
+    cutoff = (datetime.now(timezone.utc) - timedelta(hours=ORPHAN_RUN_HOURS)) \
+        .strftime("%Y-%m-%dT%H:%M:%SZ")
+    return c.execute(
+        "UPDATE runs SET ok = 0, finished_at = ?, "
+        "summary = 'orphaned (no result recorded)' "
+        "WHERE finished_at IS NULL AND started_at < ?",
+        (db.now(), cutoff)).rowcount
+
+
 def prune() -> str:
     with db.conn() as c:
         ev = _prune_events(c)
         rn = _prune_runs(c)
         it = _trim_finished_items(c)
+        orph = _close_orphaned_runs(c)
     logs = _prune_files(config.LOG_DIR, LOG_KEEP_DAYS)
     sessions = _prune_sdk_sessions()
     parts = []
     if ev: parts.append(f"{ev} events folded")
     if rn: parts.append(f"{rn} runs archived")
     if it: parts.append(f"{it} finished items trimmed")
+    if orph: parts.append(f"{orph} orphaned runs closed")
     if logs: parts.append(f"{logs} old logs removed")
     if sessions: parts.append(f"{sessions} stale sessions removed")
     return ", ".join(parts)

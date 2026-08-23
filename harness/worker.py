@@ -10,6 +10,10 @@ import traceback
 
 from . import config, db, housekeeping, pipeline
 
+class _Maintenance(Exception):
+    pass
+
+
 _run_now = threading.Event()
 _state = {"running": False, "last_cycle": "", "thread": None}
 
@@ -35,12 +39,16 @@ def _loop() -> None:
         _state["running"] = True
         db.touch_heartbeat()
         try:
+            if db.maintenance():
+                raise _Maintenance()
             hourly = housekeeping.due()
             if hourly:
                 asyncio.run(housekeeping.run(allow_agent=not db.paused_until()))
             asyncio.run(pipeline.run_all_cycles())
             if hourly:
                 asyncio.run(pipeline.run_standup())
+        except _Maintenance:
+            pass  # maintenance mode: idle until the operator clears it
         except Exception:
             db.log_event("Worker cycle crashed:\n" + traceback.format_exc()[-1500:],
                          "error")

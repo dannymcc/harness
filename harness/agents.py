@@ -101,6 +101,8 @@ async def run_agent(*, project_name: str, role: str, item_key: str, task: str,
     """
     if db.paused_until():
         raise AgentStalled("paused for API limits")
+    if db.maintenance():
+        raise AgentStalled("maintenance mode")
 
     mdl = model or config.MODEL
     if not persona:

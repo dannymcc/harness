@@ -49,6 +49,7 @@ def render(request: Request, template: str, **ctx):
         request=request,
         projects=db.all_projects(),
         paused=db.paused_until(),
+        maintenance=db.maintenance(),
         paused_reason=db.get_setting("paused_reason"),
         worker=worker.status(),
         who=request.headers.get("Tailscale-User-Login", ""),
