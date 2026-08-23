@@ -102,7 +102,7 @@
     <p class="hint">Merging and tagging — this takes about a minute. Reload
     for the result.</p>
   {% else %}
-  {% if release_auto %}<p class="hint">cut release is auto on this project —
+  {% if release_auto %}<p class="hint">auto release is on for this project —
   Colin merges and tags without waiting for you. Abandon it now if you would
   rather it didn't.</p>{% endif %}
   <div class="actions">
@@ -242,7 +242,7 @@
 </section>
 
 <section class="card">
-  <h2>Releases {% if release_auto %}<span class="pill ok">auto</span>{% endif %}</h2>
+  <h2>Releases {% if release_auto %}<span class="pill ok">auto release</span>{% endif %}</h2>
   {% if release %}
     <p class="hint">v{{ release.version }} is on the table above.</p>
   {% elif release_pending %}
@@ -251,11 +251,15 @@
     {{ p.dev_branch }} → {{ p.main_branch }} PR.</p>
   {% else %}
     <p class="hint">{{ queued_count }} change{{ '' if queued_count == 1 else 's' }}
-    queued. Releases batch at {{ policies.release_min_changes }} changes or
-    {{ policies.release_max_age_days }} days{% if can_release %} — or press
-    the button{% endif %}.
-    {% if release_auto %}Once drafted it merges and tags itself.{% else %}You
-    approve the merge.{% endif %}</p>
+    queued.
+    {% if release_auto %}This project auto-releases once
+      {{ policies.release_min_changes }} changes are queued or the oldest is
+      {{ policies.release_max_age_days }} days old{% if can_release %} — or
+      press the button{% endif %}.
+      Once drafted it merges and tags itself.{% else %}Releases batch at
+      {{ policies.release_min_changes }}
+      changes or {{ policies.release_max_age_days }} days{% if can_release %}
+      — or press the button{% endif %}. You approve the merge.{% endif %}</p>
     {% if can_release %}
       {% if not p.enabled %}<p class="hint">This harness is disabled — the
       request waits until you enable it.</p>{% endif %}

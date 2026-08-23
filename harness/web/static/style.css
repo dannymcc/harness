@@ -243,9 +243,12 @@ pre {
 .events li.error { color: var(--err); }
 
 /* --- forms -------------------------------------------------------------- */
-.policies { display: grid; gap: .4rem; margin-bottom: .8rem; }
+.policies { display: grid; gap: .7rem; margin-bottom: .8rem; }
 .policy-row { display: flex; align-items: center; gap: .6rem; }
 .policy-row label { flex: 1; text-transform: capitalize; font-size: .9rem; }
+.policy-hint { margin: .15rem 0 0; color: var(--dim); font-size: .78rem; }
+.policy-group { border-top: 1px solid var(--border); padding-top: .6rem; }
+.policy-group h3 { margin: 0 0 .2rem; font-size: .95rem; }
 select, input {
   font: 400 .95rem var(--sans); background: var(--inset); color: var(--text);
   border: 1px solid var(--border-strong); border-radius: 6px;

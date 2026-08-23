@@ -333,6 +333,51 @@ def project_page(request: Request, name: str):
         cost=db.total_cost(name))
 
 
+# How each policy reads on the settings page: key -> (label, one-line hint).
+# The stored keys never change — "auto release" is only how cut_release is
+# labelled for the operator.
+POLICY_COPY = {
+    "fix_issues": ("fix issues",
+                   "Who starts a fix: auto — Ruth's verdict is enough; "
+                   "lead — the team lead's plan is the sign-off, so the "
+                   "section runs the fix and your gate moves to the "
+                   "release; approve — you click before an engineer starts."),
+    "file_issues": ("file issues",
+                    "Whether team leads may open tracking issues on the "
+                    "repo from their plan, capped at three a day."),
+    "merge_prs": ("merge community PRs",
+                  "Community PRs are validated and tested locally first "
+                  "either way; this decides who presses merge."),
+    "merge_dependabot": ("merge Dependabot bumps",
+                         "Dependency bumps are tested locally first either "
+                         "way; this decides who presses merge."),
+    "post_comments": ("post comments",
+                      "Whether drafted comments and reviews go up on "
+                      "GitHub on their own or wait for your click."),
+    "cut_release": ("auto release",
+                    "auto — Harness drafts the release, runs the tests, "
+                    "merges to the main branch and tags it without asking. "
+                    "approve — it prepares the release and waits for your "
+                    "click. Nothing ships on a failing suite either way."),
+    "release_min_changes": ("release after this many changes",
+                            "How many queued changes it takes to start a "
+                            "release."),
+    "release_max_age_days": ("...or this many days",
+                             "How old the oldest queued change may get "
+                             "before a release starts anyway."),
+    "active_hours": ("active hours",
+                     "Local hours agent work may run in (\"HH-HH\", or "
+                     "\"always\"). Anything you trigger yourself ignores it."),
+    "daily_budget_usd": ("daily budget (USD)",
+                         "The desk stops starting agent work once it has "
+                         "spent this much in the last 24 hours."),
+}
+
+# The three policies that decide an auto release, shown together.
+RELEASE_POLICY_KEYS = ("cut_release", "release_min_changes",
+                       "release_max_age_days")
+
+
 @app.get("/p/{name}/settings")
 def project_settings(request: Request, name: str):
     p = db.get_project(name)
@@ -340,6 +385,8 @@ def project_settings(request: Request, name: str):
         return RedirectResponse("/", status_code=303)
     return render(request, "settings.html", p=p,
                   policies=db.all_policies(name),
+                  policy_copy=POLICY_COPY,
+                  release_keys=RELEASE_POLICY_KEYS,
                   staff=db.staff_get(name))
 
 
