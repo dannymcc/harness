@@ -1,0 +1,978 @@
+<!DOCTYPE html>
+<html lang="en-GB">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Harness — an AI maintainer for your GitHub repos</title>
+<link rel="canonical" href="https://harness.dmcc.io/">
+<meta name="description" content="Harness is a self-hosted AI maintainer for your GitHub repos: an agent section that triages issues, reviews PRs, fixes bugs with tests, and batches releases — with you approving the important bits. Built on the Claude Agent SDK. MIT licensed.">
+<meta property="og:type" content="website">
+<meta property="og:site_name" content="Harness">
+<meta property="og:title" content="Harness — an AI maintainer for your GitHub repos">
+<meta property="og:description" content="Harness is a self-hosted AI maintainer for your GitHub repos: an agent section that triages issues, reviews PRs, fixes bugs with tests, and batches releases — with you approving the important bits. Built on the Claude Agent SDK. MIT licensed.">
+<meta property="og:url" content="https://harness.dmcc.io/">
+<meta property="og:image" content="https://harness.dmcc.io/project-mobile.png">
+<meta property="og:image:width" content="390">
+<meta property="og:image:height" content="844">
+<meta property="og:image:alt" content="The Harness dashboard on a phone: one repo's desk, with agent status and the operator question queue.">
+<meta name="twitter:card" content="summary">
+<meta name="twitter:title" content="Harness — an AI maintainer for your GitHub repos">
+<meta name="twitter:description" content="A self-hosted AI maintainer built on the Claude Agent SDK. Judgement is agent work; every push, merge and release sits behind deterministic gates you control.">
+<meta name="twitter:image" content="https://harness.dmcc.io/project-mobile.png">
+<link rel="icon" href="icon.svg" type="image/svg+xml">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --paper: #FFFDF8;
+    --card: #FFFFFF;
+    --ink: #1B2823;
+    --muted: #5E6B62;
+    --faint: #8A948C;
+    --rule: #E7E1D2;
+    --rule-soft: #F0EBDE;
+    --green-deep: #14352A;
+    --green: #1D5741;
+    --green-mid: #2E7A55;
+    --green-soft: #6C9A62;
+    --green-wash: #EEF3EC;
+    --brick: #A6432C;
+    --code-bg: #14251E;
+    --code-ink: #D9E4DA;
+    --sans: "IBM Plex Sans", "Helvetica Neue", Arial, sans-serif;
+    --mono: "IBM Plex Mono", "SFMono-Regular", Consolas, monospace;
+    --shadow: 0 1px 2px rgba(27, 40, 35, 0.05), 0 8px 28px rgba(27, 40, 35, 0.07);
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --paper: #0F1713;
+      --card: #15201A;
+      --ink: #E6ECE6;
+      --muted: #9FAEA3;
+      --faint: #718074;
+      --rule: #263630;
+      --rule-soft: #1D2B24;
+      --green-deep: #DCE8DD;
+      --green: #4C9A74;
+      --green-mid: #5FB287;
+      --green-soft: #7FA877;
+      --green-wash: #1A2C23;
+      --brick: #D0704F;
+      --code-bg: #101C16;
+      --code-ink: #CBDACC;
+      --shadow: 0 1px 2px rgba(0, 0, 0, 0.4), 0 8px 28px rgba(0, 0, 0, 0.35);
+    }
+  }
+
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  html { scroll-behavior: smooth; }
+  @media (prefers-reduced-motion: reduce) {
+    html { scroll-behavior: auto; }
+    *, *::before, *::after { animation: none !important; transition: none !important; }
+  }
+  body {
+    font-family: var(--sans);
+    background: var(--paper);
+    color: var(--ink);
+    font-size: 1.0625rem;
+    line-height: 1.65;
+    -webkit-font-smoothing: antialiased;
+  }
+  img { max-width: 100%; display: block; }
+  a { color: var(--green); }
+  a:focus-visible, button:focus-visible {
+    outline: 2px solid var(--green-mid);
+    outline-offset: 3px;
+    border-radius: 2px;
+  }
+  ::selection { background: var(--green); color: #FFFDF8; }
+
+  .wrap { max-width: 1080px; margin: 0 auto; padding: 0 24px; }
+
+  /* ---------- mono file labels ---------- */
+  .file-ref {
+    font-family: var(--mono);
+    font-size: 0.72rem;
+    font-weight: 600;
+    letter-spacing: 0.18em;
+    text-transform: uppercase;
+    color: var(--green);
+  }
+  .file-ref::before {
+    content: "";
+    display: inline-block;
+    width: 1.6em;
+    height: 1px;
+    background: var(--green);
+    vertical-align: middle;
+    margin-right: 0.9em;
+  }
+
+  /* ---------- stamps & chips ---------- */
+  .chip {
+    display: inline-block;
+    font-family: var(--mono);
+    font-size: 0.68rem;
+    font-weight: 500;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    padding: 0.15rem 0.55rem;
+    border: 1px solid var(--rule);
+    border-radius: 4px;
+    color: var(--muted);
+    white-space: nowrap;
+  }
+  .stamp {
+    display: inline-block;
+    font-family: var(--mono);
+    font-size: 0.7rem;
+    font-weight: 600;
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+    padding: 0.3rem 0.7rem;
+    border: 1.5px solid currentColor;
+    border-radius: 4px;
+    white-space: nowrap;
+  }
+  .stamp-auto { color: var(--green-mid); background: var(--green-wash); }
+  .stamp-approve { color: var(--brick); }
+
+  /* ---------- header ---------- */
+  .site-head {
+    border-bottom: 1px solid var(--rule);
+    background: var(--paper);
+  }
+  .site-head .wrap {
+    display: flex;
+    align-items: center;
+    gap: 0.9rem;
+    padding-top: 1rem;
+    padding-bottom: 1rem;
+  }
+  .brand {
+    display: flex;
+    align-items: center;
+    gap: 0.7rem;
+    text-decoration: none;
+    color: var(--ink);
+  }
+  .brand img { width: 30px; height: 30px; border-radius: 7px; }
+  .brand span {
+    font-family: var(--mono);
+    font-weight: 600;
+    font-size: 0.95rem;
+    letter-spacing: 0.28em;
+    text-transform: uppercase;
+  }
+  .site-nav {
+    margin-left: auto;
+    display: flex;
+    align-items: center;
+    gap: 1.5rem;
+  }
+  .site-nav a {
+    font-family: var(--mono);
+    font-size: 0.78rem;
+    letter-spacing: 0.06em;
+    text-decoration: none;
+    color: var(--muted);
+  }
+  .site-nav a:hover { color: var(--green); }
+  .site-nav .nav-gh {
+    color: var(--green);
+    border: 1.5px solid var(--green);
+    border-radius: 5px;
+    padding: 0.35rem 0.8rem;
+    font-weight: 600;
+  }
+  .site-nav .nav-gh:hover { background: var(--green); color: var(--paper); }
+  @media (max-width: 700px) {
+    .site-nav a:not(.nav-gh) { display: none; }
+  }
+
+  /* ---------- hero ---------- */
+  .hero { padding: 4.5rem 0 5rem; }
+  .hero-grid {
+    display: grid;
+    grid-template-columns: minmax(0, 1.05fr) minmax(0, 0.95fr);
+    gap: 4rem;
+    align-items: center;
+  }
+  .hero h1 {
+    font-size: clamp(2.5rem, 5.5vw, 3.9rem);
+    line-height: 1.04;
+    font-weight: 700;
+    letter-spacing: -0.03em;
+    margin: 1.2rem 0 1.4rem;
+  }
+  .hero h1 em {
+    font-style: normal;
+    color: var(--green);
+  }
+  .hero .lede {
+    font-size: 1.15rem;
+    color: var(--muted);
+    max-width: 34em;
+    margin-bottom: 2.2rem;
+  }
+  .cta-row { display: flex; flex-wrap: wrap; gap: 0.9rem; align-items: center; }
+  .btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.55rem;
+    font-family: var(--mono);
+    font-size: 0.85rem;
+    font-weight: 600;
+    letter-spacing: 0.04em;
+    text-decoration: none;
+    padding: 0.8rem 1.4rem;
+    border-radius: 6px;
+    border: 1.5px solid var(--green);
+  }
+  .btn svg { width: 17px; height: 17px; flex: none; }
+  .btn-solid { background: var(--green); color: #FFFDF8; }
+  .btn-solid:hover { background: var(--green-deep); border-color: var(--green-deep); }
+  @media (prefers-color-scheme: dark) {
+    .btn-solid { color: #0F1713; }
+    .btn-solid:hover { background: var(--green-mid); border-color: var(--green-mid); }
+  }
+  .btn-ghost { color: var(--green); }
+  .btn-ghost:hover { background: var(--green-wash); }
+  .hero-note {
+    margin-top: 1.6rem;
+    font-family: var(--mono);
+    font-size: 0.75rem;
+    color: var(--faint);
+    letter-spacing: 0.04em;
+  }
+
+  /* ---------- stand-up log card (signature) ---------- */
+  .logcard {
+    position: relative;
+    background: var(--card);
+    border: 1px solid var(--rule);
+    border-radius: 10px;
+    box-shadow: var(--shadow);
+    overflow: hidden;
+  }
+  .logcard-head {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: 1rem;
+    padding: 0.85rem 1.25rem;
+    border-bottom: 1px solid var(--rule);
+    font-family: var(--mono);
+    font-size: 0.7rem;
+    font-weight: 600;
+    letter-spacing: 0.16em;
+    text-transform: uppercase;
+    color: var(--green);
+  }
+  .logcard-head .when { color: var(--faint); font-weight: 400; letter-spacing: 0.1em; }
+  .logbody {
+    padding: 1.25rem 1.25rem 3.4rem;
+    font-family: var(--mono);
+    font-size: 0.8rem;
+    line-height: 1.75;
+  }
+  .logline {
+    display: grid;
+    grid-template-columns: 4.8em 1fr;
+    gap: 0.9em;
+    opacity: 0;
+    animation: logline-in 0.45s ease forwards;
+  }
+  @keyframes logline-in {
+    from { opacity: 0; transform: translateY(4px); }
+    to { opacity: 1; transform: none; }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .logline { opacity: 1; }
+  }
+  .logline .who {
+    font-weight: 600;
+    color: var(--green-mid);
+    letter-spacing: 0.05em;
+  }
+  .logline .what { color: var(--muted); }
+  .logline .what strong { color: var(--ink); font-weight: 500; }
+  .logline + .logline { margin-top: 0.55rem; }
+  .log-stamp {
+    position: absolute;
+    right: 1.1rem;
+    bottom: 1.05rem;
+    transform: rotate(-4deg);
+    color: var(--brick);
+    background: var(--card);
+    opacity: 0;
+    animation: stamp-in 0.3s ease 3.4s forwards;
+  }
+  @keyframes stamp-in {
+    from { opacity: 0; transform: rotate(-4deg) scale(1.25); }
+    to { opacity: 0.92; transform: rotate(-4deg) scale(1); }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .log-stamp { opacity: 0.92; }
+  }
+
+  @media (max-width: 900px) {
+    .hero { padding: 3rem 0 3.5rem; }
+    .hero-grid { grid-template-columns: 1fr; gap: 3rem; }
+  }
+
+  /* ---------- generic section scaffolding ---------- */
+  .band { padding: 5rem 0; border-top: 1px solid var(--rule); }
+  .band-tinted { background: var(--rule-soft); }
+  @media (prefers-color-scheme: dark) {
+    .band-tinted { background: #121C16; }
+  }
+  .band h2 {
+    font-size: clamp(1.7rem, 3.2vw, 2.3rem);
+    font-weight: 700;
+    letter-spacing: -0.02em;
+    line-height: 1.15;
+    margin: 1rem 0 1rem;
+    max-width: 18em;
+  }
+  .band .band-intro {
+    color: var(--muted);
+    max-width: 40em;
+    margin-bottom: 2.8rem;
+  }
+  @media (max-width: 700px) {
+    .band { padding: 3.5rem 0; }
+  }
+
+  /* ---------- roster ---------- */
+  .roster { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 1rem; }
+  .officer {
+    background: var(--card);
+    border: 1px solid var(--rule);
+    border-radius: 8px;
+    padding: 1.25rem 1.35rem 1.35rem;
+  }
+  .officer.lead { grid-column: 1 / -1; }
+  .officer-top {
+    display: flex;
+    align-items: baseline;
+    gap: 0.7rem;
+    margin-bottom: 0.6rem;
+  }
+  .officer-name {
+    font-family: var(--mono);
+    font-weight: 600;
+    font-size: 0.92rem;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+    color: var(--ink);
+  }
+  .officer-top .leader {
+    flex: 1;
+    border-bottom: 1px dotted var(--rule);
+    transform: translateY(-0.25em);
+    min-width: 1rem;
+  }
+  .officer-role {
+    font-family: var(--mono);
+    font-size: 0.68rem;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--green-mid);
+    white-space: nowrap;
+  }
+  .officer p { font-size: 0.92rem; color: var(--muted); line-height: 1.6; }
+  .officer p strong { color: var(--ink); font-weight: 600; }
+  @media (max-width: 900px) { .roster { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+  @media (max-width: 620px) { .roster { grid-template-columns: 1fr; } }
+
+  /* ---------- fix pipeline ---------- */
+  .pipeline { max-width: 46em; }
+  .step {
+    position: relative;
+    display: grid;
+    grid-template-columns: 3.2rem 1fr;
+    gap: 1.4rem;
+    padding-bottom: 2.2rem;
+  }
+  .step:last-child { padding-bottom: 0; }
+  .step::before {
+    content: "";
+    position: absolute;
+    left: 1.6rem;
+    top: 2.6rem;
+    bottom: 0.4rem;
+    width: 1px;
+    background: var(--rule);
+  }
+  .step:last-child::before { display: none; }
+  .step-no {
+    width: 3.2rem;
+    height: 3.2rem;
+    border: 1.5px solid var(--green);
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-family: var(--mono);
+    font-weight: 600;
+    font-size: 0.85rem;
+    color: var(--green);
+    background: var(--paper);
+    flex: none;
+  }
+  .step h3 { font-size: 1.05rem; font-weight: 600; margin: 0.6rem 0 0.35rem; letter-spacing: -0.01em; }
+  .step p { color: var(--muted); font-size: 0.97rem; }
+  .step p code, .prose code {
+    font-family: var(--mono);
+    font-size: 0.85em;
+    background: var(--green-wash);
+    color: var(--green-deep);
+    border-radius: 4px;
+    padding: 0.1em 0.4em;
+  }
+  @media (prefers-color-scheme: dark) {
+    .step p code, .prose code { color: var(--code-ink); }
+  }
+  .pipeline-coda {
+    margin-top: 2.4rem;
+    padding-left: 4.6rem;
+  }
+  @media (max-width: 620px) {
+    .step { grid-template-columns: 2.4rem 1fr; gap: 1rem; }
+    .step-no { width: 2.4rem; height: 2.4rem; font-size: 0.75rem; }
+    .step::before { left: 1.2rem; top: 2rem; }
+    .pipeline-coda { padding-left: 3.4rem; }
+  }
+
+  /* ---------- safety ---------- */
+  .safety-grid {
+    display: grid;
+    grid-template-columns: minmax(0, 1.1fr) minmax(0, 0.9fr);
+    gap: 3.5rem;
+    align-items: start;
+  }
+  .safety-list { display: grid; gap: 2rem; }
+  .safety-item h3 {
+    font-size: 1.05rem;
+    font-weight: 600;
+    letter-spacing: -0.01em;
+    margin-bottom: 0.4rem;
+  }
+  .safety-item p { color: var(--muted); font-size: 0.97rem; }
+  .ledger {
+    background: var(--card);
+    border: 1px solid var(--rule);
+    border-radius: 10px;
+    box-shadow: var(--shadow);
+    overflow: hidden;
+  }
+  .ledger-head {
+    padding: 0.85rem 1.25rem;
+    border-bottom: 1px solid var(--rule);
+    font-family: var(--mono);
+    font-size: 0.7rem;
+    font-weight: 600;
+    letter-spacing: 0.16em;
+    text-transform: uppercase;
+    color: var(--green);
+    display: flex;
+    justify-content: space-between;
+    gap: 1rem;
+  }
+  .ledger-head .note { color: var(--faint); font-weight: 400; letter-spacing: 0.1em; }
+  .ledger-rows { padding: 0.6rem 1.25rem 1rem; }
+  .ledger-row {
+    display: flex;
+    align-items: baseline;
+    gap: 0.8rem;
+    padding: 0.65rem 0;
+  }
+  .ledger-row + .ledger-row { border-top: 1px dotted var(--rule); }
+  .ledger-row .policy { font-size: 0.92rem; color: var(--ink); }
+  .ledger-row .leader { flex: 1; border-bottom: 1px dotted var(--rule); transform: translateY(-0.3em); min-width: 1rem; }
+  .ledger-foot {
+    padding: 0.8rem 1.25rem 1rem;
+    border-top: 1px solid var(--rule);
+    font-size: 0.85rem;
+    color: var(--faint);
+  }
+  @media (max-width: 900px) {
+    .safety-grid { grid-template-columns: 1fr; gap: 2.5rem; }
+  }
+
+  /* ---------- operator / screenshots ---------- */
+  .operator-grid {
+    display: grid;
+    grid-template-columns: minmax(0, 0.9fr) minmax(0, 1.1fr);
+    gap: 3.5rem;
+    align-items: center;
+  }
+  .operator-copy p { color: var(--muted); margin-bottom: 1.2rem; max-width: 34em; }
+  .operator-copy p strong { color: var(--ink); font-weight: 600; }
+  .phones {
+    display: flex;
+    gap: 1.5rem;
+    justify-content: center;
+    align-items: flex-start;
+  }
+  .phone { flex: 0 1 250px; min-width: 0; }
+  .phone-frame {
+    border: 1px solid var(--rule);
+    background: #0D1512;
+    border-radius: 18px;
+    padding: 8px;
+    box-shadow: var(--shadow);
+  }
+  .phone-frame img { border-radius: 11px; width: 100%; height: auto; }
+  .phone figcaption {
+    margin-top: 0.8rem;
+    text-align: center;
+    font-family: var(--mono);
+    font-size: 0.7rem;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    color: var(--faint);
+  }
+  .phone:nth-child(2) { transform: translateY(2.2rem); }
+  @media (max-width: 900px) {
+    .operator-grid { grid-template-columns: 1fr; }
+    .phone:nth-child(2) { transform: none; }
+  }
+  @media (max-width: 560px) {
+    .phones { flex-direction: column; align-items: center; }
+    .phone { flex-basis: auto; width: min(280px, 100%); }
+  }
+
+  /* ---------- get started ---------- */
+  .start-grid {
+    display: grid;
+    grid-template-columns: minmax(0, 0.85fr) minmax(0, 1.15fr);
+    gap: 3.5rem;
+    align-items: start;
+  }
+  .start-copy p { color: var(--muted); margin-bottom: 1.2rem; max-width: 32em; }
+  .start-copy p strong { color: var(--ink); font-weight: 600; }
+  .terminal {
+    background: var(--code-bg);
+    border-radius: 10px;
+    box-shadow: var(--shadow);
+    overflow: hidden;
+    border: 1px solid rgba(255, 253, 248, 0.06);
+  }
+  .terminal-head {
+    display: flex;
+    justify-content: space-between;
+    align-items: baseline;
+    gap: 1rem;
+    padding: 0.8rem 1.25rem;
+    border-bottom: 1px solid rgba(255, 253, 248, 0.08);
+    font-family: var(--mono);
+    font-size: 0.68rem;
+    font-weight: 600;
+    letter-spacing: 0.16em;
+    text-transform: uppercase;
+    color: #7FA877;
+  }
+  .terminal pre {
+    padding: 1.25rem 1.4rem 1.5rem;
+    overflow-x: auto;
+    font-family: var(--mono);
+    font-size: 0.82rem;
+    line-height: 1.9;
+    color: var(--code-ink);
+  }
+  .terminal .cmt { color: #6E7F72; }
+  .terminal .prompt { color: #5FB287; user-select: none; }
+  @media (max-width: 900px) {
+    .start-grid { grid-template-columns: 1fr; gap: 2.2rem; }
+  }
+
+  /* ---------- footer ---------- */
+  .site-foot {
+    border-top: 1px solid var(--rule);
+    padding: 2.5rem 0 3rem;
+  }
+  .site-foot .wrap {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 1rem 2rem;
+  }
+  .site-foot .brand img { width: 24px; height: 24px; border-radius: 6px; }
+  .site-foot .brand span { font-size: 0.8rem; }
+  .site-foot p {
+    font-family: var(--mono);
+    font-size: 0.75rem;
+    color: var(--faint);
+    letter-spacing: 0.04em;
+  }
+  .site-foot a { color: var(--muted); }
+  .site-foot .foot-links { margin-left: auto; display: flex; gap: 1.5rem; }
+  .site-foot .foot-links a {
+    font-family: var(--mono);
+    font-size: 0.75rem;
+    letter-spacing: 0.06em;
+    text-decoration: none;
+  }
+  .site-foot .foot-links a:hover { color: var(--green); }
+</style>
+</head>
+<body>
+
+<header class="site-head">
+  <div class="wrap">
+    <a class="brand" href="#">
+      <img src="icon.svg" alt="" width="30" height="30">
+      <span>Harness</span>
+    </a>
+    <nav class="site-nav" aria-label="Site">
+      <a href="#section">The section</a>
+      <a href="#safety">Safety</a>
+      <a href="#start">Get started</a>
+      <a class="nav-gh" href="https://github.com/dannymcc/harness">GitHub</a>
+    </nav>
+  </div>
+</header>
+
+<main>
+  <section class="hero">
+    <div class="wrap hero-grid">
+      <div>
+        <p class="file-ref">Open source · Self-hosted · Claude Agent SDK</p>
+        <h1>Your repos, <em>staffed.</em></h1>
+        <p class="lede">Harness is an AI maintainer for your GitHub repos. A small agent
+          section triages issues, reviews pull requests, fixes bugs with tests, and
+          batches everything into proper versioned releases. You approve the important
+          bits from your phone.</p>
+        <div class="cta-row">
+          <a class="btn btn-solid" href="https://github.com/dannymcc/harness">
+            <svg viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82a7.5 7.5 0 0 1 2-.27c.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.01 8.01 0 0 0 16 8c0-4.42-3.58-8-8-8Z"/></svg>
+            View on GitHub
+          </a>
+          <a class="btn btn-ghost" href="#start">Get started</a>
+        </div>
+        <p class="hero-note">Self-hosted. One Docker container. SQLite. MIT licence.</p>
+      </div>
+
+      <div class="logcard" aria-label="Example stand-up log">
+        <div class="logcard-head">
+          <span>File · Section stand-up</span>
+          <span class="when">09:00 UTC · Hourly</span>
+        </div>
+        <div class="logbody">
+          <p class="logline" style="animation-delay: 0.3s"><span class="who">HARRY</span><span class="what">convenes. Two desks reporting.</span></p>
+          <p class="logline" style="animation-delay: 0.8s"><span class="who">RUTH</span><span class="what">issue #42 triaged against the code — <strong>valid, safely fixable.</strong> Assigned to Malcolm.</span></p>
+          <p class="logline" style="animation-delay: 1.3s"><span class="who">MALCOLM</span><span class="what">fix written in its own worktree, with tests. Suite re-run by the harness: <strong>34 passed.</strong></span></p>
+          <p class="logline" style="animation-delay: 1.8s"><span class="who">TOM</span><span class="what">pr #40 reviewed for value and quality — verdict <strong>merge</strong>, held at the policy gate.</span></p>
+          <p class="logline" style="animation-delay: 2.3s"><span class="who">COLIN</span><span class="what">release queue at three. Drafting v0.9.0: version bump, changelog, credited notes.</span></p>
+          <p class="logline" style="animation-delay: 2.8s"><span class="who">HARRY</span><span class="what">one question is genuinely yours. <strong>Sent to your phone.</strong></span></p>
+        </div>
+        <span class="stamp log-stamp">Held for operator</span>
+      </div>
+    </div>
+  </section>
+
+  <section class="band" id="section">
+    <div class="wrap">
+      <p class="file-ref">File / Personnel</p>
+      <h2>A section, not a chatbot.</h2>
+      <p class="band-intro">Harness staffs your repos with a small agent organisation —
+        personas borrowed, affectionately, from Spooks. Everyone has a job, a scope,
+        and a boss. Work moves through the section the way it would through a good
+        small team: planned, assigned, reviewed, released.</p>
+
+      <div class="roster">
+        <div class="officer lead">
+          <div class="officer-top">
+            <span class="officer-name">Harry</span>
+            <span class="leader"></span>
+            <span class="officer-role">Head of section · all repos</span>
+          </div>
+          <p>Runs an hourly stand-up across every desk. Blockers become directives,
+            stuck work is requeued, and staffing requests are granted or declined
+            against backlog and spend. Questions from the team come to Harry first —
+            <strong>only what is genuinely yours reaches you.</strong></p>
+        </div>
+
+        <div class="officer">
+          <div class="officer-top">
+            <span class="officer-name">Team leads</span>
+            <span class="leader"></span>
+            <span class="officer-role">One per repo</span>
+          </div>
+          <p>Tom, Adam, Ros, Lucas… each owns a desk: plans the cycle, actions
+            Harry's directives, assigns fixes, and asks for more engineers when the
+            backlog outgrows the team.</p>
+        </div>
+
+        <div class="officer">
+          <div class="officer-top">
+            <span class="officer-name">Ruth</span>
+            <span class="leader"></span>
+            <span class="officer-role">Analyst</span>
+          </div>
+          <p>Triages issues against the actual code and reviews pull requests for
+            <strong>value as well as quality</strong> — is this worth having, not
+            just is it tidy.</p>
+        </div>
+
+        <div class="officer">
+          <div class="officer-top">
+            <span class="officer-name">Malcolm</span>
+            <span class="leader"></span>
+            <span class="officer-role">Engineer</span>
+          </div>
+          <p>Writes the fixes, with tests, each in its own git worktree. When the
+            backlog demands it, Harry hires more engineers and they work in
+            parallel.</p>
+        </div>
+
+        <div class="officer">
+          <div class="officer-top">
+            <span class="officer-name">Colin</span>
+            <span class="leader"></span>
+            <span class="officer-role">Operations</span>
+          </div>
+          <p>Runs the release cycle: version bump, changelog, release notes with
+            contributor credits, docs check — then the dev&nbsp;→&nbsp;main pull
+            request for your approval.</p>
+        </div>
+
+        <div class="officer">
+          <div class="officer-top">
+            <span class="officer-name">Zaf</span>
+            <span class="leader"></span>
+            <span class="officer-role">Security</span>
+          </div>
+          <p>On-demand, read-only security review of a repo: auth, injection,
+            uploads, secrets, deployment config. Findings ranked by severity.</p>
+        </div>
+
+        <div class="officer">
+          <div class="officer-top">
+            <span class="officer-name">Tariq</span>
+            <span class="leader"></span>
+            <span class="officer-role">Admin</span>
+          </div>
+          <p>Hourly housekeeping: prunes old runs and logs, compacts state, and
+            keeps 200-word rolling desk notes so prompts stay small and memory
+            stays sharp.</p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section class="band band-tinted" id="how">
+    <div class="wrap">
+      <p class="file-ref">File / Procedure</p>
+      <h2>How a fix happens.</h2>
+      <p class="band-intro">From an issue landing to a release shipping, in order.
+        The order is the point — nothing skips a step.</p>
+
+      <div class="pipeline">
+        <div class="step">
+          <div class="step-no">1</div>
+          <div>
+            <h3>An issue lands</h3>
+            <p>Ruth investigates it against the actual code, not just the report.
+              Valid and safely fixable, it goes to an engineer. Everything else gets
+              a drafted, courteous reply and waits for you.</p>
+          </div>
+        </div>
+        <div class="step">
+          <div class="step-no">2</div>
+          <div>
+            <h3>The fix is written in isolation</h3>
+            <p>Each engineer works in their own git worktree, so fixes run in
+              parallel without treading on each other. Landing on <code>dev</code>
+              is serialised: rebase and re-test when it has moved, conflicts held
+              for a human.</p>
+          </div>
+        </div>
+        <div class="step">
+          <div class="step-no">3</div>
+          <div>
+            <h3>The harness re-runs the tests itself</h3>
+            <p>An engineer claiming success is never taken on trust. Only a suite
+              the harness has run and seen pass lets the fix continue.</p>
+          </div>
+        </div>
+        <div class="step">
+          <div class="step-no">4</div>
+          <div>
+            <h3>The change queues on dev</h3>
+            <p>Behind whatever policy you've set — push automatically, or hold for
+              your click. Fixes and merged pull requests accumulate together.</p>
+          </div>
+        </div>
+        <div class="step">
+          <div class="step-no">5</div>
+          <div>
+            <h3>Colin drafts a release</h3>
+            <p>When the queue reaches three changes, or the oldest turns seven days,
+              he prepares the lot: version bump, changelog, credited release notes,
+              docs check, then a <code>dev&nbsp;→&nbsp;main</code> pull request. You
+              approve; it merges, tags, and publishes the GitHub Release.</p>
+          </div>
+        </div>
+      </div>
+      <p class="pipeline-coda file-ref">One fix never means one release</p>
+    </div>
+  </section>
+
+  <section class="band" id="safety">
+    <div class="wrap">
+      <p class="file-ref">File / Standing orders</p>
+      <h2>Judgement is agent work.<br>Actions are not.</h2>
+      <p class="band-intro">The interesting decisions — is this issue real, is this
+        pull request worth having — are made by agents. Everything with
+        consequences is executed by deterministic code, behind gates you set.</p>
+
+      <div class="safety-grid">
+        <div class="safety-list">
+          <div class="safety-item">
+            <h3>Deterministic gates</h3>
+            <p>Every push, merge, comment and release is performed by plain code
+              acting on an agent's verdict — never by the agent. Agents are blocked
+              by tool policy, not just prompt, from <code>git push</code>,
+              <code>gh</code>, and anything network-facing.</p>
+          </div>
+          <div class="safety-item">
+            <h3>Tests, always, by the harness</h3>
+            <p>The suite is re-run deterministically before anything leaves the
+              building. Nothing merges on an agent's word.</p>
+          </div>
+          <div class="safety-item">
+            <h3>Circuit breaker</h3>
+            <p>Two consecutive failed runs and an item is held, not retried
+              forever. Every run has a live transcript and a Stop button.</p>
+          </div>
+          <div class="safety-item">
+            <h3>Rate-limit aware</h3>
+            <p>If the API rate-limits or your plan hits its cap, Harness pauses,
+              records why, and resumes the moment the limit resets — in-flight
+              fixes pick up their session rather than starting over.</p>
+          </div>
+        </div>
+
+        <div class="ledger" aria-label="Default approval policies">
+          <div class="ledger-head">
+            <span>Policies · Defaults</span>
+            <span class="note">Editable live, per repo</span>
+          </div>
+          <div class="ledger-rows">
+            <div class="ledger-row">
+              <span class="policy">Fix issues, push to dev</span>
+              <span class="leader"></span>
+              <span class="stamp stamp-auto">Auto</span>
+            </div>
+            <div class="ledger-row">
+              <span class="policy">Merge community PRs</span>
+              <span class="leader"></span>
+              <span class="stamp stamp-approve">Approve</span>
+            </div>
+            <div class="ledger-row">
+              <span class="policy">Merge dependabot PRs</span>
+              <span class="leader"></span>
+              <span class="stamp stamp-approve">Approve</span>
+            </div>
+            <div class="ledger-row">
+              <span class="policy">Comment publicly</span>
+              <span class="leader"></span>
+              <span class="stamp stamp-approve">Approve</span>
+            </div>
+            <div class="ledger-row">
+              <span class="policy">Cut releases</span>
+              <span class="leader"></span>
+              <span class="stamp stamp-approve">Approve</span>
+            </div>
+          </div>
+          <div class="ledger-foot">
+            <em>Auto</em> — Harness acts on its own verdict.
+            <em>Approve</em> — everything is prepared, then waits for your click.
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section class="band band-tinted" id="operator">
+    <div class="wrap operator-grid">
+      <div class="operator-copy">
+        <p class="file-ref">File / Operator</p>
+        <h2>You stay in charge, from your phone.</h2>
+        <p>When a decision isn't an agent's to make, it files a question. Harry
+          rules on most of them at stand-up; the few that are genuinely yours
+          arrive as a <strong>phone notification with one-tap answers</strong>, via
+          your own ntfy. Your reply flows back into every relevant prompt.</p>
+        <p>The dashboard is mobile-first — a kanban board per repo, live agent
+          transcripts, policies editable in place. Pin it to your home screen and
+          run the section from the queue.</p>
+      </div>
+      <div class="phones">
+        <figure class="phone">
+          <div class="phone-frame">
+            <img src="overview-mobile.png" alt="Harness overview dashboard on a phone: the operator question queue, with escalated questions from Tom and Ruth and one-tap Answer buttons" width="390" height="844" loading="lazy">
+          </div>
+          <figcaption>The question queue</figcaption>
+        </figure>
+        <figure class="phone">
+          <div class="phone-frame">
+            <img src="project-mobile.png" alt="Harness project page on a phone: the desk for one repo, with agent status chips for Tom, Ruth, Malcolm, Colin and Zaf" width="390" height="844" loading="lazy">
+          </div>
+          <figcaption>One repo's desk</figcaption>
+        </figure>
+      </div>
+    </div>
+  </section>
+
+  <section class="band" id="start">
+    <div class="wrap start-grid">
+      <div class="start-copy">
+        <p class="file-ref">File / Deployment</p>
+        <h2>Up in three commands.</h2>
+        <p><strong>Fully self-hosted.</strong> One Docker container on your own
+          machine or server, state in SQLite, your Claude account via a setup
+          token. It talks to exactly two services — GitHub and Claude, plus your
+          own ntfy if you want phone notifications — and depends on no
+          infrastructure of ours.</p>
+        <p><strong>Designed to stay off the public internet.</strong> The dashboard
+          deliberately ships without auth of its own — serve it over your tailnet
+          or VPN, and it's exactly as reachable as you are.</p>
+      </div>
+      <div class="terminal">
+        <div class="terminal-head">
+          <span>Deploy</span>
+          <span>Dashboard on :8300</span>
+        </div>
+        <pre><code><span class="cmt"># clone the repo, then:</span>
+<span class="prompt">$</span> cp .env.example .env   <span class="cmt"># add your GH_TOKEN</span>
+<span class="prompt">$</span> claude setup-token     <span class="cmt"># auth with your Claude account</span>
+<span class="prompt">$</span> docker compose up -d
+
+<span class="cmt"># keep it tailnet-only:</span>
+<span class="prompt">$</span> tailscale serve --bg --https=443 http://127.0.0.1:8300</code></pre>
+      </div>
+    </div>
+  </section>
+</main>
+
+<footer class="site-foot">
+  <div class="wrap">
+    <a class="brand" href="#">
+      <img src="icon.svg" alt="" width="24" height="24">
+      <span>Harness</span>
+    </a>
+    <p>MIT licence · Built on the <a href="https://docs.claude.com/en/api/agent-sdk/overview">Claude Agent SDK</a></p>
+    <div class="foot-links">
+      <a href="https://github.com/dannymcc/harness">GitHub</a>
+      <a href="#section">The section</a>
+      <a href="#start">Get started</a>
+    </div>
+  </div>
+</footer>
+
+</body>
+</html>
