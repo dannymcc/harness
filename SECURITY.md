@@ -26,6 +26,39 @@ merges/comments/releases default to requiring your approval, and why the
 circuit breaker holds repeatedly-failing items. Keeping `merge_prs` and
 `post_comments` on `approve` is the recommended posture for public repos.
 
+## Running untrusted PR code
+
+Reviewing a community PR means running the contributor's code: the harness
+merges the PR onto your dev branch and runs the project's `setup_command` and
+`test_command` over the result, because an agent's word that the suite passes
+is worth nothing. Both commands come from the PR's own tree, so anyone who can
+open a PR can choose what runs.
+
+Two things contain that:
+
+- **No credentials in scope.** Project-supplied commands get a built
+  environment — `PATH`, locale, `TERM`, `TMPDIR` — and nothing else.
+  The GitHub token and the Claude credentials are not inherited, and `HOME`
+  points at scratch space, so `~/.config/gh/hosts.yml`, `~/.claude` and
+  `~/.git-credentials` are not reachable either. Harness's own git and gh
+  calls keep the real environment; nothing else does.
+- **A disposable checkout.** PR code is tested in a throwaway clone under
+  `data/pr-runs/`, with its own virtualenv and scratch `HOME`, all deleted
+  when the review ends. It is not a worktree of harness's clone (a worktree
+  shares `.git`), so the PR cannot reach the clone's object store, its hooks,
+  or the venv the fix flow reuses.
+
+**Residual risk: this is containment, not a sandbox.** The shipped image runs
+the tests as the same user, in the same container, as the harness itself. A
+hostile PR can still execute arbitrary code: it has the network, it can write
+anywhere that user can write (including `data/`), and it can read anything on
+that filesystem that is not a credential in the environment. Isolating the
+test step in a child container is the remaining fix and is not implemented.
+
+Until it is, treat the harness's container as the blast radius: give it a
+fine-grained token, run it somewhere you would be content to rebuild, and keep
+`merge_prs` and `post_comments` on `approve` for public repos.
+
 ## Credentials
 
 The container needs a GitHub token (`repo` scope) and Claude credentials via

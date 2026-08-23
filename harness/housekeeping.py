@@ -131,6 +131,32 @@ def _prune_worktrees() -> int:
     return n
 
 
+PR_RUN_KEEP_HOURS = 12
+
+
+def _prune_pr_runs() -> int:
+    """Sweep up throwaway PR checkouts that a crash left behind.
+
+    The review flow removes its own run directory; this is only for the case
+    where the process died between fetching a PR and finishing with it.
+    """
+    import shutil
+    n = 0
+    cutoff = time.time() - PR_RUN_KEEP_HOURS * 3600
+    for p in db.all_projects():
+        base = config.DATA_DIR / "pr-runs" / p["name"]
+        if not base.exists():
+            continue
+        for d in base.iterdir():
+            try:
+                if d.is_dir() and d.stat().st_mtime < cutoff:
+                    shutil.rmtree(d, ignore_errors=True)
+                    n += 1
+            except OSError:
+                pass
+    return n
+
+
 def prune() -> str:
     with db.conn() as c:
         ev = _prune_events(c)
@@ -139,6 +165,7 @@ def prune() -> str:
         orph = _close_orphaned_runs(c)
     logs = _prune_files(config.LOG_DIR, LOG_KEEP_DAYS)
     wts = _prune_worktrees()
+    prs = _prune_pr_runs()
     sessions = _prune_sdk_sessions()
     parts = []
     if ev: parts.append(f"{ev} events folded")
@@ -147,6 +174,7 @@ def prune() -> str:
     if orph: parts.append(f"{orph} orphaned runs closed")
     if logs: parts.append(f"{logs} old logs removed")
     if wts: parts.append(f"{wts} stale worktrees removed")
+    if prs: parts.append(f"{prs} stale PR runs removed")
     if sessions: parts.append(f"{sessions} stale sessions removed")
     return ", ".join(parts)
 
@@ -156,18 +184,20 @@ def _prune_sdk_sessions() -> int:
 
     Strictly scoped: Claude Code stores sessions under
     ~/.claude/projects/<encoded-cwd>/, and harness agents only ever run with
-    cwd inside REPOS_DIR — so only directories whose encoded name matches
-    REPOS_DIR are touched, only *.jsonl files inside them, and never anything
-    under a memory/ path. Everything else in ~/.claude belongs to the human.
+    cwd inside REPOS_DIR or the throwaway PR checkouts under pr-runs — so only
+    directories whose encoded name matches one of those are touched, only
+    *.jsonl files inside them, and never anything under a memory/ path.
+    Everything else in ~/.claude belongs to the human.
     """
     root = Path.home() / ".claude" / "projects"
     if not root.exists():
         return 0
-    prefix = str(config.REPOS_DIR).replace("/", "-").replace(".", "-")
+    prefixes = tuple(str(p).replace("/", "-").replace(".", "-")
+                     for p in (config.REPOS_DIR, config.DATA_DIR / "pr-runs"))
     cutoff = time.time() - SESSION_KEEP_DAYS * 86400
     n = 0
     for d in root.iterdir():
-        if not d.is_dir() or not d.name.startswith(prefix):
+        if not d.is_dir() or not d.name.startswith(prefixes):
             continue
         for f in d.rglob("*.jsonl"):
             if "memory" in f.parts:

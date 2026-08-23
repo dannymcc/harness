@@ -4,7 +4,9 @@ The clone under data/repos/<project> belongs to harness: agents edit it, the
 pipeline resets it. It is never the user's own working copy.
 """
 import fcntl
+import os
 import re
+import shutil
 import subprocess
 import venv
 from contextlib import contextmanager
@@ -224,16 +226,71 @@ def reconcile_dev(project) -> str:
     return "fast-forwarded"
 
 
+def pr_run_dir(project, number: int) -> Path:
+    """The throwaway directory a PR's code is tested in."""
+    return config.DATA_DIR / "pr-runs" / project["name"] / str(number)
+
+
 def fetch_pr_branch(project, number: int, branch: str) -> Path:
-    """Check out PR #number merged onto origin/<dev> as local branch."""
+    """Check out PR #number merged onto origin/<dev>, in a throwaway clone.
+
+    The merge happens in harness's clone (it is the one with the remote and
+    the credentials), but the contributor's code is then copied out to
+    data/pr-runs/<project>/<number>/repo and tested there. A worktree would
+    not do: it shares .git with the clone, and the test command a PR ships is
+    attacker-controlled. --no-hardlinks so the run cannot reach back into the
+    clone's object store, and hooks point at an empty directory.
+
+    Returns the checkout; the caller must remove_pr_run() when done.
+    """
     d = clean_checkout(project, project["dev_branch"])
     run(["git", "fetch", "origin", f"pull/{number}/head:pr-{number}"], cwd=d)
     run(["git", "checkout", "-B", branch, f"origin/{project['dev_branch']}"], cwd=d)
     run(["git", "merge", "--no-edit", f"pr-{number}"], cwd=d)  # raises on conflict
-    return d
+    remove_pr_run(project, number)
+    hooks = pr_run_dir(project, number) / "no-hooks"
+    hooks.mkdir(parents=True)
+    checkout = pr_run_dir(project, number) / "repo"
+    run(["git", "clone", "--no-hardlinks", "-c", f"core.hooksPath={hooks}",
+         str(d), str(checkout)], timeout=1200)
+    return checkout
+
+
+def remove_pr_run(project, number: int) -> None:
+    """Delete a PR's throwaway checkout, venv and scratch home."""
+    shutil.rmtree(pr_run_dir(project, number), ignore_errors=True)
 
 
 # --- tests ------------------------------------------------------------------
+
+def _sandbox_env(project, home: Path | None = None) -> dict[str, str]:
+    """The environment project-supplied commands run in.
+
+    setup_command and test_command are the project's own build hooks, so on a
+    community PR they are contributor-controlled code. Harness's own
+    environment holds the GitHub token and the Claude credentials, so none of
+    it is inherited: this is an allowlist of what a build actually needs, with
+    HOME and TMPDIR pointed at scratch space so ~/.config/gh/hosts.yml,
+    ~/.claude and ~/.git-credentials are out of reach as well.
+
+    Not a sandbox: the command still has the network and can write anywhere
+    the harness user can. See SECURITY.md.
+    """
+    home = home or config.DATA_DIR / "sandbox" / project["name"]
+    tmp = home / "tmp"
+    tmp.mkdir(parents=True, exist_ok=True)
+    env = {
+        "PATH": os.environ.get("PATH", "/usr/local/bin:/usr/bin:/bin"),
+        "HOME": str(home),
+        "TMPDIR": str(tmp),
+        "TERM": "dumb",
+        "GIT_TERMINAL_PROMPT": "0",
+    }
+    for passthrough in ("LANG", "LC_ALL", "TZ"):
+        if passthrough in os.environ:
+            env[passthrough] = os.environ[passthrough]
+    return env
+
 
 def ensure_test_env(project) -> None:
     """Build the shared venv + install deps once, before parallel test runs."""
@@ -244,13 +301,13 @@ def ensure_test_env(project) -> None:
         setup_cmd = f"{py} -m pip install -q -r requirements.txt"
     if setup_cmd:
         run(["bash", "-c", f'PATH="{py.parent}:$PATH" {setup_cmd}'],
-            cwd=d, timeout=1200, check=False)
+            cwd=d, timeout=1200, check=False, env=_sandbox_env(project))
 
 
 
-def _venv_python(project) -> Path:
+def _venv_python(project, vdir: Path | None = None) -> Path:
     """A per-project virtualenv so test deps don't pollute harness's own env."""
-    vdir = config.DATA_DIR / "venvs" / project["name"]
+    vdir = vdir or config.DATA_DIR / "venvs" / project["name"]
     py = vdir / "bin" / "python"
     if not py.exists():
         vdir.parent.mkdir(parents=True, exist_ok=True)
@@ -258,17 +315,30 @@ def _venv_python(project) -> Path:
     return py
 
 
-def run_tests(project, cwd: Path | None = None,
-              setup: bool = True) -> tuple[bool, str]:
+def run_pr_tests(project, number: int) -> tuple[bool, str]:
+    """Run a contributor's suite in its own throwaway checkout.
+
+    Everything the run touches — checkout, venv, HOME — lives under the PR's
+    run directory and goes when it does, so a PR cannot poison the venv the
+    fix flow shares.
+    """
+    return run_tests(project, cwd=pr_run_dir(project, number) / "repo",
+                     scratch=pr_run_dir(project, number))
+
+
+def run_tests(project, cwd: Path | None = None, setup: bool = True,
+              scratch: Path | None = None) -> tuple[bool, str]:
     """Run setup (unless suppressed) + the project's test command.
 
     cwd defaults to the main clone; pass a worktree for isolated runs.
     Parallel worktree runs share the per-project venv — suppress setup for
-    all but one to avoid concurrent pip installs racing.
+    all but one to avoid concurrent pip installs racing. Pass scratch to give
+    one run a private venv and HOME underneath it instead (see run_pr_tests).
     Returns (passed, combined output tail).
     """
     d = cwd or repo_dir(project)
-    py = _venv_python(project)
+    py = _venv_python(project, scratch / "venv" if scratch else None)
+    env = _sandbox_env(project, scratch / "home" if scratch else None)
     env_prefix = str(py.parent)
     outputs = []
     setup_cmd = project["setup_command"].strip() if setup else ""
@@ -278,10 +348,10 @@ def run_tests(project, cwd: Path | None = None,
         if setup_cmd:
             outputs.append(run(["bash", "-c",
                                 f'PATH="{env_prefix}:$PATH" {setup_cmd}'],
-                               cwd=d, timeout=1200))
+                               cwd=d, timeout=1200, env=env))
         out = run(["bash", "-c",
                    f'PATH="{env_prefix}:$PATH" {project["test_command"]}'],
-                  cwd=d, timeout=1800)
+                  cwd=d, timeout=1800, env=env)
         outputs.append(out)
         tail = "\n".join(outputs)[-8000:]
         return True, tail
