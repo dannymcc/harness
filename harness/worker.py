@@ -41,12 +41,13 @@ def _loop() -> None:
         try:
             if db.maintenance():
                 raise _Maintenance()
-            hourly = housekeeping.due()
-            if hourly:
+            if housekeeping.due():
                 asyncio.run(housekeeping.run(allow_agent=not db.paused_until()))
-            asyncio.run(pipeline.run_all_cycles())
-            if hourly:
+            # Stand-up has its own clock and runs BEFORE the sweep, so a
+            # long cycle (or a restart mid-cycle) can never starve it.
+            if pipeline.standup_due():
                 asyncio.run(pipeline.run_standup())
+            asyncio.run(pipeline.run_all_cycles())
         except _Maintenance:
             pass  # maintenance mode: idle until the operator clears it
         except Exception:

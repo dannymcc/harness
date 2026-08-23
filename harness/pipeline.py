@@ -619,6 +619,15 @@ def _standup_digest() -> str:
     return "\n\n".join(sections) or "No harnesses configured."
 
 
+def standup_due() -> bool:
+    from datetime import datetime, timezone
+    last = db.get_setting("last_standup_at")
+    if not last:
+        return True
+    dt = datetime.strptime(last, "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=timezone.utc)
+    return (datetime.now(timezone.utc) - dt).total_seconds() >= 3600
+
+
 async def run_standup() -> None:
     """Harry's hourly stand-up across every desk."""
     _unstick_working()
@@ -644,6 +653,7 @@ async def run_standup() -> None:
                      project=b.get("project", ""))
     _apply_decisions(out.get("decisions", []))
     _apply_staffing(out.get("staffing", []))
+    db.set_setting("last_standup_at", db.now())
     if out["all_clear"]:
         db.log_event("Stand-up: all clear")
 
