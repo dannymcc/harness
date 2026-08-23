@@ -90,12 +90,13 @@ def dev_ahead_count(project) -> int:
     Read-only and lock-free: the cycle has already fetched by the time this
     is asked, and a count one fetch stale only ever costs a cycle's delay.
     Returns 0 if the clone is missing or git fails — never a false "there is
-    something to release".
+    something to release". A page render asks it too, so the timeout is
+    short: a wedged git must not hold the GUI open.
     """
     try:
         out = run(["git", "rev-list", "--count",
                    f"origin/{project['main_branch']}..origin/{project['dev_branch']}"],
-                  cwd=repo_dir(project))
+                  cwd=repo_dir(project), timeout=15)
         return int(out.strip() or 0)
     except (CmdError, ValueError, OSError,
             subprocess.TimeoutExpired):

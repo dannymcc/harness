@@ -111,10 +111,10 @@
     {% if c.lead_report %}<p class="report-snippet clamp3"><b>{{ c.project.lead_name }}:</b> {{ c.lead_report.content[:300] }}</p>{% endif %}
     <p class="cost">{{ c.cost|money }} spent</p>
   </a>
-  {% if not c.release and not c.release_pending %}
+  {% if c.can_release %}
   <form class="slot-action" method="post"
         action="/p/{{ c.project.name }}/release/request">
-    <button title="Cut a release now, whatever the batch thresholds say">
+    <button title="Drafts and tests a release now, whatever the thresholds say">
       Release now</button></form>
   {% endif %}
   </div>

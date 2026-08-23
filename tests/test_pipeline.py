@@ -92,6 +92,23 @@ def test_release_due_thresholds(fresh_db, may):
     assert len(pipeline._release_due(may)) == 3
 
 
+def test_anything_to_release_is_what_the_button_asks(fresh_db, may,
+                                                     monkeypatch):
+    """The GUI offers Release now on this answer, so it has to match what a
+    request would actually do."""
+    from harness import pipeline, repo
+    monkeypatch.setattr(repo, "dev_ahead_count", lambda project: 0)
+    assert pipeline.anything_to_release(may) is False
+    fresh_db.upsert_item("may", "issue", 1, "t", "a", "open", "x")
+    fresh_db.update_item("may", "issue", 1, status="queued",
+                         queued_at=fresh_db.now())
+    assert pipeline.anything_to_release(may) is True
+    # nothing queued, but dev carries work that landed outside the harness
+    fresh_db.update_item("may", "issue", 1, status="released")
+    monkeypatch.setattr(repo, "dev_ahead_count", lambda project: 3)
+    assert pipeline.anything_to_release(may) is True
+
+
 def test_operator_release_with_nothing_queued(fresh_db, may, monkeypatch):
     """Work landed on dev outside the harness: pressing Release now must
     still cut one, and must not claim there is a release when there isn't."""

@@ -176,7 +176,14 @@ def test_only_escalations_get_primary_buttons(client, fresh_db):
     assert "Needs your decision (1)" in html
 
 
+def _queue_item(fresh_db, number=1):
+    fresh_db.upsert_item("may", "issue", number, "t", "a", "open", "x")
+    fresh_db.update_item("may", "issue", number, status="queued",
+                         queued_at=fresh_db.now())
+
+
 def test_release_now_button_and_request(client, fresh_db):
+    _queue_item(fresh_db)
     html = client.get("/p/may").text
     assert "Release now (Colin)" in html
     r = client.post("/p/may/release/request", follow_redirects=False)
@@ -187,7 +194,30 @@ def test_release_now_button_and_request(client, fresh_db):
     assert "Release requested" in html and "Release now (Colin)" not in html
 
 
+def test_release_now_is_hidden_with_nothing_to_release(client, fresh_db):
+    """Nothing queued and dev level with main: pressing it would only earn a
+    "nothing to release" warning next cycle, so it is not offered at all."""
+    assert "Release now (Colin)" not in client.get("/p/may").text
+    assert "Nothing to release" in client.get("/p/may").text
+    assert "Release now" not in client.get("/").text
+    # and a stale page that posts anyway changes nothing
+    r = client.post("/p/may/release/request", follow_redirects=False)
+    assert r.status_code == 303
+    assert fresh_db.get_setting("release_requested.may") == ""
+
+
+def test_release_now_survives_work_landed_outside_the_harness(
+        client, fresh_db, monkeypatch):
+    """Nothing queued, but dev is ahead of main — there is still a release."""
+    from harness import repo
+    monkeypatch.setattr(repo, "dev_ahead_count", lambda p: 2)
+    assert "Release now (Colin)" in client.get("/p/may").text
+    client.post("/p/may/release/request", follow_redirects=False)
+    assert fresh_db.get_setting("release_requested.may") == "1"
+
+
 def test_release_now_is_refused_while_one_is_open(client, fresh_db):
+    _queue_item(fresh_db)
     fresh_db.create_release("may", "1.0.0", "notes", [])
     client.post("/p/may/release/request", follow_redirects=False)
     assert fresh_db.get_setting("release_requested.may") == ""
@@ -223,9 +253,7 @@ def test_live_console_keeps_polling_before_the_log_exists(client, fresh_db):
 def test_overview_release_button_overrides_the_thresholds(client, fresh_db):
     """One queued change is under the default batch of three; the override
     exists precisely so that does not mean waiting."""
-    fresh_db.upsert_item("may", "issue", 1, "t", "a", "open", "x")
-    fresh_db.update_item("may", "issue", 1, status="queued",
-                         queued_at=fresh_db.now())
+    _queue_item(fresh_db)
     assert "Release now" in client.get("/").text
     client.post("/p/may/release/request", follow_redirects=False)
     html = client.get("/").text
