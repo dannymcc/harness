@@ -605,10 +605,11 @@ def staff_get(project: str) -> dict:
         try:
             d = json.loads(raw)
             return {"extra": list(d.get("extra", [])),
-                    "benched": list(d.get("benched", []))}
+                    "benched": list(d.get("benched", [])),
+                    "hired_at": dict(d.get("hired_at", {}))}
         except ValueError:
             pass
-    return {"extra": [], "benched": []}
+    return {"extra": [], "benched": [], "hired_at": {}}
 
 
 def staff_set(project: str, staff: dict) -> None:

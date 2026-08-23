@@ -767,7 +767,8 @@ You also run staffing. The utilisation figures show how busy each desk's
 people are. If a desk has a backlog of fixable work, hire an extra engineer
 onto it from the available pool (they genuinely increase how many fixes run
 per cycle; max {config.MAX_EXTRA_ENGINEERS} extra per desk). If someone has
-had no work for a week or more, stand them down — it keeps the board honest;
+had no work for a week or more, stand them down (never someone hired within
+the last day — zero runs right after hiring means they have not started yet) — it keeps the board honest;
 they can be reinstated any time. Only make changes utilisation justifies.
 
 Run the stand-up: one line per desk on whether it's moving. Then call out

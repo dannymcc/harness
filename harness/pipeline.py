@@ -459,6 +459,12 @@ async def run_cycle(project, force: bool = False) -> None:
         await run_security_review(project)
 
     try:
+        # Release first: a due release must never be starved by a long
+        # sweep (or a restart mid-sweep).
+        queued = _release_due(project)
+        if queued:
+            await propose_release(project, queued)
+
         fix_jobs: list = []
 
         # Anything a human approved in the GUI runs first.
@@ -538,7 +544,7 @@ async def run_cycle(project, force: bool = False) -> None:
 
         queued = _release_due(project)
         if queued:
-            await propose_release(project, queued)
+            await propose_release(project, queued)  # catches same-cycle landings
     except AgentStalled:
         db.log_event(f"Cycle for {name} paused mid-way; will resume", "warn",
                      project=name)
@@ -748,12 +754,25 @@ def _apply_staffing(actions: list) -> None:
             if name in cfg.HIRE_POOL and name not in staff["extra"] \
                     and len(staff["extra"]) < cfg.MAX_EXTRA_ENGINEERS:
                 staff["extra"].append(name)
+                staff.setdefault("hired_at", {})[name] = db.now()
                 if name in staff["benched"]:
                     staff["benched"].remove(name)
                 db.staff_set(pname, staff)
                 db.log_event(f"Harry has brought {name} onto the {pname} desk: "
                              f"{a['reason'][:150]}", project=pname)
         elif a["action"] == "stand_down":
+            hired = staff.get("hired_at", {}).get(name, "")
+            if hired:
+                age_h = (datetime.now(timezone.utc)
+                         - datetime.strptime(hired, "%Y-%m-%dT%H:%M:%SZ")
+                         .replace(tzinfo=timezone.utc)).total_seconds() / 3600
+                if age_h < 24:
+                    db.log_event(
+                        f"Refused Harry's stand-down of {name} on {pname}: "
+                        f"hired {age_h:.0f}h ago — zero runs right after "
+                        "hiring means not started, not idle", "warn",
+                        project=pname)
+                    continue
             if name in staff["extra"]:
                 staff["extra"].remove(name)
             if name not in staff["benched"] and name not in ("Harry",):
