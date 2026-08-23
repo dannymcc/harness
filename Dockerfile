@@ -17,6 +17,9 @@ WORKDIR /app
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
+ARG GIT_SHA=""
+ENV HARNESS_GIT_SHA=$GIT_SHA
+
 COPY harness/ harness/
 COPY run.py .
 

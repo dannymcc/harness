@@ -48,6 +48,7 @@ def render(request: Request, template: str, **ctx):
     ctx.update(
         request=request,
         operator=config.OPERATOR,
+        version=config.DISPLAY_VERSION,
         projects=db.all_projects(),
         paused=db.paused_until(),
         maintenance=db.maintenance(),

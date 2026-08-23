@@ -49,7 +49,8 @@ holding; no action needed from you.</div>
 </main>
 
 <footer>
-  worker: {{ "running" if worker.running else "idle" }}{% if worker.last_cycle %} · last cycle {{ worker.last_cycle }}{% endif %}
+  <span class="ts">harness {{ version }}</span> ·
+  worker: {{ "running" if worker.running else "idle" }}{% if worker.last_cycle %} · last cycle <span class="ts">{{ worker.last_cycle }}</span>{% endif %}
   <form method="post" action="/run-now"><button>Run cycle now</button></form>
 </footer>
 </body>

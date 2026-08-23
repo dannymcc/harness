@@ -132,8 +132,13 @@ export CLAUDE_CODE_OAUTH_TOKEN=... GH_TOKEN=...
 python run.py            # GUI + worker on :8300
 ```
 
-State lives in `data/` (SQLite, clones, worktrees, per-run transcripts).
-Deleting `data/repos` or `data/worktrees` is always safe — they're rebuilt.
+Run the tests with `python -m pytest -q`. State lives in `data/` (SQLite,
+clones, worktrees, per-run transcripts). Deleting `data/repos` or
+`data/worktrees` is always safe — they're rebuilt.
+
+Harness can maintain itself — add this repo as a harness with version file
+`harness/config.py`, version pattern `VERSION\s*=\s*"(?P<version>[^"]+)"`,
+and test command `python -m pytest -x -q`. We do.
 
 ## Licence
 

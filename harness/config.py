@@ -7,6 +7,10 @@ many harnesses and they are edited from the GUI.
 import os
 from pathlib import Path
 
+VERSION = "0.1.0"
+GIT_SHA = os.environ.get("HARNESS_GIT_SHA", "")[:7]
+DISPLAY_VERSION = f"v{VERSION}" + (f" ({GIT_SHA})" if GIT_SHA else "")
+
 # --- Paths ------------------------------------------------------------------
 DATA_DIR = Path(os.environ.get("HARNESS_DATA_DIR", "./data")).resolve()
 REPOS_DIR = DATA_DIR / "repos"        # harness's own clones, one per project
