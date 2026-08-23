@@ -1,5 +1,7 @@
 # Harness
 
+[!["Buy Me A Coffee"](https://www.buymeacoffee.com/assets/img/custom_images/orange_img.png)](https://buymeacoffee.com/d3hkz6gwle)
+
 **An AI maintainer for your GitHub repos.** Harness watches the repositories
 you point it at, triages issues, reviews pull requests, fixes what it safely
 can, keeps the docs honest, and batches everything into sensible versioned
