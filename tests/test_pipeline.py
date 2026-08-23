@@ -580,3 +580,47 @@ def test_directions_are_actioned_during_an_engineer_wave(fresh_db, may, monkeypa
     assert fresh_db.pending_directives() == []
     assert any("Noted, blue it is." in e["message"]
                for e in fresh_db.recent_events(10, "may"))
+
+
+def test_desks_run_concurrently(fresh_db, monkeypatch):
+    """A slow desk must not delay the others — the whole point of the
+    parallel sweep: a release never queues behind another desk's triage."""
+    import asyncio, time
+    from harness import pipeline
+    for n in ("alpha", "beta", "gamma"):
+        fresh_db.create_project(n, f"example/{n}")
+    spans = {}
+
+    async def fake_cycle(project, force=False):
+        t0 = time.monotonic()
+        await asyncio.sleep(0.3)
+        spans[project["name"]] = (t0, time.monotonic())
+    monkeypatch.setattr(pipeline, "run_cycle", fake_cycle)
+    monkeypatch.setattr(pipeline, "work_ready", lambda p: False)
+    t0 = time.monotonic()
+    asyncio.run(pipeline.run_all_cycles())
+    elapsed = time.monotonic() - t0
+    assert len(spans) == 3
+    assert elapsed < 0.7, f"desks ran serially ({elapsed:.2f}s for 3×0.3s)"
+    (a0, a1), (b0, b1) = spans["alpha"], spans["beta"]
+    assert a0 < b1 and b0 < a1          # genuinely overlapping
+
+
+def test_concurrent_directive_processing_actions_each_direction_once(
+        fresh_db, may, monkeypatch):
+    import asyncio
+    from harness import pipeline, agents
+    fresh_db.add_direction("may", "paint it blue")
+    actioned = []
+
+    async def slow_directive(project, text, item_key, digest):
+        await asyncio.sleep(0.1)
+        actioned.append(text)
+        return {"ok": True, "output": {"actions": [], "reply": "done"}}
+    monkeypatch.setattr(agents, "execute_directive", slow_directive)
+
+    async def both():
+        await asyncio.gather(pipeline.process_directives(),
+                             pipeline.process_directives())
+    asyncio.run(both())
+    assert actioned == ["paint it blue"]

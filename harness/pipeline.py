@@ -699,6 +699,22 @@ def desk_events(project) -> list[str]:
 ATTEND_INTERVAL_S = 20   # how often a long step looks for new directions
 
 
+def _loop_lock(name: str) -> asyncio.Lock:
+    """A named asyncio.Lock scoped to the running event loop.
+
+    Desks run concurrently and several of them (plus the attendants inside
+    engineer waves) call process_directives/process_questions; without a
+    lock two callers can both pick up the same pending row and have Harry
+    action it twice. The worker starts a fresh loop every wake, so the
+    locks live on the loop, not the module."""
+    loop = asyncio.get_running_loop()
+    locks = getattr(loop, "_harness_locks", None)
+    if locks is None:
+        locks = {}
+        loop._harness_locks = locks
+    return locks.setdefault(name, asyncio.Lock())
+
+
 class _Attendant:
     """Actions operator directions while a long step (an engineer wave,
     a run of triages) is in progress, so a direction typed mid-cycle is
@@ -890,16 +906,25 @@ def work_ready(project) -> bool:
 async def run_all_cycles(force: bool = False) -> bool:
     """Run every desk once. Returns True if any desk has work ready to go on."""
     projects = db.all_projects(enabled_only=True)
-    for p in projects:
+
+    async def desk(p):
         db.touch_heartbeat()
         try:
-            await process_directives()   # before each desk, not just each wake
             await run_cycle(p, force=force)
         except AgentStalled:
-            break
+            # The pause (API limits) or drain is global state that
+            # run_agent checks, so the other desks stop starting new work
+            # by themselves — no need to cancel them here.
+            pass
         except Exception as e:
             db.log_event(f"Cycle failed: {type(e).__name__}: {e}", "error",
                          project=p["name"])
+
+    # Every desk runs its cycle concurrently: a release on one desk is
+    # never queued behind another desk's triage. Desks share nothing but
+    # the DB (WAL) and Harry, and his rulings are serialized by _loop_lock.
+    await process_directives()
+    await asyncio.gather(*(desk(p) for p in projects))
     # Harry's cross-project review now happens in the hourly stand-up
     # (run_standup) rather than every sweep — cheaper and more predictable.
     if db.paused_until():
@@ -985,6 +1010,11 @@ def _open_tracking_issues(project, new_issues) -> None:
 # --- Harry's inbox -------------------------------------------------------------
 
 async def process_questions(project_name: str | None = None) -> None:
+    async with _loop_lock("questions"):
+        return await _process_questions_locked(project_name)
+
+
+async def _process_questions_locked(project_name: str | None = None) -> None:
     """Harry rules on his people's questions as soon as they are asked.
 
     Answers land on the question record (the asker's next prompt carries
@@ -1363,6 +1393,11 @@ def _apply_directive_actions(project, actions: list) -> list[str]:
 
 async def process_directives() -> None:
     """Turn pending operator directions into actions, promptly."""
+    async with _loop_lock("directives"):
+        await _process_directives_locked()
+
+
+async def _process_directives_locked() -> None:
     for q in db.pending_directives():
         project = db.get_project(q["project"])
         if not project:

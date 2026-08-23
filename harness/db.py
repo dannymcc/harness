@@ -147,6 +147,9 @@ def conn():
     config.DATA_DIR.mkdir(parents=True, exist_ok=True)
     c = sqlite3.connect(config.DB_PATH, timeout=30)
     c.row_factory = sqlite3.Row
+    # Desk cycles run concurrently; WAL lets readers proceed under a writer
+    # instead of stacking "database is locked" retries on the 30s timeout.
+    c.execute("PRAGMA journal_mode=WAL")
     c.executescript(SCHEMA)
     for mig in MIGRATIONS:
         try:
