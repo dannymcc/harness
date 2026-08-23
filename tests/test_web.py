@@ -40,3 +40,18 @@ def test_board_shows_live_assignee(client, fresh_db):
     html = client.get("/p/may").text
     assert "Dimitri · working" in html and "assignee live" in html
     assert "1 live" in html
+
+
+def test_staff_chip_states_and_links(client, fresh_db):
+    from harness.web.app import _member_status
+    rid = fresh_db.start_run("may", "ic", "issue#1", "fix", "m", "Malcolm")
+    fresh_db.finish_run(rid, False, 0.1, 1, "orphaned by restart")
+    runs = fresh_db.recent_runs(10, "may")
+    m = _member_status("Malcolm", runs, lambda r: r["agent"] == "Malcolm")
+    assert m["state"] == "restarted" and "requeued" in m["detail"]
+    rid2 = fresh_db.start_run("may", "ic", "issue#2", "fix", "m", "Beth")
+    fresh_db.finish_run(rid2, False, 0.1, 1, "tests failed after fix")
+    runs = fresh_db.recent_runs(10, "may")
+    b = _member_status("Beth", runs, lambda r: r["agent"] == "Beth")
+    assert b["state"] == "failed" and "tests failed" in b["detail"]
+    assert f"/run/{rid}" in client.get("/").text  # Malcolm is on-roster

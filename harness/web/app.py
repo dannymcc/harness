@@ -113,13 +113,25 @@ AGENT_ROSTER = [
 def _member_status(display, runs, match):
     last = next((r for r in runs if match(r)), None)
     if not last:
-        return {"name": display, "state": "idle", "detail": "no runs yet"}
+        return {"name": display, "state": "idle", "detail": "no runs yet",
+                "run_id": None}
+    what = f"{last['task']} {last['item_key']}".strip()
     if last["finished_at"] is None:
-        return {"name": display, "state": "working",
-                "detail": f"{last['task']} {last['item_key']}".strip()}
-    return {"name": display, "state": "ok" if last["ok"] else "failed",
-            "detail": (f"{last['task']} {last['item_key']}".strip()
-                       + f" · {last['started_at']}")}
+        return {"name": display, "state": "working", "detail": what,
+                "run_id": last["id"]}
+    if last["ok"]:
+        return {"name": display, "state": "ok",
+                "detail": f"{what} · {last['started_at']}",
+                "run_id": last["id"]}
+    if (last["summary"] or "").startswith("orphaned"):
+        # A restart interrupted this run; the item was requeued
+        # automatically. Not a real failure — don't dress it as one.
+        return {"name": display, "state": "restarted",
+                "detail": f"{what} — interrupted by a restart, requeued",
+                "run_id": last["id"]}
+    return {"name": display, "state": "failed",
+            "detail": f"{what} — {(last['summary'] or 'no reason recorded')[:90]}",
+            "run_id": last["id"]}
 
 
 def _enrich_questions(qs):

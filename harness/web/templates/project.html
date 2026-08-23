@@ -8,8 +8,13 @@
 
 <div class="roster roster-strip">
   {% for a in roster %}
+  {% if a.run_id %}
+  <a class="agent-chip {{ a.state }}" href="/run/{{ a.run_id }}" title="{{ a.detail }}">
+    <b>{{ a.name }}</b> {{ a.state }}</a>
+  {% else %}
   <span class="agent-chip {{ a.state }}" title="{{ a.detail }}">
     <b>{{ a.name }}</b> {{ a.state }}</span>
+  {% endif %}
   {% endfor %}
 </div>
 

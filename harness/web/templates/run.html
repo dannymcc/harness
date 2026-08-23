@@ -3,7 +3,10 @@
 {% block content %}
 
 <p><a href="{{ '/p/' + run.project if run.project else '/' }}">← back</a></p>
-<h1>Run {{ run.id }}: {{ display_name }} · {{ run.task }} {{ run.item_key }}</h1>
+<h1>Run {{ run.id }}: {{ display_name }} · {{ run.task }}
+  {% if run.item_key and '#' in run.item_key and run.project %}
+  <a href="/p/{{ run.project }}/{{ run.item_key.replace('#', '/') }}">{{ run.item_key }}</a>
+  {% else %}{{ run.item_key }}{% endif %}</h1>
 <p class="run-facts">
   {% if run.finished_at is none %}
     <span class="pill warn">live</span>

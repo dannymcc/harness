@@ -397,3 +397,9 @@ body {
   padding-right: env(safe-area-inset-right, 0px);
 }
 footer { padding-bottom: calc(1rem + env(safe-area-inset-bottom, 0px)); }
+
+/* --- agent chip states: restarted is informational, not alarming --- */
+a.agent-chip { text-decoration: none; }
+a.agent-chip:hover { border-color: var(--accent); text-decoration: none; }
+.agent-chip.restarted { border-style: dashed; color: var(--dim); }
+.agent-chip.restarted b { color: var(--dim); }

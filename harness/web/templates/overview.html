@@ -68,8 +68,13 @@
     <h3>{{ g.group }}</h3>
     <div class="roster">
       {% for a in g.members %}
+      {% if a.run_id %}
+      <a class="agent-chip {{ a.state }}" href="/run/{{ a.run_id }}" title="{{ a.detail }}">
+        <b>{{ a.name }}</b> {{ a.state }}<small>{{ a.detail }}</small></a>
+      {% else %}
       <span class="agent-chip {{ a.state }}" title="{{ a.detail }}">
         <b>{{ a.name }}</b> {{ a.state }}<small>{{ a.detail }}</small></span>
+      {% endif %}
       {% endfor %}
     </div>
   </div>
