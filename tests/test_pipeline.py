@@ -16,6 +16,27 @@ def test_circuit_breaker(fresh_db, may):
     assert fresh_db.consecutive_failures("may", "issue#9") == 0
 
 
+def test_restart_orphans_do_not_trip_the_breaker(fresh_db, may):
+    """Two deploys in a row killed whatever was in flight; that is not the
+    item's fault and must not hold it."""
+    from harness import pipeline, worker
+    fresh_db.upsert_item("may", "issue", 9, "fine", "a", "open", "x")
+    for _ in range(2):
+        fresh_db.start_run("may", "ic", "issue#9", "fix", "m", "Malcolm")
+        worker.recover_after_restart()
+    assert fresh_db.consecutive_failures("may", "issue#9") == 0
+    item = fresh_db.get_item("may", "issue", 9)
+    assert pipeline._breaker_tripped(may, item) is False
+    # a real failure either side of an orphan still counts as consecutive
+    rid = fresh_db.start_run("may", "ic", "issue#9", "fix", "m", "Malcolm")
+    fresh_db.finish_run(rid, False, 0.1, 1, "boom")
+    fresh_db.start_run("may", "ic", "issue#9", "fix", "m", "Malcolm")
+    worker.recover_after_restart()
+    rid = fresh_db.start_run("may", "ic", "issue#9", "fix", "m", "Malcolm")
+    fresh_db.finish_run(rid, False, 0.1, 1, "boom again")
+    assert fresh_db.consecutive_failures("may", "issue#9") == 2
+
+
 def test_staffing_guard_same_day(fresh_db, may):
     from harness import pipeline
     pipeline._apply_staffing([

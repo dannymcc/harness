@@ -92,8 +92,8 @@ def recover_after_restart() -> None:
     with db.conn() as c:
         n = c.execute(
             "UPDATE runs SET ok = 0, finished_at = ?, "
-            "summary = 'orphaned by restart' WHERE finished_at IS NULL",
-            (db.now(),)).rowcount
+            "summary = ? WHERE finished_at IS NULL",
+            (db.now(), db.ORPHANED_SUMMARY)).rowcount
     requeued = []
     for p in db.all_projects():
         for it in db.items_by_status(p["name"], "working"):

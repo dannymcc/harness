@@ -806,15 +806,25 @@ def get_run(run_id: int):
         return c.execute("SELECT * FROM runs WHERE id = ?", (run_id,)).fetchone()
 
 
+ORPHANED_SUMMARY = "orphaned by restart"
+
+
 def consecutive_failures(project: str, item_key: str) -> int:
-    """Trailing count of failed runs for this item (cancellations count)."""
+    """Trailing count of failed runs for this item (cancellations count).
+
+    Runs orphaned by a restart are skipped, not counted: the process was
+    killed under the agent, which says nothing about the item. Counting
+    them meant two deploys in a row tripped the circuit breaker on
+    whatever happened to be in flight."""
     with conn() as c:
         rows = c.execute(
-            "SELECT ok FROM runs WHERE project = ? AND item_key = ? "
-            "AND finished_at IS NOT NULL ORDER BY id DESC LIMIT 5",
+            "SELECT ok, summary FROM runs WHERE project = ? AND item_key = ? "
+            "AND finished_at IS NOT NULL ORDER BY id DESC LIMIT 8",
             (project, item_key)).fetchall()
     n = 0
     for r in rows:
+        if r["summary"] == ORPHANED_SUMMARY:
+            continue
         if r["ok"] == 0:
             n += 1
         else:

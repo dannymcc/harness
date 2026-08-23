@@ -4,6 +4,17 @@ All notable changes to Harness are recorded here. The format is
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project
 follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.6.1] - 2026-08-23
+
+### Fixed
+
+- Runs orphaned by a restart no longer count towards the circuit breaker.
+  Restart recovery closes in-flight runs with `ok=0`, so two deploys in a
+  row tripped the breaker on whatever happened to be running — the item was
+  held and the operator paged ("two consecutive failed runs") for a failure
+  that was the process being killed, not the agent's. `consecutive_failures`
+  now skips those runs; real failures either side of an orphan still count.
+
 ## [0.6.0] - 2026-08-23
 
 ### Added
