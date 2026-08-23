@@ -295,7 +295,8 @@ async def review_item(project, item) -> None:
     author = item["author"]
     policy_key = "merge_dependabot" if _is_dependabot(author) else "merge_prs"
     if verdict == "merge" and db.policy(name, policy_key) == "auto":
-        await merge_pr_item(project, db.get_item(name, "pr", item["number"]))
+        await merge_pr_item(project, db.get_item(name, "pr", item["number"]),
+                            validate=False)
     else:
         db.update_item(name, "pr", item["number"], status="waiting_human")
         if verdict in ("needs_work", "reject") and out["draft_review"] and \
@@ -304,9 +305,52 @@ async def review_item(project, item) -> None:
             db.log_event(f"Posted review on PR #{item['number']}", project=name)
 
 
-async def merge_pr_item(project, item) -> None:
-    """Merge an approved PR into dev (retargeting it there first)."""
+async def _pr_merges_clean_and_passes(project, item) -> bool:
+    """Merge the PR onto dev in harness's clone and run the suite there.
+
+    The operator can send a PR straight to merge without waiting for Ruth,
+    so this is the only thing standing between an unreviewed contribution and
+    the dev branch. Nothing merges on a red suite, whoever asked.
+    """
+    name, number = project["name"], item["number"]
+    detail = gh.pr_detail(project["repo"], number)
+    if detail.get("isDraft"):
+        db.update_item(name, "pr", number, status="waiting_human",
+                       error="still a draft — not merged")
+        db.log_event(f"PR #{number} is still a draft; not merging", "warn",
+                     project=name)
+        return False
+    try:
+        with repo.clone_lock(project):
+            repo.fetch_pr_branch(project, number, f"harness/pr-{number}")
+            passed, out = await asyncio.to_thread(repo.run_tests, project)
+    except CmdError as e:
+        db.update_item(name, "pr", number, status="blocked",
+                       error=f"does not merge cleanly onto "
+                             f"{project['dev_branch']}: {e}"[:2000])
+        db.log_event(f"PR #{number} does not merge cleanly onto "
+                     f"{project['dev_branch']}", "warn", project=name)
+        return False
+    if not passed:
+        db.update_item(name, "pr", number, status="waiting_human",
+                       verdict="needs_work",
+                       error=f"tests failed on the merge result:\n{out[-2000:]}")
+        db.log_event(f"PR #{number} not merged: the suite fails once it is on "
+                     f"{project['dev_branch']}", "warn", project=name)
+        return False
+    return True
+
+
+async def merge_pr_item(project, item, validate: bool = True) -> None:
+    """Merge an approved PR into dev (retargeting it there first).
+
+    validate=False only from the review, which has just fetched and tested
+    this exact merge result and still holds the clone lock — flock is not
+    reentrant, so it must not be taken again here.
+    """
     name = project["name"]
+    if validate and not await _pr_merges_clean_and_passes(project, item):
+        return
     try:
         detail = gh.pr_detail(project["repo"], item["number"])
         if detail.get("baseRefName") != project["dev_branch"]:
@@ -327,17 +371,29 @@ async def merge_pr_item(project, item) -> None:
 
 # --- release flow -----------------------------------------------------------
 
-def _release_due(project) -> list:
-    """Queued items, if thresholds (or an operator request) say it's time."""
+def _release_due(project) -> list | None:
+    """Queued items when it is time to cut, otherwise None.
+
+    An empty list is a real answer, not "nothing to do": the operator pressed
+    Release now and dev is ahead of main with nothing queued behind it, which
+    happens whenever work landed on dev outside the harness. There is still a
+    release to cut, just no harness items to credit in it.
+    """
     name = project["name"]
-    queued = db.items_by_status(name, "queued")
-    if not queued:
-        return []
     if db.open_release(name):
-        return []
-    if db.get_setting(f"release_requested.{name}") == "1":
+        return None
+    queued = db.items_by_status(name, "queued")
+    requested = db.get_setting(f"release_requested.{name}") == "1"
+    if requested:
         db.set_setting(f"release_requested.{name}", "")
-        return queued
+        if queued or repo.dev_ahead_count(project) > 0:
+            return queued
+        db.log_event(f"Release requested, but {project['dev_branch']} matches "
+                     f"{project['main_branch']} and nothing is queued — "
+                     "nothing to release", "warn", project=name)
+        return None
+    if not queued:
+        return None
     min_changes = int(db.policy(name, "release_min_changes"))
     max_age_days = float(db.policy(name, "release_max_age_days"))
     if len(queued) >= min_changes:
@@ -346,16 +402,25 @@ def _release_due(project) -> list:
     age_days = (datetime.now(timezone.utc)
                 - datetime.strptime(oldest, "%Y-%m-%dT%H:%M:%SZ")
                 .replace(tzinfo=timezone.utc)).total_seconds() / 86400
-    return queued if age_days >= max_age_days else []
+    return queued if age_days >= max_age_days else None
 
 
 async def propose_release(project, queued) -> None:
     name = project["name"]
     with repo.clone_lock(project):
         rid = await _propose_release_locked(project, queued)
+    if rid is None or db.policy(name, "cut_release") != "auto":
+        return
+    # Hands-off: nobody is going to click. Mark it merging before finalising
+    # so the GUI cannot offer an approve button for a release already on its
+    # way out — a second click would try to merge a merged PR.
+    release = db.get_release(rid)
+    db.update_release(rid, status="merging")
+    db.log_event(f"cut_release is auto — merging and tagging v"
+                 f"{release['version']} without waiting for "
+                 f"{config.OPERATOR}", project=name)
     # finalize outside the lock: it re-acquires it, and flock is not reentrant
-    if rid is not None and db.policy(project["name"], "cut_release") == "auto":
-        finalize_release(project, db.get_release(rid))
+    finalize_release(project, release)
 
 
 async def _propose_release_locked(project, queued) -> int | None:
@@ -502,7 +567,7 @@ async def run_cycle(project, force: bool = False,
         # Release first: a due release must never be starved by a long
         # sweep (or a restart mid-sweep).
         queued = _release_due(project)
-        if queued:
+        if queued is not None:
             await propose_release(project, queued)
 
         fix_jobs: list = []
@@ -623,7 +688,7 @@ async def run_cycle(project, force: bool = False,
         await process_questions(name)
 
         queued = _release_due(project)
-        if queued:
+        if queued is not None:
             await propose_release(project, queued)  # catches same-cycle landings
     except AgentStalled:
         db.log_event(f"Cycle for {name} paused mid-way; will resume", "warn",

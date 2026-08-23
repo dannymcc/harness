@@ -3,3 +3,4 @@ data/
 .smoke/
 __pycache__/
 .env
+harness/_build_sha

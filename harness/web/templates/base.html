@@ -51,7 +51,7 @@ holding; no action needed from you.</div>
 </main>
 
 <footer>
-  <span class="ts">harness <a href="https://github.com/dannymcc/harness/commit/{{ version.split('(')[-1].rstrip(')') if '(' in version else 'main' }}" target="_blank">{{ version }}</a></span> ·
+  <span class="ts">harness {{ version }}</span> ·
   worker: {{ "running" if worker.running else "idle" }}{% if worker.last_cycle %} · last cycle <span class="ts">{{ worker.last_cycle }}</span>{% endif %}
   <form method="post" action="/run-now"><button>Run cycle now</button></form>
 </footer>

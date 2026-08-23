@@ -335,6 +335,14 @@ def start_run(project: str, role: str, item_key: str, task: str, model: str,
         return cur.lastrowid
 
 
+def update_run(run_id: int, **fields) -> None:
+    """Progress on a run still in flight — never touches finished_at."""
+    cols = ", ".join(f"{k} = ?" for k in fields)
+    with conn() as c:
+        c.execute(f"UPDATE runs SET {cols} WHERE id = ?",
+                  (*fields.values(), run_id))
+
+
 def finish_run(run_id: int, ok: bool, cost_usd: float, turns: int,
                summary: str, log_path: str = "") -> None:
     with conn() as c:

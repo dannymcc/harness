@@ -1,13 +1,3 @@
-import pytest
-
-
-@pytest.fixture()
-def client(fresh_db, may):
-    from fastapi.testclient import TestClient
-    from harness.web.app import app
-    return TestClient(app)
-
-
 def test_pages_render(client, fresh_db):
     fresh_db.upsert_item("may", "issue", 7, "A bug", "alice", "open", "x")
     for path in ("/", "/p/may", "/p/may/settings", "/p/may/issue/7", "/add",
@@ -18,7 +8,7 @@ def test_pages_render(client, fresh_db):
 def test_version_in_footer(client):
     from harness import config
     html = client.get("/").text
-    assert f"v{config.VERSION}" in html and "harness/commit/" in html
+    assert config.DISPLAY_VERSION in html
 
 
 def test_question_buttons_and_ntfy_answer(client, fresh_db):
@@ -105,3 +95,47 @@ def test_only_escalations_get_primary_buttons(client, fresh_db):
     assert "Answer it yourself instead" in html
     html = client.get("/").text
     assert "Needs your decision (1)" in html
+
+
+def test_release_now_button_and_request(client, fresh_db):
+    html = client.get("/p/may").text
+    assert "Release now (Colin)" in html
+    r = client.post("/p/may/release/request", follow_redirects=False)
+    assert r.status_code == 303
+    assert fresh_db.get_setting("release_requested.may") == "1"
+    # the button gives way to the pending state, so it cannot be pressed twice
+    html = client.get("/p/may").text
+    assert "Release requested" in html and "Release now (Colin)" not in html
+
+
+def test_release_now_is_refused_while_one_is_open(client, fresh_db):
+    fresh_db.create_release("may", "1.0.0", "notes", [])
+    client.post("/p/may/release/request", follow_redirects=False)
+    assert fresh_db.get_setting("release_requested.may") == ""
+    assert "Release now (Colin)" not in client.get("/p/may").text
+
+
+def test_auto_release_is_visible_on_the_project(client, fresh_db):
+    assert "pill ok\">auto" not in client.get("/p/may").text
+    fresh_db.set_policy("may", "cut_release", "auto")
+    html = client.get("/p/may").text
+    assert "pill ok\">auto" in html
+    assert "merges and tags itself" in html
+
+
+def test_auto_release_shows_on_overview_and_is_not_your_queue(client, fresh_db):
+    fresh_db.create_release("may", "1.0.0", "notes", [])
+    assert "release v1.0.0 proposed" in client.get("/").text
+    fresh_db.set_policy("may", "cut_release", "auto")
+    html = client.get("/").text
+    assert "auto release" in html and "release v1.0.0 going out" in html
+
+
+def test_live_console_keeps_polling_before_the_log_exists(client, fresh_db):
+    """A live run with nothing written yet must not report live=False — the
+    poller stops for good on that, which reads as a stalled agent."""
+    rid = fresh_db.start_run("may", "ic", "issue#4", "fix", "m", "Dimitri")
+    j = client.get(f"/run/{rid}/tail?offset=0").json()
+    assert j["data"] == "" and j["live"] is True
+    fresh_db.finish_run(rid, True, 0.1, 3, "done")
+    assert client.get(f"/run/{rid}/tail?offset=0").json()["live"] is False

@@ -5,6 +5,7 @@ pipeline resets it. It is never the user's own working copy.
 """
 import fcntl
 import re
+import subprocess
 import venv
 from contextlib import contextmanager
 from pathlib import Path
@@ -79,6 +80,24 @@ def has_changes(project, base: str) -> bool:
     unstaged = run(["git", "status", "--porcelain"], cwd=d).strip()
     ahead = run(["git", "rev-list", "--count", f"origin/{base}..HEAD"], cwd=d).strip()
     return bool(unstaged) or ahead != "0"
+
+
+def dev_ahead_count(project) -> int:
+    """Commits on origin/dev that origin/main does not have.
+
+    Read-only and lock-free: the cycle has already fetched by the time this
+    is asked, and a count one fetch stale only ever costs a cycle's delay.
+    Returns 0 if the clone is missing or git fails — never a false "there is
+    something to release".
+    """
+    try:
+        out = run(["git", "rev-list", "--count",
+                   f"origin/{project['main_branch']}..origin/{project['dev_branch']}"],
+                  cwd=repo_dir(project))
+        return int(out.strip() or 0)
+    except (CmdError, ValueError, OSError,
+            subprocess.TimeoutExpired):
+        return 0
 
 
 def commit_all(project, message: str) -> None:

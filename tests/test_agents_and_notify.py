@@ -38,3 +38,13 @@ def test_notify_payload_and_resilience(fresh_db):
     config.NTFY_URL = "http://127.0.0.1:1"
     notify.send("x", "y")  # unreachable server must not raise
     config.NTFY_TOPIC = ""
+
+
+def test_run_progress_is_visible_while_the_run_is_in_flight(fresh_db):
+    """log_path and turns are what the GUI reads to show a run working."""
+    rid = fresh_db.start_run("may", "ic", "issue#5", "fix", "m", "Malcolm")
+    assert fresh_db.get_run(rid)["log_path"] == ""
+    fresh_db.update_run(rid, log_path="/tmp/run.log", turns=2)
+    run = fresh_db.get_run(rid)
+    assert run["log_path"] == "/tmp/run.log" and run["turns"] == 2
+    assert run["finished_at"] is None  # progress never ends a run

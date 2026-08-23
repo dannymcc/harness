@@ -102,6 +102,9 @@
     <p class="hint">Merging and tagging — this takes about a minute. Reload
     for the result.</p>
   {% else %}
+  {% if release_auto %}<p class="hint">cut release is auto on this project —
+  Colin merges and tags without waiting for you. Abandon it now if you would
+  rather it didn't.</p>{% endif %}
   <div class="actions">
     <form method="post" action="/p/{{ p.name }}/release/{{ release.id }}/approve">
       <button class="primary">Merge &amp; tag v{{ release.version }}</button></form>
@@ -239,8 +242,25 @@
 </section>
 
 <section class="card">
-  <h2>Past releases</h2>
-  <ul class="events">{% for r in releases if r.status != 'proposed' %}
+  <h2>Releases {% if release_auto %}<span class="pill ok">auto</span>{% endif %}</h2>
+  {% if release %}
+    <p class="hint">v{{ release.version }} is on the table above.</p>
+  {% elif release_pending %}
+    <p class="hint">Release requested — Colin drafts it on the next cycle:
+    version bump, CHANGELOG, notes, then a
+    {{ p.dev_branch }} → {{ p.main_branch }} PR.</p>
+  {% else %}
+    <p class="hint">{{ queued_count }} change{{ '' if queued_count == 1 else 's' }}
+    queued. Releases batch at {{ policies.release_min_changes }} changes or
+    {{ policies.release_max_age_days }} days — or press the button.
+    {% if release_auto %}Once drafted it merges and tags itself.{% else %}You
+    approve the merge.{% endif %}</p>
+    {% if not p.enabled %}<p class="hint">This harness is disabled — the
+    request waits until you enable it.</p>{% endif %}
+    <form method="post" action="/p/{{ p.name }}/release/request">
+      <button>Release now (Colin)</button></form>
+  {% endif %}
+  <ul class="events">{% for r in releases if r.status not in ('proposed', 'merging') %}
     <li><b>v{{ r.version }}</b> {{ r.status }}
       <span class="ts">{{ r.released_at or r.created_at }}</span></li>
   {% else %}<li>None yet.</li>{% endfor %}</ul>

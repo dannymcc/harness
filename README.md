@@ -47,12 +47,19 @@ told to behave.
 - **Pull requests** — merged onto dev locally, tested, then reviewed for
   value and quality. Verdicts: merge / needs work / reject, each with a
   courteous drafted review. Nothing merges without passing tests; by default
-  nothing merges without your click.
+  nothing merges without your click. **Merge now** on an unreviewed PR skips
+  Ruth's opinion when you already know the answer — the harness still merges
+  it onto dev in its own clone and runs the suite before landing it, and
+  still refuses drafts.
 - **Batched releases** — fixes and merges queue on dev. At a threshold (N
   changes or age), Colin drafts the release: version bump, CHANGELOG,
   README check, credited notes, then a dev → main PR. You approve; it
   merges, tags, and publishes the GitHub Release. One fix never means one
-  release.
+  release. **Release now** on the project page cuts one without waiting for
+  the threshold — including when the only changes on dev landed outside the
+  harness. Set `cut releases` to `auto` on the repos you want running
+  hands-off and the drafted release merges, tags and publishes itself; the
+  tests still have to pass first.
 - **Operator-in-the-loop** — any agent can ask a question when a decision
   isn't theirs. It goes to Harry, who rules within minutes on anything in
   the section's remit (engineering judgement, priorities, process); only
@@ -117,7 +124,7 @@ Per-repo policies, editable live in Settings:
 | merge community PRs | approve |
 | merge dependabot PRs | approve |
 | post comments/reviews publicly | approve |
-| cut releases | approve |
+| cut releases | approve (`auto` — hands-off: it ships itself once tests pass) |
 | release batch size / max age | 3 changes / 7 days |
 | active hours | always |
 
@@ -127,6 +134,13 @@ defaults match a Flask-style project (`config.py`, pytest).
 
 Costs shown in the GUI are the SDK's API-equivalent estimates (`≈US$`) — on
 a subscription plan nothing is billed per token; read them as a burn meter.
+
+The footer names the build you are looking at: `v0.1.0 (abc1234)`. The number
+comes from `VERSION` in `harness/config.py` (bumped by the release process,
+not by hand) and the SHA from, in order, `HARNESS_GIT_SHA`, the stamp the
+image build writes to `harness/_build_sha`, or `git HEAD` of the checkout it
+is running from. If none of those can answer, the footer says
+`v0.1.0 (unknown build)` rather than implying a commit it doesn't know.
 
 ## Development
 

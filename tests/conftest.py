@@ -29,3 +29,10 @@ def fresh_db(monkeypatch):
 def may(fresh_db):
     fresh_db.create_project("may", "example/may")
     return fresh_db.get_project("may")
+
+
+@pytest.fixture()
+def client(fresh_db, may):
+    from fastapi.testclient import TestClient
+    from harness.web.app import app
+    return TestClient(app)
