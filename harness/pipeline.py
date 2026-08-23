@@ -166,27 +166,45 @@ async def fix_item(project, item, persona: str = "Malcolm") -> None:
     if not res["ok"] or not res["output"]["success"]:
         msg = (res["error"] or res["output"]["notes"]) if res["output"] \
             else res["error"]
-        db.update_item(name, "issue", item["number"], status="blocked",
-                       error=(msg or "fix did not succeed")[:2000])
-        db.log_event(f"Fix for issue #{item['number']} blocked: {msg}",
-                     "warn", project=name)
+        msg = (msg or "fix did not succeed")[:2000]
+        if res.get("cancelled"):
+            # A human pressed Stop — never auto-retry over their decision.
+            db.update_item(name, "issue", item["number"],
+                           status="waiting_human", error=msg)
+        elif res["ok"] and res["output"] and not res["output"]["success"]:
+            # The engineer deliberately declined (too risky, unclear spec).
+            # Retrying repeats the same honest refusal at full cost.
+            db.update_item(name, "issue", item["number"],
+                           status="waiting_human", error=msg)
+            db.log_event(f"{persona} declined issue #{item['number']}: "
+                         f"{msg[:120]} — needs a human call", "warn",
+                         project=name)
+        else:
+            # Mechanical failure (crash, timeout, transport): retry next
+            # cycle; the circuit breaker holds it after two in a row.
+            db.update_item(name, "issue", item["number"], status="approved",
+                           error=msg)
+            db.log_event(f"Fix for issue #{item['number']} failed "
+                         f"({msg[:100]}) — will retry next cycle", "warn",
+                         project=name)
         return
     out = res["output"]
     _file_question(name, persona, f"issue#{item['number']}", out)
 
     if not repo.wt_has_changes(project, wt):
-        db.update_item(name, "issue", item["number"], status="blocked",
-                       error="agent reported success but made no changes")
+        db.update_item(name, "issue", item["number"], status="waiting_human",
+                       error="agent reported success but made no changes — "
+                             "needs a human look")
         return
 
     # The deterministic gate: harness runs the tests itself, in the worktree.
     passed, test_out = await asyncio.to_thread(
         repo.run_tests, project, wt, False)
     if not passed:
-        db.update_item(name, "issue", item["number"], status="blocked",
+        db.update_item(name, "issue", item["number"], status="approved",
                        error="tests failed after fix:\n" + test_out[-1500:])
-        db.log_event(f"Issue #{item['number']}: tests failed, fix not pushed",
-                     "warn", project=name)
+        db.log_event(f"Issue #{item['number']}: tests failed — fix not "
+                     "pushed, retrying next cycle", "warn", project=name)
         return
 
     msg = out["commit_message"].strip() or f"fix: issue #{item['number']}"
@@ -197,10 +215,10 @@ async def fix_item(project, item, persona: str = "Malcolm") -> None:
     landed, err = await asyncio.to_thread(
         repo.push_worktree_to_dev, project, wt, branch)
     if not landed:
-        db.update_item(name, "issue", item["number"], status="blocked",
+        db.update_item(name, "issue", item["number"], status="approved",
                        diff=diff, error=err[:2000])
-        db.log_event(f"Issue #{item['number']}: {err[:120]}", "warn",
-                     project=name)
+        db.log_event(f"Issue #{item['number']}: {err[:120]} — retrying "
+                     "next cycle", "warn", project=name)
         return
     repo.remove_worktree(project, wt)
     db.update_item(

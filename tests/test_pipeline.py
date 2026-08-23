@@ -79,3 +79,19 @@ def test_restart_recovery(fresh_db, may):
     worker.recover_after_restart()
     assert fresh_db.get_run(rid)["ok"] == 0
     assert fresh_db.get_item("may", "issue", 5)["status"] == "approved"
+
+
+def test_fix_failures_retry_then_breaker(fresh_db, may):
+    """Mechanical failures requeue; the breaker holds after two in a row."""
+    from harness import pipeline
+    fresh_db.upsert_item("may", "issue", 20, "flaky", "a", "open", "x")
+    fresh_db.update_item("may", "issue", 20, status="approved")
+    rid = fresh_db.start_run("may", "ic", "issue#20", "fix", "m", "Malcolm")
+    fresh_db.finish_run(rid, False, 0.1, 1, "transport crash")
+    # one failure: breaker not yet tripped, item may retry
+    item = fresh_db.get_item("may", "issue", 20)
+    assert pipeline._breaker_tripped(may, item) is False
+    rid2 = fresh_db.start_run("may", "ic", "issue#20", "fix", "m", "Malcolm")
+    fresh_db.finish_run(rid2, False, 0.1, 1, "transport crash again")
+    assert pipeline._breaker_tripped(may, item) is True
+    assert fresh_db.get_item("may", "issue", 20)["status"] == "waiting_human"
