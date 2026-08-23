@@ -96,6 +96,13 @@ harnesses start conservative: fixes run automatically but land only on your
 dev branch; merges, public comments, and releases all wait for your
 approval until you loosen the policies in Settings.
 
+**Restarts are safe.** On SIGTERM (a deploy, `docker compose down`,
+watchtower) the harness stops starting agent runs, lets the ones in flight
+finish — up to `HARNESS_DRAIN_TIMEOUT_S`, default 25 minutes — keeps the GUI
+up meanwhile, and only then exits. The compose file sets
+`stop_grace_period: 30m` to match; if you use watchtower, give it
+`WATCHTOWER_TIMEOUT=30m` too or it will SIGKILL after 10 seconds.
+
 **Keep it private.** The dashboard has no authentication — it approves
 merges and releases, so treat it like a shell. Bind it to loopback (the
 default compose does), and reach it over a tailnet/VPN or behind an

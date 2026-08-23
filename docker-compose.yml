@@ -7,9 +7,13 @@ services:
     restart: unless-stopped
     labels:
       # Opt-in for watchtower-style auto-updates; harmless otherwise.
-      # Restarts are self-healing: interrupted agent runs are closed and
-      # their items requeued on boot.
+      # Restarts drain first (SIGTERM: in-flight agent runs finish, nothing
+      # new starts), and anything still cut off is requeued on boot. Give
+      # watchtower a matching stop timeout (WATCHTOWER_TIMEOUT=30m).
       - "com.centurylinklabs.watchtower.enable=true"
+    # How long Docker waits after SIGTERM before SIGKILL. Must be at least
+    # HARNESS_DRAIN_TIMEOUT_S (default 25 min) or deploys kill agents mid-run.
+    stop_grace_period: 30m
     ports:
       # Keep the GUI off the public internet: bind to loopback (and front it
       # with a tailnet/VPN or an authenticating reverse proxy).

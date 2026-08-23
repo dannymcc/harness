@@ -32,6 +32,10 @@
   </form>
 </nav>
 
+{% if worker.draining %}
+<div class="banner warn">Restarting: the section is finishing what is in flight and
+starting nothing new. Back shortly.</div>
+{% endif %}
 {% if worker.stale %}
 <div class="banner warn">The worker's heartbeat is stale — it may be hung. Check `docker logs harness`.</div>
 {% endif %}

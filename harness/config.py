@@ -90,6 +90,11 @@ MAX_BUDGET_USD_PER_RUN = float(os.environ.get("HARNESS_MAX_BUDGET_USD_PER_RUN", 
 # sync is two gh calls, and a wake with nothing new runs no agents.
 POLL_INTERVAL_MINUTES = int(os.environ.get("HARNESS_POLL_INTERVAL_MINUTES", "5"))
 ADMIN_INTERVAL_MINUTES = int(os.environ.get("HARNESS_ADMIN_INTERVAL_MINUTES", "60"))
+# On SIGTERM (deploy, watchtower, compose down) the worker stops starting
+# new agent runs and the process waits this long for in-flight ones to
+# finish before exiting. Pair it with a matching stop_grace_period in the
+# compose file, or Docker SIGKILLs the container after 10s regardless.
+DRAIN_TIMEOUT_S = int(os.environ.get("HARNESS_DRAIN_TIMEOUT_S", str(25 * 60)))
 
 # --- Notifications (ntfy) ---------------------------------------------------
 # Disabled unless a topic is set. On the public ntfy.sh server the topic

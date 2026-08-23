@@ -15,7 +15,8 @@ class _Maintenance(Exception):
 
 
 _run_now = threading.Event()
-_state = {"running": False, "last_cycle": "", "thread": None}
+_state = {"running": False, "last_cycle": "", "thread": None,
+          "draining": False}   # SIGTERM received: finish in-flight, start nothing
 
 
 HEARTBEAT_STALE_S = 45 * 60
@@ -27,7 +28,58 @@ def status() -> dict:
     alive = _state["thread"] is not None and _state["thread"].is_alive()
     return {"running": _state["running"], "last_cycle": _state["last_cycle"],
             "alive": alive, "heartbeat_age": age,
+            "draining": _state["draining"],
             "stale": alive and age is not None and age > HEARTBEAT_STALE_S}
+
+
+def draining() -> bool:
+    return _state["draining"]
+
+
+def live_runs() -> int:
+    with db.conn() as c:
+        return c.execute("SELECT COUNT(*) FROM runs WHERE finished_at IS NULL"
+                         ).fetchone()[0]
+
+
+def request_drain(on_done=None, timeout_s: float | None = None) -> None:
+    """Stop starting agent runs; let the ones in flight finish.
+
+    Called from the SIGTERM path. `agents.run_agent` refuses to start while
+    draining (raising AgentStalled, which every caller already treats as
+    "pause, resume later"), the worker loop exits after its current cycle,
+    and a watcher thread calls `on_done` once the worker thread has ended
+    or `timeout_s` has passed. Nothing is marked failed: whatever is still
+    running at the deadline gets closed by restart recovery as before."""
+    if _state["draining"]:
+        return
+    _state["draining"] = True
+    n = live_runs()
+    db.log_event(f"Draining for restart: {n} run(s) in flight, starting no "
+                 "more" if n else "Draining for restart: nothing in flight")
+    _run_now.set()  # an idle loop wakes and exits straight away
+
+    def _watch():
+        t = _state["thread"]
+        if t is not None:
+            t.join(timeout_s if timeout_s is not None else config.DRAIN_TIMEOUT_S)
+            if t.is_alive():
+                db.log_event(f"Drain timed out after {config.DRAIN_TIMEOUT_S}s "
+                             f"with {live_runs()} run(s) still live", "warn")
+            else:
+                db.log_event("Drained — safe to restart")
+        if on_done:
+            on_done()
+    threading.Thread(target=_watch, name="harness-drain", daemon=True).start()
+
+
+def drain(timeout_s: float | None = None) -> bool:
+    """Blocking form for callers that just want to wait. True if clean."""
+    done = threading.Event()
+    request_drain(on_done=done.set, timeout_s=timeout_s)
+    done.wait()
+    t = _state["thread"]
+    return t is None or not t.is_alive()
 
 
 def trigger() -> None:
@@ -37,7 +89,7 @@ def trigger() -> None:
 
 
 def _loop() -> None:
-    while True:
+    while not _state["draining"]:
         _run_now.clear()
         _state["running"] = True
         more = False
@@ -67,6 +119,8 @@ def _loop() -> None:
         _state["running"] = False
         _state["last_cycle"] = db.now()
         db.touch_heartbeat()
+        if _state["draining"]:
+            break
         # Wake early if paused_until expires before the normal interval —
         # this is what resumes stalled work as soon as limits reset.
         wait = config.POLL_INTERVAL_MINUTES * 60
