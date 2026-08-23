@@ -6,9 +6,9 @@
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 <title>{% block title %}Harness{% endblock %}</title>
-<meta name="theme-color" content="#151d18" media="(prefers-color-scheme: dark)">
+<meta name="theme-color" content="#1D5741" media="(prefers-color-scheme: dark)">
 <meta name="theme-color" content="#fffdf8" media="(prefers-color-scheme: light)">
-<link rel="manifest" href="/static/manifest.json">
+<link rel="manifest" href="/static/manifest.json" crossorigin="use-credentials">
 <link rel="icon" href="/static/icon.svg" type="image/svg+xml">
 <link rel="apple-touch-icon" href="/static/icon-192.png">
 <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -51,7 +51,7 @@ holding; no action needed from you.</div>
 </main>
 
 <footer>
-  <span class="ts">harness {{ version }}</span> ·
+  <span class="ts">harness <a href="https://github.com/dannymcc/harness/commit/{{ version.split('(')[-1].rstrip(')') if '(' in version else 'main' }}" target="_blank">{{ version }}</a></span> ·
   worker: {{ "running" if worker.running else "idle" }}{% if worker.last_cycle %} · last cycle <span class="ts">{{ worker.last_cycle }}</span>{% endif %}
   <form method="post" action="/run-now"><button>Run cycle now</button></form>
 </footer>
