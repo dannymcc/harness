@@ -324,3 +324,11 @@ footer {
 }
 .roster-strip::-webkit-scrollbar { display: none; }
 .roster-strip .agent-chip { flex: 0 0 auto; white-space: nowrap; }
+
+/* --- staff board: uniform grid on all viewports --- */
+.staff-group .roster {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+  gap: .45rem;
+}
+.staff-group .agent-chip { max-width: none; width: 100%; }
