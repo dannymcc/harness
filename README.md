@@ -65,8 +65,8 @@ told to behave.
   a dead press; the version bump and the tests happen either way. Set
   `auto release` to `auto` on the repos you want running hands-off and the
   drafted release merges, tags and publishes itself; the tests still have to
-  pass first. It is per repo, and the project page says which repos are on
-  it, with the thresholds that set one off.
+  pass first. It is set per repo — the overview marks the repos that are on
+  it, and the project page repeats it with the thresholds that set one off.
 - **Operator-in-the-loop** — any agent can ask a question when a decision
   isn't theirs. It goes to Harry, who rules within minutes on anything in
   the section's remit (engineering judgement, priorities, process); only

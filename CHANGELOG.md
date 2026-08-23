@@ -4,6 +4,26 @@ All notable changes to Harness are recorded here. The format is
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project
 follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.9.0] - 2026-08-23
+
+### Changed
+
+- **Auto release is named and explained where it is set.** The Settings row
+  for `cut_release` read "cut release" with no further word on the page, so
+  the one policy that lets a repo ship without you was also the least
+  legible. It is now labelled **auto release** and carries a one-line hint
+  saying what each mode does — auto drafts the release, runs the tests,
+  merges to the main branch and tags it without asking; approve prepares the
+  same release and waits for your click, and nothing ships on a failing
+  suite either way. It sits under an "Auto release" heading with the two
+  numbers that decide when it fires (batch size and max age), and the page
+  now states outright that every policy is per project, so putting one repo
+  on auto changes nothing for the rest. Every other policy row gained a hint
+  in the same style. On the project page the pill reads "auto release"
+  rather than a bare "auto", and the releases card gives the thresholds for
+  that project. Stored policy keys and their defaults are unchanged — new
+  projects still default to approve (issue #11).
+
 ## [0.8.3] - 2026-08-23
 
 ### Fixed
