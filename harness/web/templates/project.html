@@ -6,6 +6,13 @@
   {% if not p.enabled %}<span class="pill">disabled</span>{% endif %}
   <a class="settings-link" href="/p/{{ p.name }}/settings">Settings</a></h1>
 
+<div class="roster roster-strip">
+  {% for a in roster %}
+  <span class="agent-chip {{ a.state }}" title="{{ a.detail }}">
+    <b>{{ a.name }}</b> {{ a.state }}</span>
+  {% endfor %}
+</div>
+
 {% if questions %}
 <section class="card accent-border">
   <h2>Danny-in-the-loop ({{ questions|length }})</h2>
@@ -80,12 +87,6 @@
         desk hourly and decides what gets escalated.</p>
       {% endif %}
     </div>
-  </div>
-  <div class="roster">
-    {% for a in roster %}
-    <span class="agent-chip {{ a.state }}" title="{{ a.detail }}">
-      <b>{{ a.name }}</b> {{ a.state }}</span>
-    {% endfor %}
   </div>
   <form method="post" action="/p/{{ p.name }}/tell" class="answer-form tell-form">
     <input name="text" placeholder="Direct the team…" required>

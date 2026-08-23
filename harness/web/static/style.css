@@ -316,3 +316,11 @@ footer {
 .question.open > p:first-child b { color: var(--dim); }
 
 .q-context { font-size: .84rem; color: var(--dim); margin: .15rem 0 0; }
+
+/* --- compact agent strip under the page title --- */
+.roster-strip {
+  flex-wrap: nowrap; overflow-x: auto; -webkit-overflow-scrolling: touch;
+  margin: 0 0 1rem; padding-bottom: .25rem; scrollbar-width: none;
+}
+.roster-strip::-webkit-scrollbar { display: none; }
+.roster-strip .agent-chip { flex: 0 0 auto; white-space: nowrap; }
