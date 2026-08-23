@@ -440,6 +440,19 @@ async def merge_pr_item(project, item, validate: bool = True) -> None:
 
 # --- release flow -----------------------------------------------------------
 
+def anything_to_release(project, queued=None) -> bool:
+    """Would a release request actually have something to cut?
+
+    Queued items are the usual case; dev ahead of main covers work that
+    landed outside the harness. Neither means Release now would be a dead
+    press, so the GUI asks this before offering the button — and asks it
+    here, so button and cycle can never disagree.
+    """
+    if queued is None:
+        queued = db.items_by_status(project["name"], "queued")
+    return bool(queued) or repo.dev_ahead_count(project) > 0
+
+
 def _release_due(project) -> list | None:
     """Queued items when it is time to cut, otherwise None.
 
@@ -455,7 +468,7 @@ def _release_due(project) -> list | None:
     requested = db.get_setting(f"release_requested.{name}") == "1"
     if requested:
         db.set_setting(f"release_requested.{name}", "")
-        if queued or repo.dev_ahead_count(project) > 0:
+        if anything_to_release(project, queued):
             return queued
         db.log_event(f"Release requested, but {project['dev_branch']} matches "
                      f"{project['main_branch']} and nothing is queued — "

@@ -252,13 +252,23 @@
   {% else %}
     <p class="hint">{{ queued_count }} change{{ '' if queued_count == 1 else 's' }}
     queued. Releases batch at {{ policies.release_min_changes }} changes or
-    {{ policies.release_max_age_days }} days — or press the button.
+    {{ policies.release_max_age_days }} days{% if can_release %} — or press
+    the button{% endif %}.
     {% if release_auto %}Once drafted it merges and tags itself.{% else %}You
     approve the merge.{% endif %}</p>
-    {% if not p.enabled %}<p class="hint">This harness is disabled — the
-    request waits until you enable it.</p>{% endif %}
-    <form method="post" action="/p/{{ p.name }}/release/request">
-      <button>Release now (Colin)</button></form>
+    {% if can_release %}
+      {% if not p.enabled %}<p class="hint">This harness is disabled — the
+      request waits until you enable it.</p>{% endif %}
+      {% set cut_hint = "drafts and tests a release from the %s queued change%s"
+         | format(queued_count, '' if queued_count == 1 else 's')
+         if queued_count else
+         "drafts and tests a release from what landed on " ~ p.dev_branch %}
+      <form method="post" action="/p/{{ p.name }}/release/request">
+        <button title="{{ cut_hint }}">Release now (Colin)</button></form>
+    {% else %}
+      <p class="hint">Nothing to release: {{ p.dev_branch }} matches
+      {{ p.main_branch }}.</p>
+    {% endif %}
   {% endif %}
   <ul class="events">{% for r in releases if r.status not in ('proposed', 'merging') %}
     <li><b>v{{ r.version }}</b> {{ r.status }}
