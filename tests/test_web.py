@@ -139,3 +139,19 @@ def test_live_console_keeps_polling_before_the_log_exists(client, fresh_db):
     assert j["data"] == "" and j["live"] is True
     fresh_db.finish_run(rid, True, 0.1, 3, "done")
     assert client.get(f"/run/{rid}/tail?offset=0").json()["live"] is False
+
+
+def test_overview_release_button_overrides_the_thresholds(client, fresh_db):
+    """One queued change is under the default batch of three; the override
+    exists precisely so that does not mean waiting."""
+    fresh_db.upsert_item("may", "issue", 1, "t", "a", "open", "x")
+    fresh_db.update_item("may", "issue", 1, status="queued",
+                         queued_at=fresh_db.now())
+    assert "Release now" in client.get("/").text
+    client.post("/p/may/release/request", follow_redirects=False)
+    html = client.get("/").text
+    assert "release requested" in html and "Release now" not in html
+
+    from harness import pipeline
+    # one queued item, threshold three: only the request gets it over the line
+    assert len(pipeline._release_due(fresh_db.get_project("may"))) == 1
