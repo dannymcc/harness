@@ -63,9 +63,10 @@ told to behave.
   only changes on dev landed outside the harness. It shows only when there
   is something to cut, and only until a release is proposed, so it is never
   a dead press; the version bump and the tests happen either way. Set
-  `cut releases` to `auto` on the repos you want running hands-off and the
+  `auto release` to `auto` on the repos you want running hands-off and the
   drafted release merges, tags and publishes itself; the tests still have to
-  pass first.
+  pass first. It is per repo, and the project page says which repos are on
+  it, with the thresholds that set one off.
 - **Operator-in-the-loop** — any agent can ask a question when a decision
   isn't theirs. It goes to Harry, who rules within minutes on anything in
   the section's remit (engineering judgement, priorities, process); only
@@ -149,7 +150,7 @@ Per-repo policies, editable live in Settings:
 | merge community PRs | approve |
 | merge dependabot PRs | approve |
 | post comments/reviews publicly | approve |
-| cut releases | approve (`auto` — hands-off: it ships itself once tests pass) |
+| auto release | approve — it prepares the release and waits for your click (`auto` — it drafts, tests, merges to main and tags without asking) |
 | release batch size / max age | 3 changes / 7 days |
 | active hours | always |
 

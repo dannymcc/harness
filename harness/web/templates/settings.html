@@ -5,23 +5,11 @@
 <p><a href="/p/{{ p.name }}">← {{ p.name }}</a></p>
 <h1>{{ p.name }} settings <span class="repo">{{ p.repo }}</span></h1>
 
-<section class="card">
-  <h2>Policies</h2>
-  <p class="hint">auto — Harness acts on its own verdict. approve — it
-  prepares everything and waits for your click. For fixing issues there is
-  also lead — the team lead's plan is the sign-off, so the section runs the
-  fix without you; your gate moves to the release. file issues — whether
-  team leads may open tracking issues on the repo from their plan (capped
-  at three a day per desk).</p>
-  <p class="hint">cut release on auto is hands-off management: once the batch
-  is drafted and the tests pass, Colin merges the
-  {{ p.dev_branch }} → {{ p.main_branch }} PR, tags and publishes without
-  asking. Nothing ships on a failing suite either way. Set the other
-  policies to auto too if you want the whole desk to run unattended.</p>
-  <div class="policies">
-  {% for key, value in policies.items() %}
+{% macro policy(key, value) %}
+  {% set copy = policy_copy.get(key) %}
+  <div>
     <form method="post" action="/p/{{ p.name }}/policy/{{ key }}" class="policy-row">
-      <label>{{ key.replace('_', ' ') }}</label>
+      <label>{{ copy[0] if copy else key.replace('_', ' ') }}</label>
       {% if key == 'file_issues' %}
         <select name="value" onchange="this.form.submit()">
           <option value="auto" {% if value == 'auto' %}selected{% endif %}>auto</option>
@@ -38,7 +26,32 @@
         <button>set</button>
       {% endif %}
     </form>
+    {% if copy %}<p class="policy-hint">{{ copy[1] }}</p>{% endif %}
+  </div>
+{% endmacro %}
+
+<section class="card">
+  <h2>Policies</h2>
+  <p class="hint">Every policy here is set per project — one project on auto
+  changes nothing for the others. auto — Harness acts on its own verdict.
+  approve — it prepares everything and waits for your click.</p>
+  <div class="policies">
+  {% for key, value in policies.items() if key not in release_keys %}
+    {{ policy(key, value) }}
   {% endfor %}
+  </div>
+
+  <div class="policy-group">
+    <h3>Auto release</h3>
+    <p class="hint">The release goes out as a
+    {{ p.dev_branch }} → {{ p.main_branch }} PR that Colin merges and tags —
+    on auto without asking you, on approve on your click. The two numbers
+    below decide when an auto release fires.</p>
+    <div class="policies">
+    {% for key in release_keys %}
+      {{ policy(key, policies[key]) }}
+    {% endfor %}
+    </div>
   </div>
 </section>
 

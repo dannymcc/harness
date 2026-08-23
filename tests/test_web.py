@@ -224,6 +224,39 @@ def test_release_now_is_refused_while_one_is_open(client, fresh_db):
     assert "Release now (Colin)" not in client.get("/p/may").text
 
 
+def test_settings_explains_auto_release(client, fresh_db):
+    """The row is labelled for what it does, and the page alone says what
+    each mode means."""
+    html = client.get("/p/may/settings").text
+    assert "auto release" in html
+    assert "merges" in html and "tags it without asking" in html
+    assert "waits for your click" in html
+    # the two numbers that decide when it fires sit with it
+    assert "release after this many changes" in html
+    assert "cut release" not in html  # the raw key is never shown as a label
+
+
+def _release_mode(client, project):
+    """The mode the cut_release row on a settings page is showing."""
+    html = client.get(f"/p/{project}/settings").text
+    form = html.split("/policy/cut_release\"", 1)[1].split("</form>", 1)[0]
+    return "auto" if 'value="auto" selected' in form else "approve"
+
+
+def test_new_projects_still_default_to_approve(client, fresh_db):
+    assert fresh_db.policy("may", "cut_release") == "approve"
+    assert _release_mode(client, "may") == "approve"
+
+
+def test_auto_release_is_per_project(client, fresh_db):
+    fresh_db.create_project("june", "example/june")
+    fresh_db.set_policy("may", "cut_release", "auto")
+    assert fresh_db.policy("june", "cut_release") == "approve"
+    assert _release_mode(client, "may") == "auto"
+    assert _release_mode(client, "june") == "approve"
+    assert "pill ok\">auto release" not in client.get("/p/june").text
+
+
 def test_auto_release_is_visible_on_the_project(client, fresh_db):
     assert "pill ok\">auto" not in client.get("/p/may").text
     fresh_db.set_policy("may", "cut_release", "auto")
