@@ -18,6 +18,16 @@
     {% if q.item_title %}<p class="q-context">Re: {{ q.item_title[:90] }}
       {% if q.item_url %}— <a href="{{ q.item_url }}">details</a>{% endif %}</p>{% endif %}
     <p class="q-text">{{ q.question }}</p>
+    {% if q.options_list %}
+    <div class="actions option-row">
+      {% for opt in q.options_list %}
+      <form method="post" action="/p/{{ q.project or '-' }}/question/{{ q.id }}/answer" class="answer-form option-form">
+        <input type="hidden" name="answer" value="{{ opt }}">
+        <button class="primary">{{ opt }}</button>
+      </form>
+      {% endfor %}
+    </div>
+    {% endif %}
     <form method="post" action="/p/{{ q.project or '-' }}/question/{{ q.id }}/answer" class="answer-form">
       <input name="answer" placeholder="Your decision…" required>
       <button class="primary">Answer</button>

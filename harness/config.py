@@ -85,4 +85,9 @@ POLICY_DEFAULTS = {
     "release_min_changes": "3",
     # ...or when the oldest queued change is this old (days), whichever first.
     "release_max_age_days": "7",
+    # Agent work runs only inside these local hours ("HH-HH", or "always").
+    # Human-triggered actions (approvals, Run cycle now, answers) override.
+    "active_hours": "always",
 }
+
+TIMEZONE = os.environ.get("HARNESS_TZ", "Europe/London")

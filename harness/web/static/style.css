@@ -384,3 +384,8 @@ footer {
   gap: .45rem;
 }
 .staff-group .agent-chip { max-width: none; width: 100%; }
+
+/* --- one-tap question options --- */
+.option-row { gap: .45rem; margin-bottom: .5rem; }
+.option-form { display: inline; flex: 1 1 auto; }
+.option-form button { width: 100%; }

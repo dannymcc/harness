@@ -30,6 +30,8 @@ def status() -> dict:
 
 
 def trigger() -> None:
+    # Human-initiated: the next cycle runs even outside active hours.
+    db.set_setting("force_cycle", "1")
     _run_now.set()
 
 
@@ -41,13 +43,15 @@ def _loop() -> None:
         try:
             if db.maintenance():
                 raise _Maintenance()
+            force = db.get_setting("force_cycle") == "1"
+            db.set_setting("force_cycle", "")
             if housekeeping.due():
                 asyncio.run(housekeeping.run(allow_agent=not db.paused_until()))
             # Stand-up has its own clock and runs BEFORE the sweep, so a
             # long cycle (or a restart mid-cycle) can never starve it.
             if pipeline.standup_due():
-                asyncio.run(pipeline.run_standup())
-            asyncio.run(pipeline.run_all_cycles())
+                asyncio.run(pipeline.run_standup(force=force))
+            asyncio.run(pipeline.run_all_cycles(force=force))
         except _Maintenance:
             pass  # maintenance mode: idle until the operator clears it
         except Exception:

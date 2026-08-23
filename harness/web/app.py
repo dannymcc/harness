@@ -126,6 +126,7 @@ def _enrich_questions(qs):
     out = []
     for q in qs:
         d = dict(q)
+        d["options_list"] = db.question_options(q)
         d["item_title"], d["item_url"] = "", ""
         if q["item_key"] and "#" in q["item_key"] and q["project"]:
             kind, _, num = q["item_key"].partition("#")
@@ -316,11 +317,15 @@ def set_policy(name: str, key: str, value: str = Form(...)):
 
 
 @app.post("/p/{name}/question/{qid}/answer")
-def answer_question(name: str, qid: int, answer: str = Form(...)):
+def answer_question(name: str, qid: int, answer: str = Form(...),
+                    via: str = ""):
     db.answer_question(qid, answer.strip())
     db.log_event(f"Danny answered a question: {answer.strip()[:100]}",
                  project=name)
     worker.trigger()
+    if via == "ntfy":  # ntfy http actions want a plain 2xx, not a redirect
+        from fastapi.responses import JSONResponse
+        return JSONResponse({"ok": True, "answered": qid})
     return RedirectResponse(f"/p/{name}" if name != "-" else "/",
                             status_code=303)
 

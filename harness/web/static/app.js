@@ -58,3 +58,25 @@ document.addEventListener("submit", async (e) => {
     location.reload();
   }
 });
+
+
+// Render ISO-UTC timestamps in the viewer's own locale and timezone.
+// Server keeps emitting ISO strings; presentation is the browser's job.
+document.addEventListener("DOMContentLoaded", () => {
+  const ISO = /\b\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z\b/g;
+  const now = new Date();
+  const fmt = (d) => {
+    const opts = { day: "numeric", month: "short",
+                   hour: "2-digit", minute: "2-digit" };
+    if (d.getFullYear() !== now.getFullYear()) opts.year = "numeric";
+    return d.toLocaleString(undefined, opts);
+  };
+  document.querySelectorAll(".ts").forEach((el) => {
+    for (const node of el.childNodes) {
+      if (node.nodeType === Node.TEXT_NODE && ISO.test(node.nodeValue)) {
+        node.nodeValue = node.nodeValue.replace(ISO, (m) => fmt(new Date(m)));
+      }
+      ISO.lastIndex = 0;
+    }
+  });
+});

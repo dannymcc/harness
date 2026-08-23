@@ -50,8 +50,10 @@ Ground rules, non-negotiable:
 - Every schema has an optional question_for_danny field. Use it when you
   need a decision you cannot make yourself. It goes to Harry first, who
   either decides or escalates to Danny, the maintainer. One short, specific
-  question; empty string otherwise. Never re-ask something already listed
-  as waiting.
+  question; empty string otherwise. When the answer is a choice between
+  clear alternatives, also fill question_options with up to 3 short options
+  — they become one-tap buttons on Danny's phone. Never re-ask something
+  already listed as waiting.
 """
 
 
@@ -202,6 +204,9 @@ TRIAGE_SCHEMA = {
         "summary": {"type": "string",
                     "description": "2-3 sentences: what this is and your assessment."},
         "question_for_danny": {"type": "string", "description": "Optional: one question needing Danny's decision, else empty."},
+        "question_options": {"type": "array", "maxItems": 3,
+                             "items": {"type": "string"},
+                             "description": "Optional: up to 3 short answer choices when the question has discrete options."},
         "memory_note": {"type": "string", "description": "Optional: one line worth remembering for future work on this project, else empty."},
         "plan": {"type": "string",
                  "description": "If fixable: concrete fix plan with files. Else empty."},
@@ -220,6 +225,9 @@ FIX_SCHEMA = {
         "summary": {"type": "string"},
         "question_for_danny": {"type": "string",
                                "description": "Optional: one question needing Danny's decision, else empty."},
+        "question_options": {"type": "array", "maxItems": 3,
+                             "items": {"type": "string"},
+                             "description": "Optional: up to 3 short answer choices when the question has discrete options."},
         "memory_note": {"type": "string",
                         "description": "Optional: one line worth remembering for future work on this project, else empty."},
         "docs_updated": {"type": "boolean",
@@ -242,6 +250,9 @@ REVIEW_SCHEMA = {
         "summary": {"type": "string"},
         "question_for_danny": {"type": "string",
                                "description": "Optional: one question needing Danny's decision, else empty."},
+        "question_options": {"type": "array", "maxItems": 3,
+                             "items": {"type": "string"},
+                             "description": "Optional: up to 3 short answer choices when the question has discrete options."},
         "memory_note": {"type": "string",
                         "description": "Optional: one line worth remembering for future work on this project, else empty."},
         "risks": {"type": "string"},
@@ -262,6 +273,9 @@ RELEASE_SCHEMA = {
         "summary": {"type": "string"},
         "question_for_danny": {"type": "string",
                                "description": "Optional: one question needing Danny's decision, else empty."},
+        "question_options": {"type": "array", "maxItems": 3,
+                             "items": {"type": "string"},
+                             "description": "Optional: up to 3 short answer choices when the question has discrete options."},
         "memory_note": {"type": "string",
                         "description": "Optional: one line worth remembering for future work on this project, else empty."},
     },
@@ -276,6 +290,9 @@ PLAN_SCHEMA = {
                     "description": "Team lead's read on the project this cycle."},
         "question_for_danny": {"type": "string",
                                "description": "Optional: one question needing Danny's decision, else empty."},
+        "question_options": {"type": "array", "maxItems": 3,
+                             "items": {"type": "string"},
+                             "description": "Optional: up to 3 short answer choices when the question has discrete options."},
         "memory_note": {"type": "string",
                         "description": "Optional: one line worth remembering for future work on this project, else empty."},
         "tasks": {
@@ -306,6 +323,9 @@ STANDUP_SCHEMA = {
         "summary": {"type": "string"},
         "question_for_danny": {"type": "string",
                                "description": "Optional: one question needing Danny's decision, else empty."},
+        "question_options": {"type": "array", "maxItems": 3,
+                             "items": {"type": "string"},
+                             "description": "Optional: up to 3 short answer choices when the question has discrete options."},
         "memory_note": {"type": "string",
                         "description": "Optional: one line worth remembering for future work on this project, else empty."},
         "desks": {
@@ -383,6 +403,9 @@ CTO_SCHEMA = {
         "summary": {"type": "string"},
         "question_for_danny": {"type": "string",
                                "description": "Optional: one question needing Danny's decision, else empty."},
+        "question_options": {"type": "array", "maxItems": 3,
+                             "items": {"type": "string"},
+                             "description": "Optional: up to 3 short answer choices when the question has discrete options."},
         "memory_note": {"type": "string",
                         "description": "Optional: one line worth remembering for future work on this project, else empty."},
         "report_markdown": {"type": "string",
@@ -563,6 +586,9 @@ NOTES_SCHEMA = {
         "summary": {"type": "string"},
         "question_for_danny": {"type": "string",
                                "description": "Optional: one question needing Danny's decision, else empty."},
+        "question_options": {"type": "array", "maxItems": 3,
+                             "items": {"type": "string"},
+                             "description": "Optional: up to 3 short answer choices when the question has discrete options."},
         "memory_note": {"type": "string",
                         "description": "Optional: one line worth remembering for future work on this project, else empty."},
     },
@@ -616,6 +642,9 @@ SECURITY_SCHEMA = {
         "summary": {"type": "string"},
         "question_for_danny": {"type": "string",
                                "description": "Optional: one question needing Danny's decision, else empty."},
+        "question_options": {"type": "array", "maxItems": 3,
+                             "items": {"type": "string"},
+                             "description": "Optional: up to 3 short answer choices when the question has discrete options."},
         "memory_note": {"type": "string",
                         "description": "Optional: one line worth remembering for future work on this project, else empty."},
         "report_markdown": {"type": "string",

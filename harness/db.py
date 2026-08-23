@@ -120,6 +120,7 @@ MIGRATIONS = [
     "ALTER TABLE runs ADD COLUMN agent TEXT NOT NULL DEFAULT ''",
     "ALTER TABLE questions ADD COLUMN answered_by TEXT NOT NULL DEFAULT ''",
     "ALTER TABLE runs ADD COLUMN cancel_requested INTEGER NOT NULL DEFAULT 0",
+    "ALTER TABLE questions ADD COLUMN options TEXT NOT NULL DEFAULT ''",
 ]
 
 
@@ -467,10 +468,11 @@ def latest_report(scope: str, project: str = ""):
 # --- Danny-in-the-loop -------------------------------------------------------
 
 def ask_question(project: str, asked_by: str, item_key: str,
-                 question: str) -> None:
+                 question: str, options: list[str] | None = None) -> None:
     question = question.strip()
     if not question:
         return
+    opts = json.dumps([o.strip()[:80] for o in (options or []) if o.strip()][:3])
     with conn() as c:
         dup = c.execute(
             "SELECT id FROM questions WHERE project = ? AND status IN "
@@ -480,8 +482,9 @@ def ask_question(project: str, asked_by: str, item_key: str,
             return
         c.execute(
             "INSERT INTO questions (project, asked_by, item_key, question, "
-            "created_at) VALUES (?, ?, ?, ?, ?)",
-            (project, asked_by, item_key, question, now()))
+            "options, created_at) VALUES (?, ?, ?, ?, ?, ?)",
+            (project, asked_by, item_key, question,
+             opts if opts != "[]" else "", now()))
     log_event(f"{asked_by} has a question for Danny: {question[:120]}",
               "warn", project=project)
 
@@ -646,3 +649,12 @@ def consecutive_failures(project: str, item_key: str) -> int:
         else:
             break
     return n
+
+
+def question_options(q) -> list[str]:
+    if not q["options"]:
+        return []
+    try:
+        return json.loads(q["options"])
+    except ValueError:
+        return []

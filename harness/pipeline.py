@@ -14,6 +14,25 @@ from .agents import AgentStalled
 from .gh import CmdError
 
 MAX_AGENT_TASKS_PER_CYCLE = 5
+
+
+def within_active_hours(name: str) -> bool:
+    """True when the project's active_hours policy allows agent work now."""
+    val = db.policy(name, "active_hours").strip().lower()
+    if val in ("", "always", "24/7"):
+        return True
+    try:
+        start_s, end_s = val.split("-", 1)
+        start, end = int(start_s), int(end_s)
+    except ValueError:
+        return True  # unparseable policy never silences the section
+    from zoneinfo import ZoneInfo
+    hour = datetime.now(ZoneInfo(config.TIMEZONE)).hour
+    if start == end:
+        return True
+    if start < end:
+        return start <= hour < end
+    return hour >= start or hour < end  # overnight range like 22-06
 BREAKER_THRESHOLD = 2  # consecutive failed runs before an item is held
 
 
@@ -45,7 +64,8 @@ def _file_question(project_name: str, asked_by: str, item_key: str,
         return
     if out.get("question_for_danny"):
         db.ask_question(project_name, asked_by, item_key,
-                        out["question_for_danny"])
+                        out["question_for_danny"],
+                        options=out.get("question_options"))
     if out.get("memory_note") and project_name:
         key = PERSONA_MEMORY_KEY.get(asked_by)
         if key is None:
@@ -421,12 +441,14 @@ def _state_digest(project) -> str:
     return "\n".join(lines) or "No open items."
 
 
-async def run_cycle(project) -> None:
+async def run_cycle(project, force: bool = False) -> None:
     """One full cycle for one project."""
     name = project["name"]
     sync(project)
     if db.paused_until():
         return
+    if not force and not within_active_hours(name):
+        return  # outside working hours; sync done, agent work waits
 
     if db.get_setting(f"security_requested.{name}") == "1":
         db.set_setting(f"security_requested.{name}", "")
@@ -512,12 +534,12 @@ async def run_cycle(project) -> None:
                      project=name)
 
 
-async def run_all_cycles() -> None:
+async def run_all_cycles(force: bool = False) -> None:
     projects = db.all_projects(enabled_only=True)
     for p in projects:
         db.touch_heartbeat()
         try:
-            await run_cycle(p)
+            await run_cycle(p, force=force)
         except AgentStalled:
             break
         except Exception as e:
@@ -569,6 +591,8 @@ def _standup_digest() -> str:
         sections.append("Open questions awaiting your ruling:\n" + "\n".join(
             f"- id={q['id']} [{q['project'] or 'section'}] from {q['asked_by']}"
             f"{' re ' + q['item_key'] if q['item_key'] else ''}: {q['question'][:200]}"
+            + (f" (options: {' / '.join(db.question_options(q))})"
+               if q['options'] else "")
             for q in inbox))
     if db.paused_until():
         sections.append(f"NOTE: agent work is paused for API limits until "
@@ -628,11 +652,14 @@ def standup_due() -> bool:
     return (datetime.now(timezone.utc) - dt).total_seconds() >= 3600
 
 
-async def run_standup() -> None:
+async def run_standup(force: bool = False) -> None:
     """Harry's hourly stand-up across every desk."""
     _unstick_working()
-    if db.paused_until() or not db.all_projects(enabled_only=True):
+    projects = db.all_projects(enabled_only=True)
+    if db.paused_until() or not projects:
         return
+    if not force and not any(within_active_hours(p["name"]) for p in projects):
+        return  # the whole section is off the clock
     try:
         res = await agents.standup(_standup_digest())
     except AgentStalled:
@@ -672,11 +699,18 @@ def _apply_decisions(decisions: list) -> None:
             db.escalate_question(q["id"])
             db.log_event(f"Harry escalated {q['asked_by']}'s question to Danny",
                          "warn", project=q["project"])
+            from urllib.parse import urlencode
+            opts = db.question_options(q)
+            actions = [{"label": o, "body": urlencode({"answer": o}),
+                        "path": f"/p/{q['project'] or '-'}/question/{q['id']}"
+                                f"/answer?via=ntfy"}
+                       for o in opts]
             notify.send(
                 f"Harry needs your decision ({q['project'] or 'section'})",
                 f"{q['asked_by']} asks: {q['question'][:300]}",
                 priority="high", tags="question",
-                click_path=f"/p/{q['project']}" if q["project"] else "/")
+                click_path=f"/p/{q['project']}" if q["project"] else "/",
+                actions=actions)
 
 
 def _apply_staffing(actions: list) -> None:
