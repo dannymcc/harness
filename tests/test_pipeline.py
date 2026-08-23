@@ -387,3 +387,53 @@ def test_quick_cycle_runs_fresh_approvals_only(fresh_db, may, monkeypatch):
     fresh_db.update_item("may", "issue", 7, status="queued")
     asyncio.run(pipeline.run_cycle(may))
     assert fixed == [3]
+
+
+def test_unreviewed_pr_merge_runs_the_suite_first(fresh_db, may, monkeypatch):
+    """Merge now skips Ruth, never the tests."""
+    import asyncio
+    from harness import gh, pipeline, repo
+
+    fresh_db.upsert_item("may", "pr", 9, "A contribution", "outsider",
+                         "open", "x")
+    item = fresh_db.get_item("may", "pr", 9)
+    merged = []
+
+    class _NoLock:
+        def __enter__(self): return None
+        def __exit__(self, *a): return False
+
+    monkeypatch.setattr(repo, "clone_lock", lambda project: _NoLock())
+    monkeypatch.setattr(repo, "fetch_pr_branch",
+                        lambda project, number, branch: "/tmp")
+    monkeypatch.setattr(gh, "pr_detail", lambda repo_, number: {
+        "isDraft": False, "baseRefName": "dev"})
+    monkeypatch.setattr(gh, "merge_pr",
+                        lambda repo_, number, **kw: merged.append(number))
+
+    monkeypatch.setattr(repo, "run_tests",
+                        lambda project, cwd=None: (False, "2 failed"))
+    asyncio.run(pipeline.merge_pr_item(may, item))
+    assert merged == []
+    after = fresh_db.get_item("may", "pr", 9)
+    assert after["status"] == "waiting_human" and "2 failed" in after["error"]
+
+    monkeypatch.setattr(repo, "run_tests",
+                        lambda project, cwd=None: (True, "ok"))
+    asyncio.run(pipeline.merge_pr_item(may, item))
+    assert merged == [9]
+    assert fresh_db.get_item("may", "pr", 9)["status"] == "queued"
+
+
+def test_draft_pr_is_never_merged(fresh_db, may, monkeypatch):
+    import asyncio
+    from harness import gh, pipeline
+
+    fresh_db.upsert_item("may", "pr", 10, "WIP", "outsider", "open", "x")
+    item = fresh_db.get_item("may", "pr", 10)
+    monkeypatch.setattr(gh, "pr_detail", lambda repo_, number: {"isDraft": True})
+    def _no(*a, **k):
+        raise AssertionError("merged a draft")
+    monkeypatch.setattr(gh, "merge_pr", _no)
+    asyncio.run(pipeline.merge_pr_item(may, item))
+    assert fresh_db.get_item("may", "pr", 10)["status"] == "waiting_human"

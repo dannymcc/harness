@@ -295,7 +295,8 @@ async def review_item(project, item) -> None:
     author = item["author"]
     policy_key = "merge_dependabot" if _is_dependabot(author) else "merge_prs"
     if verdict == "merge" and db.policy(name, policy_key) == "auto":
-        await merge_pr_item(project, db.get_item(name, "pr", item["number"]))
+        await merge_pr_item(project, db.get_item(name, "pr", item["number"]),
+                            validate=False)
     else:
         db.update_item(name, "pr", item["number"], status="waiting_human")
         if verdict in ("needs_work", "reject") and out["draft_review"] and \
@@ -304,9 +305,52 @@ async def review_item(project, item) -> None:
             db.log_event(f"Posted review on PR #{item['number']}", project=name)
 
 
-async def merge_pr_item(project, item) -> None:
-    """Merge an approved PR into dev (retargeting it there first)."""
+async def _pr_merges_clean_and_passes(project, item) -> bool:
+    """Merge the PR onto dev in harness's clone and run the suite there.
+
+    The operator can send a PR straight to merge without waiting for Ruth,
+    so this is the only thing standing between an unreviewed contribution and
+    the dev branch. Nothing merges on a red suite, whoever asked.
+    """
+    name, number = project["name"], item["number"]
+    detail = gh.pr_detail(project["repo"], number)
+    if detail.get("isDraft"):
+        db.update_item(name, "pr", number, status="waiting_human",
+                       error="still a draft — not merged")
+        db.log_event(f"PR #{number} is still a draft; not merging", "warn",
+                     project=name)
+        return False
+    try:
+        with repo.clone_lock(project):
+            repo.fetch_pr_branch(project, number, f"harness/pr-{number}")
+            passed, out = await asyncio.to_thread(repo.run_tests, project)
+    except CmdError as e:
+        db.update_item(name, "pr", number, status="blocked",
+                       error=f"does not merge cleanly onto "
+                             f"{project['dev_branch']}: {e}"[:2000])
+        db.log_event(f"PR #{number} does not merge cleanly onto "
+                     f"{project['dev_branch']}", "warn", project=name)
+        return False
+    if not passed:
+        db.update_item(name, "pr", number, status="waiting_human",
+                       verdict="needs_work",
+                       error=f"tests failed on the merge result:\n{out[-2000:]}")
+        db.log_event(f"PR #{number} not merged: the suite fails once it is on "
+                     f"{project['dev_branch']}", "warn", project=name)
+        return False
+    return True
+
+
+async def merge_pr_item(project, item, validate: bool = True) -> None:
+    """Merge an approved PR into dev (retargeting it there first).
+
+    validate=False only from the review, which has just fetched and tested
+    this exact merge result and still holds the clone lock — flock is not
+    reentrant, so it must not be taken again here.
+    """
     name = project["name"]
+    if validate and not await _pr_merges_clean_and_passes(project, item):
+        return
     try:
         detail = gh.pr_detail(project["repo"], item["number"])
         if detail.get("baseRefName") != project["dev_branch"]:

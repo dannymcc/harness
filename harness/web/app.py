@@ -292,8 +292,13 @@ def item_page(request: Request, name: str, kind: str, number: int):
 
 @app.post("/p/{name}/{kind}/{number}/approve")
 def approve(name: str, kind: str, number: int):
+    item = db.get_item(name, kind, number)
+    unreviewed = bool(item and kind == "pr" and item["status"] == "new")
     db.update_item(name, kind, number, status="approved", error="")
-    db.log_event(f"Operator approved {kind}#{number}", project=name)
+    db.log_event(
+        f"{config.OPERATOR} sent {kind}#{number} straight to merge, without "
+        "a review — the harness tests it first" if unreviewed
+        else f"Operator approved {kind}#{number}", project=name)
     worker.trigger()
     return RedirectResponse(f"/p/{name}", status_code=303)
 

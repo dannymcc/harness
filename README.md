@@ -47,7 +47,10 @@ told to behave.
 - **Pull requests** — merged onto dev locally, tested, then reviewed for
   value and quality. Verdicts: merge / needs work / reject, each with a
   courteous drafted review. Nothing merges without passing tests; by default
-  nothing merges without your click.
+  nothing merges without your click. **Merge now** on an unreviewed PR skips
+  Ruth's opinion when you already know the answer — the harness still merges
+  it onto dev in its own clone and runs the suite before landing it, and
+  still refuses drafts.
 - **Batched releases** — fixes and merges queue on dev. At a threshold (N
   changes or age), Colin drafts the release: version bump, CHANGELOG,
   README check, credited notes, then a dev → main PR. You approve; it
