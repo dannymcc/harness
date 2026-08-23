@@ -50,6 +50,17 @@ anything network-facing.
   rest. One fix never means one release.
 - **Docs** — fix sessions must update README/docs when user-visible behaviour
   changes, and every release drafting pass re-checks them.
+- **Mid-run control** — every agent run has a live transcript page and a
+  Stop button; a circuit breaker holds any item after two consecutive
+  failed runs rather than retrying forever.
+- **Desk memory** — agents bank one-line learnings as they work (shared by
+  role: analyst, engineering, lead, ops, security). Memories are recalled
+  into every relevant prompt and condensed hourly by Tariq, so judgement
+  stays consistent across cycles without prompts growing.
+- **Parallel engineers** — each fix runs in its own git worktree, and the
+  desk's engineers (Malcolm plus anyone Harry hires) work concurrently as
+  one wave per cycle. Landing on dev is serialised: rebase and re-test when
+  dev has moved, conflicts held for a human.
 - **Housekeeping** — every hour Tariq compacts state: old events and runs
   fold into aggregates, finished items lose their stored diffs and session
   ids, stale transcripts and SDK session files are deleted, and per-project
