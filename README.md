@@ -127,7 +127,8 @@ page arrives already in the right palette — no flash on load.
 ## Configuration
 
 Environment (see `.env.example`): `HARNESS_MODEL` (default `claude-opus-5`),
-`HARNESS_ADMIN_MODEL` (cheap model for housekeeping), poll interval, per-run
+`HARNESS_ADMIN_MODEL` (cheap model for housekeeping), `HARNESS_TRIAGE_MODEL`
+(mid-tier model for triage and PR review, default `claude-sonnet-5`), poll interval, per-run
 budget cap, timezone, ntfy settings.
 
 Per-repo policies, editable live in Settings:

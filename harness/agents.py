@@ -616,7 +616,8 @@ genuinely cannot be captured in a test.
     return await run_agent(
         project_name=project["name"], role="ic",
         item_key=f"issue#{issue['number']}", task="triage",
-        prompt=prompt, cwd=cwd, schema=TRIAGE_SCHEMA, readonly=True)
+        prompt=prompt, cwd=cwd, schema=TRIAGE_SCHEMA, readonly=True,
+        model=config.TRIAGE_MODEL)
 
 
 async def fix_issue(project, issue: dict, plan: str, cwd: str,
@@ -690,7 +691,8 @@ modify any files.
     return await run_agent(
         project_name=project["name"], role="ic",
         item_key=f"pr#{pr['number']}", task="review",
-        prompt=prompt, cwd=cwd, schema=REVIEW_SCHEMA, readonly=True)
+        prompt=prompt, cwd=cwd, schema=REVIEW_SCHEMA, readonly=True,
+        model=config.TRIAGE_MODEL)
 
 
 async def draft_release(project, queued_items: list, current_version: str,

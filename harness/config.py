@@ -81,6 +81,12 @@ MODEL = os.environ.get("HARNESS_MODEL", "claude-opus-5")
 # Housekeeping/compaction runs are summarisation, not engineering — a cheap
 # model keeps the housekeeper from eating the budget it exists to protect.
 ADMIN_MODEL = os.environ.get("HARNESS_ADMIN_MODEL", "claude-haiku-4-5")
+# Triage and PR review are read-and-judge: is it valid, what is the plan,
+# write the reproduction test. A mid-tier model does this well at a
+# fraction of the cost; the repro test is proven against the code either
+# way, and the engineer (on MODEL) gets the final say. Set to MODEL's
+# value to keep everything on one model.
+TRIAGE_MODEL = os.environ.get("HARNESS_TRIAGE_MODEL", "claude-sonnet-5")
 MAX_TURNS = int(os.environ.get("HARNESS_MAX_TURNS", "80"))
 MAX_BUDGET_USD_PER_RUN = float(os.environ.get("HARNESS_MAX_BUDGET_USD_PER_RUN", "5.0"))
 
