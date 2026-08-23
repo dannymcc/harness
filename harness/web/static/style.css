@@ -364,6 +364,11 @@ footer {
   .who { display: none; }
   /* .who is hidden here, so the toggle takes the free space itself */
   .who + .theme-toggle { margin-left: auto; }
+  /* Brand and theme toggle share the first row; the links become a
+     full-width second row that scrolls sideways instead of wrapping the
+     toggle onto a line of its own (#26). */
+  .navlinks { order: 3; flex: 1 1 100%; overflow-x: auto; flex-wrap: nowrap; }
+  .theme-toggle { margin-left: auto; }
   .kanban { grid-auto-columns: minmax(220px, 78vw); }
   .card { --card-pad: .8rem; padding: .85rem var(--card-pad); }
   /* the input takes the whole first line; the buttons share the second */
