@@ -92,6 +92,90 @@ def push_branch_to(project, local_branch: str, remote_branch: str) -> None:
     run(["git", "push", "origin", f"{local_branch}:{remote_branch}"], cwd=d)
 
 
+def worktrees_dir(project) -> Path:
+    return config.DATA_DIR / "worktrees" / project["name"]
+
+
+def add_worktree(project, branch: str) -> Path:
+    """Create (or recreate) an isolated worktree for one fix branch.
+
+    Holds the clone lock only for the brief git bookkeeping; afterwards the
+    worktree is independent and agents can work there without contending
+    for the main checkout."""
+    with clone_lock(project):
+        d = ensure_clone(project)
+        run(["git", "fetch", "origin", "--prune"], cwd=d)
+        wt = worktrees_dir(project) / branch.replace("/", "-")
+        if wt.exists():
+            run(["git", "worktree", "remove", "--force", str(wt)], cwd=d,
+                check=False)
+        wt.parent.mkdir(parents=True, exist_ok=True)
+        run(["git", "worktree", "add", "-B", branch, str(wt),
+             f"origin/{project['dev_branch']}"], cwd=d)
+        return wt
+
+
+def remove_worktree(project, wt: Path) -> None:
+    with clone_lock(project):
+        d = ensure_clone(project)
+        run(["git", "worktree", "remove", "--force", str(wt)], cwd=d,
+            check=False)
+
+
+def wt_has_changes(project, wt: Path) -> bool:
+    unstaged = run(["git", "status", "--porcelain"], cwd=wt).strip()
+    ahead = run(["git", "rev-list", "--count",
+                 f"origin/{project['dev_branch']}..HEAD"], cwd=wt).strip()
+    return bool(unstaged) or ahead != "0"
+
+
+def wt_commit_all(project, wt: Path, message: str) -> None:
+    run(["git", "add", "-A"], cwd=wt)
+    run(["git", "commit", "-m", message], cwd=wt)
+
+
+def wt_diff(project, wt: Path) -> tuple[str, str]:
+    base = f"origin/{project['dev_branch']}"
+    stat = run(["git", "diff", "--stat", base], cwd=wt)
+    diff = run(["git", "diff", base], cwd=wt)
+    if len(diff) > 150_000:
+        diff = diff[:150_000] + "\n... [diff truncated] ..."
+    return stat, diff
+
+
+def push_worktree_to_dev(project, wt: Path,
+                         branch: str) -> tuple[bool, str]:
+    """Land a finished worktree branch on dev, serialised via the clone lock.
+
+    If dev moved (a parallel engineer landed first), rebase and re-run the
+    tests before pushing — the deterministic gate applies to what actually
+    lands, not what was built."""
+    dev = project["dev_branch"]
+    for _ in range(3):
+        run(["git", "fetch", "origin"], cwd=wt)
+        behind = run(["git", "rev-list", "--count",
+                      f"HEAD..origin/{dev}"], cwd=wt).strip()
+        if behind != "0":
+            try:
+                run(["git", "rebase", f"origin/{dev}"], cwd=wt)
+            except CmdError:
+                run(["git", "rebase", "--abort"], cwd=wt, check=False)
+                return False, f"rebase onto moved {dev} conflicted"
+            ok, out = run_tests(project, cwd=wt, setup=False)
+            if not ok:
+                return False, ("tests failed after rebase onto moved "
+                               f"{dev}:\n" + out[-800:])
+        try:
+            with clone_lock(project):
+                run(["git", "push", "origin", f"HEAD:{dev}"], cwd=wt)
+            return True, ""
+        except CmdError as e:
+            if "rejected" in (e.err or "") or "fetch first" in (e.err or ""):
+                continue  # dev moved again while we were testing; go around
+            return False, f"push failed: {e}"
+    return False, f"could not land on {dev} after 3 attempts"
+
+
 def fetch_pr_branch(project, number: int, branch: str) -> Path:
     """Check out PR #number merged onto origin/<dev> as local branch."""
     d = clean_checkout(project, project["dev_branch"])
@@ -103,6 +187,19 @@ def fetch_pr_branch(project, number: int, branch: str) -> Path:
 
 # --- tests ------------------------------------------------------------------
 
+def ensure_test_env(project) -> None:
+    """Build the shared venv + install deps once, before parallel test runs."""
+    d = repo_dir(project)
+    py = _venv_python(project)
+    setup_cmd = project["setup_command"].strip()
+    if not setup_cmd and (d / "requirements.txt").exists():
+        setup_cmd = f"{py} -m pip install -q -r requirements.txt"
+    if setup_cmd:
+        run(["bash", "-c", f'PATH="{py.parent}:$PATH" {setup_cmd}'],
+            cwd=d, timeout=1200, check=False)
+
+
+
 def _venv_python(project) -> Path:
     """A per-project virtualenv so test deps don't pollute harness's own env."""
     vdir = config.DATA_DIR / "venvs" / project["name"]
@@ -113,21 +210,26 @@ def _venv_python(project) -> Path:
     return py
 
 
-def run_tests(project) -> tuple[bool, str]:
-    """Run setup (if any) + the project's test command in its clone.
+def run_tests(project, cwd: Path | None = None,
+              setup: bool = True) -> tuple[bool, str]:
+    """Run setup (unless suppressed) + the project's test command.
 
+    cwd defaults to the main clone; pass a worktree for isolated runs.
+    Parallel worktree runs share the per-project venv — suppress setup for
+    all but one to avoid concurrent pip installs racing.
     Returns (passed, combined output tail).
     """
-    d = repo_dir(project)
+    d = cwd or repo_dir(project)
     py = _venv_python(project)
     env_prefix = str(py.parent)
     outputs = []
-    setup = project["setup_command"].strip()
-    if not setup and (d / "requirements.txt").exists():
-        setup = f"{py} -m pip install -q -r requirements.txt"
+    setup_cmd = project["setup_command"].strip() if setup else ""
+    if setup and not setup_cmd and (d / "requirements.txt").exists():
+        setup_cmd = f"{py} -m pip install -q -r requirements.txt"
     try:
-        if setup:
-            outputs.append(run(["bash", "-c", f'PATH="{env_prefix}:$PATH" {setup}'],
+        if setup_cmd:
+            outputs.append(run(["bash", "-c",
+                                f'PATH="{env_prefix}:$PATH" {setup_cmd}'],
                                cwd=d, timeout=1200))
         out = run(["bash", "-c",
                    f'PATH="{env_prefix}:$PATH" {project["test_command"]}'],

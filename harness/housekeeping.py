@@ -106,6 +106,31 @@ def _close_orphaned_runs(c) -> int:
         (db.now(), cutoff)).rowcount
 
 
+WORKTREE_KEEP_DAYS = 3
+
+
+def _prune_worktrees() -> int:
+    import shutil, subprocess
+    n = 0
+    cutoff = time.time() - WORKTREE_KEEP_DAYS * 86400
+    for p in db.all_projects():
+        base = config.DATA_DIR / "worktrees" / p["name"]
+        if not base.exists():
+            continue
+        for wt in base.iterdir():
+            try:
+                if wt.is_dir() and wt.stat().st_mtime < cutoff:
+                    shutil.rmtree(wt, ignore_errors=True)
+                    n += 1
+            except OSError:
+                pass
+        clone = config.REPOS_DIR / p["name"]
+        if (clone / ".git").exists():
+            subprocess.run(["git", "worktree", "prune"], cwd=clone,
+                           capture_output=True)
+    return n
+
+
 def prune() -> str:
     with db.conn() as c:
         ev = _prune_events(c)
@@ -113,6 +138,7 @@ def prune() -> str:
         it = _trim_finished_items(c)
         orph = _close_orphaned_runs(c)
     logs = _prune_files(config.LOG_DIR, LOG_KEEP_DAYS)
+    wts = _prune_worktrees()
     sessions = _prune_sdk_sessions()
     parts = []
     if ev: parts.append(f"{ev} events folded")
@@ -120,6 +146,7 @@ def prune() -> str:
     if it: parts.append(f"{it} finished items trimmed")
     if orph: parts.append(f"{orph} orphaned runs closed")
     if logs: parts.append(f"{logs} old logs removed")
+    if wts: parts.append(f"{wts} stale worktrees removed")
     if sessions: parts.append(f"{sessions} stale sessions removed")
     return ", ".join(parts)
 

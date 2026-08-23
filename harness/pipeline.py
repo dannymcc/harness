@@ -126,22 +126,23 @@ async def triage_item(project, item) -> None:
 
 
 async def fix_item(project, item, persona: str = "Malcolm") -> None:
+    """Fix one issue in its own git worktree (safe to run concurrently)."""
     name = project["name"]
     if _breaker_tripped(project, item):
         return
     detail = gh.issue_detail(project["repo"], item["number"])
     branch = f"harness/issue-{item['number']}"
-    cwd = str(repo.create_branch(project, branch, project["dev_branch"]))
+    wt = repo.add_worktree(project, branch)
     db.update_item(name, "issue", item["number"], status="working",
                    branch=branch)
-    res = await agents.fix_issue(project, detail, item["plan"], cwd,
+    res = await agents.fix_issue(project, detail, item["plan"], str(wt),
                                  resume=item["session_id"] or None,
                                  persona=persona)
-    # (questions/memory filed under the engineer persona below)
     db.update_item(name, "issue", item["number"],
                    session_id=res.get("session_id", ""))
     if not res["ok"] or not res["output"]["success"]:
-        msg = res["error"] or res["output"]["notes"] if res["output"] else res["error"]
+        msg = (res["error"] or res["output"]["notes"]) if res["output"] \
+            else res["error"]
         db.update_item(name, "issue", item["number"], status="blocked",
                        error=(msg or "fix did not succeed")[:2000])
         db.log_event(f"Fix for issue #{item['number']} blocked: {msg}",
@@ -150,13 +151,14 @@ async def fix_item(project, item, persona: str = "Malcolm") -> None:
     out = res["output"]
     _file_question(name, persona, f"issue#{item['number']}", out)
 
-    if not repo.has_changes(project, project["dev_branch"]):
+    if not repo.wt_has_changes(project, wt):
         db.update_item(name, "issue", item["number"], status="blocked",
                        error="agent reported success but made no changes")
         return
 
-    # The deterministic gate: harness runs the tests itself.
-    passed, test_out = await asyncio.to_thread(repo.run_tests, project)
+    # The deterministic gate: harness runs the tests itself, in the worktree.
+    passed, test_out = await asyncio.to_thread(
+        repo.run_tests, project, wt, False)
     if not passed:
         db.update_item(name, "issue", item["number"], status="blocked",
                        error="tests failed after fix:\n" + test_out[-1500:])
@@ -167,23 +169,24 @@ async def fix_item(project, item, persona: str = "Malcolm") -> None:
     msg = out["commit_message"].strip() or f"fix: issue #{item['number']}"
     if f"#{item['number']}" not in msg:
         msg += f" (#{item['number']})"
-    repo.commit_all(project, msg)
-    stat, diff = repo.diff_stat(project, project["dev_branch"])
-    try:
-        repo.push_branch_to(project, branch, project["dev_branch"])
-    except CmdError as e:
+    repo.wt_commit_all(project, wt, msg)
+    stat, diff = repo.wt_diff(project, wt)
+    landed, err = await asyncio.to_thread(
+        repo.push_worktree_to_dev, project, wt, branch)
+    if not landed:
         db.update_item(name, "issue", item["number"], status="blocked",
-                       diff=diff, error=f"push to dev failed: {e}"[:2000])
+                       diff=diff, error=err[:2000])
+        db.log_event(f"Issue #{item['number']}: {err[:120]}", "warn",
+                     project=name)
         return
+    repo.remove_worktree(project, wt)
     db.update_item(
         name, "issue", item["number"],
         status="queued", queued_at=db.now(), diff=diff,
-        commits=repo.commit_log(project, project["dev_branch"]) or msg,
-        verdict_summary=out["summary"], error="")
+        commits=msg, verdict_summary=out["summary"], error="")
     db.log_event(
-        f"Fixed issue #{item['number']} and pushed to "
-        f"{project['dev_branch']} ({stat.strip().splitlines()[-1] if stat.strip() else 'changes'})",
-        project=name)
+        f"{persona} fixed issue #{item['number']} and landed it on "
+        f"{project['dev_branch']}", project=name)
     if item["draft_comment"] or out["summary"]:
         body = (f"A fix for this has been pushed to `{project['dev_branch']}` "
                 f"and will be included in the next release.\n\n{out['summary']}")
@@ -420,11 +423,12 @@ async def run_cycle(project) -> None:
         await run_security_review(project)
 
     try:
+        fix_jobs: list = []
+
         # Anything a human approved in the GUI runs first.
         for item in db.items_by_status(name, "approved"):
             if item["kind"] == "issue":
-                with repo.clone_lock(project):
-                    await fix_item(project, item)
+                fix_jobs.append(item)
             else:
                 await merge_pr_item(project, item)
 
@@ -438,7 +442,6 @@ async def run_cycle(project) -> None:
 
         staff = db.staff_get(name)
         engineers = ["Malcolm"] + staff["extra"]
-        fixes_done = 0
 
         done = 0
         for t in tasks:
@@ -452,26 +455,33 @@ async def run_cycle(project) -> None:
                 done += 1
                 # auto-advance freshly approved fixes in the same cycle
                 item = db.get_item(name, t["kind"], t["number"])
-                if item["status"] == "approved" and done < MAX_AGENT_TASKS_PER_CYCLE \
-                        and fixes_done < len(engineers):
-                    with repo.clone_lock(project):
-                        await fix_item(project, item,
-                                       engineers[fixes_done % len(engineers)])
-                    fixes_done += 1
-                    done += 1
+                if item["status"] == "approved":
+                    fix_jobs.append(item)
             elif t["action"] == "fix" and item["status"] in ("triaged", "approved"):
-                if (db.policy(name, "fix_issues") == "auto" or
-                        item["status"] == "approved") and \
-                        fixes_done < len(engineers):
-                    with repo.clone_lock(project):
-                        await fix_item(project, item,
-                                       engineers[fixes_done % len(engineers)])
-                    fixes_done += 1
-                    done += 1
+                if db.policy(name, "fix_issues") == "auto" or \
+                        item["status"] == "approved":
+                    fix_jobs.append(item)
             elif t["action"] == "review" and item["status"] == "new":
                 with repo.clone_lock(project):
                     await review_item(project, item)
                 done += 1
+
+        # Execute fixes as one concurrent wave: one engineer per job, each
+        # in an isolated worktree. Hires give the desk real parallelism.
+        seen, wave = set(), []
+        for item in fix_jobs:
+            k = (item["kind"], item["number"])
+            if k in seen:
+                continue
+            seen.add(k)
+            wave.append(item)
+        wave = wave[:len(engineers)]
+        if wave:
+            await asyncio.to_thread(repo.ensure_test_env, project)
+            await asyncio.gather(*(
+                fix_item(project, item, engineers[i % len(engineers)])
+                for i, item in enumerate(wave)))
+            done += len(wave)
 
         # Fallback: triage anything new the lead didn't mention.
         for item in db.items_by_status(name, "new"):
