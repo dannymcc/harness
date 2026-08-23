@@ -78,6 +78,8 @@ def overview(request: Request):
             "queued": counts.get("queued", 0),
             "release": rel,
             "release_auto": auto,
+            "release_pending": db.get_setting(
+                f"release_requested.{p['name']}") == "1",
             "cost": db.total_cost(p["name"]),
             "lead_report": db.latest_report("lead", p["name"]),
         })
