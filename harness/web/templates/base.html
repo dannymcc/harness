@@ -28,18 +28,18 @@
 </nav>
 
 {% if worker.stale %}
-<div class="banner warn">⚠ The worker's heartbeat is stale — it may be hung. Check `docker logs harness`.</div>
+<div class="banner warn">The worker's heartbeat is stale — it may be hung. Check `docker logs harness`.</div>
 {% endif %}
 {% if not worker.alive %}
-<div class="banner warn">⚠ The worker thread is not running. Restart the container.</div>
+<div class="banner warn">The worker thread is not running. Restart the container.</div>
 {% endif %}
 {% if maintenance %}
-<div class="banner warn">🔧 Maintenance in progress — {{ maintenance }}. The section is
+<div class="banner warn">Maintenance in progress — {{ maintenance }}. The section is
 holding; no action needed from you.</div>
 {% endif %}
 {% if paused %}
 <div class="banner warn">
-  ⏸ Agent work paused until {{ paused }} — {{ paused_reason }}
+  Agent work paused until {{ paused }} — {{ paused_reason }}
   <form method="post" action="/resume"><button>Resume now</button></form>
 </div>
 {% endif %}

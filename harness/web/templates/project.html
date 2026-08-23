@@ -2,7 +2,7 @@
 {% block title %}Harness · {{ p.name }}{% endblock %}
 {% block content %}
 
-<h1>{{ p.name }} <span class="repo">{{ p.repo }}</span>
+<h1 class="page-head">{{ p.name }} <span class="repo">{{ p.repo }}</span>
   {% if not p.enabled %}<span class="pill">disabled</span>{% endif %}
   <a class="settings-link" href="/p/{{ p.name }}/settings">Settings</a></h1>
 
@@ -59,7 +59,7 @@
     <a href="/p/{{ p.name }}/{{ i.kind }}/{{ i.number }}">
       <b>{{ i.kind }}#{{ i.number }}</b> {{ i.title }}</a>
     <span class="pill {{ 'ok' if i.verdict == 'merge' else '' }}">{{ i.verdict or '—' }}</span>
-    <p class="snippet">{{ i.verdict_summary[:200] }}</p>
+    <p class="snippet clamp3">{{ i.verdict_summary[:200] }}</p>
     <div class="actions">
       <form method="post" action="/p/{{ p.name }}/{{ i.kind }}/{{ i.number }}/approve">
         <button class="primary">{{ 'Merge' if i.kind == 'pr' else 'Fix it' }}</button></form>
@@ -107,13 +107,13 @@
     {% for col in board %}
     <div class="kanban-col">
       <h3>{{ col.title }}
-        {% if col.agent %}<span class="pill">{{ col.agent }}</span>{% endif %}
-        <span class="count">{{ col.cards|length }}</span></h3>
+        <span class="count">{{ col.cards|length }}</span>
+        {% if col.agent %}<span class="pill">{{ col.agent }}</span>{% endif %}</h3>
       {% for i in col.cards %}
       <a class="kcard {{ 'err-border' if i.status == 'blocked' }}"
          href="/p/{{ p.name }}/{{ i.kind }}/{{ i.number }}">
         <span class="kcard-id">{{ i.kind }}#{{ i.number }}</span>
-        <span class="kcard-title">{{ i.title[:70] }}</span>
+        <span class="kcard-title clamp3">{{ i.title[:100] }}</span>
         <span class="kcard-meta">
           {% if i.verdict %}<span class="pill">{{ i.verdict }}</span>{% endif %}
           <span class="ts">{{ i.author }}</span>
@@ -147,25 +147,28 @@
 
 <section class="card">
   <h2>Agent runs · {{ cost|money }}</h2>
-  <ul class="events">
+  <ul class="runs">
   {% for r in runs %}
-    <li class="{{ 'info' if r.ok else 'error' }}">
-      <span class="ts">{{ r.started_at }}</span>
-      <span class="pill">{{ r.agent or agent_name(r.role, r.task, p.lead_name) }}</span>
-      <a href="/run/{{ r.id }}">{{ r.task }} {{ r.item_key }}</a>
-      {% if r.finished_at is none %}<span class="pill warn">live</span>
-        <form method="post" action="/run/{{ r.id }}/stop" style="display:inline">
-          <button class="danger">Stop</button></form>
-      {% elif r.ok is not none %}{{ '✓' if r.ok else '✗' }}{% endif %}
-      {{ r.cost_usd|money }} {{ r.summary[:120] }}</li>
+    <li>
+      <span class="run-head">
+        <span class="pill">{{ r.agent or agent_name(r.role, r.task, p.lead_name) }}</span>
+        <a href="/run/{{ r.id }}">{{ r.task }} {{ r.item_key }}</a>
+        {% if r.finished_at is none %}<span class="pill warn">live</span>
+          <form method="post" action="/run/{{ r.id }}/stop">
+            <button class="danger">Stop</button></form>
+        {% elif r.ok is not none %}<span class="run-mark {{ 'ok' if r.ok else 'err' }}">{{ '✓' if r.ok else '✗' }}</span>{% endif %}
+      </span>
+      {% if r.summary %}<p class="run-summary clamp2">{{ r.summary[:200] }}</p>{% endif %}
+      <p class="run-when"><span class="ts">{{ r.started_at }}</span> · {{ r.cost_usd|money }}</p></li>
   {% endfor %}
   </ul>
 </section>
 
 <section class="card">
   <h2>Past releases</h2>
-  <ul>{% for r in releases if r.status != 'proposed' %}
-    <li>v{{ r.version }} — {{ r.status }} {{ r.released_at or r.created_at }}</li>
+  <ul class="events">{% for r in releases if r.status != 'proposed' %}
+    <li><b>v{{ r.version }}</b> {{ r.status }}
+      <span class="ts">{{ r.released_at or r.created_at }}</span></li>
   {% else %}<li>None yet.</li>{% endfor %}</ul>
 </section>
 

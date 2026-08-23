@@ -40,7 +40,7 @@
       {% if c.release %}<span class="pill accent">release v{{ c.release.version }} proposed</span>{% endif %}
       {% if not c.waiting and not c.queued and not c.release %}<span class="pill">all quiet</span>{% endif %}
     </div>
-    {% if c.lead_report %}<p class="report-snippet"><b>{{ c.project.lead_name }}:</b> {{ c.lead_report.content[:180] }}</p>{% endif %}
+    {% if c.lead_report %}<p class="report-snippet clamp3"><b>{{ c.project.lead_name }}:</b> {{ c.lead_report.content[:300] }}</p>{% endif %}
     <p class="cost">{{ c.cost|money }} spent</p>
   </a>
 {% endfor %}

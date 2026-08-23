@@ -4,15 +4,17 @@
 
 <p><a href="{{ '/p/' + run.project if run.project else '/' }}">← back</a></p>
 <h1>Run {{ run.id }}: {{ display_name }} · {{ run.task }} {{ run.item_key }}</h1>
-<p>
+<p class="run-facts">
   {% if run.finished_at is none %}
     <span class="pill warn">live</span>
     {% if run.cancel_requested %}<span class="pill">stopping…</span>{% endif %}
   {% elif run.ok %}<span class="pill ok">succeeded</span>
   {% else %}<span class="pill">failed</span>{% endif %}
-  started {{ run.started_at }}
-  {% if run.finished_at %}· finished {{ run.finished_at }}{% endif %}
-  · {{ run.cost_usd|money }} · {{ run.turns }} messages · {{ run.model }}
+  <span>started {{ run.started_at }}</span>
+  {% if run.finished_at %}<span>finished {{ run.finished_at }}</span>{% endif %}
+  <span>{{ run.cost_usd|money }}</span>
+  <span>{{ run.turns }} messages</span>
+  <span>{{ run.model }}</span>
 </p>
 {% if run.summary %}<section class="card"><h2>Summary</h2>
   <div class="md">{{ run.summary }}</div></section>{% endif %}

@@ -5,7 +5,7 @@
 <p><a href="/p/{{ p.name }}">← {{ p.name }}</a></p>
 <h1>{{ item.kind }}#{{ item.number }}: {{ item.title }}</h1>
 <p>
-  <span class="pill">{{ item.status }}</span>
+  <span class="pill">{{ item.status.replace('_', ' ') }}</span>
   {% if item.verdict %}<span class="pill">{{ item.verdict }}</span>{% endif %}
   by {{ item.author }} · <a href="{{ gh_url }}" target="_blank">view on GitHub ↗</a>
 </p>
