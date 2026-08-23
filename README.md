@@ -17,7 +17,7 @@ Harness runs a small agent organisation, staffed from Spooks:
 
 | Agent | Role | Scope | Job |
 |---|---|---|---|
-| **Harry** | head of section (CTO) | all harnesses | Takes an hourly stand-up across every desk: one line per project on whether it's moving, blockers called out with next steps, escalations logged. Work stranded mid-fix is requeued automatically first. |
+| **Harry** | head of section (CTO) | all harnesses | Takes an hourly stand-up across every desk: one line per project on whether it's moving, blockers called out, stuck work requeued. He makes the decisions — questions from the team come to him first, and he answers what's in the section's remit, escalating to you only what's genuinely yours. He also runs staffing: hires extra engineers onto busy desks (real fix capacity, max 2 per desk) and stands down people who never see work. |
 | **Tom, Adam, Ros, Lucas…** | team leads | one per harness | Read the project state each cycle and plan the work: what to triage, fix, review, and what to deliberately skip. |
 | **Ruth** | analyst (IC) | task-based | Triages issues and reviews pull requests. |
 | **Malcolm** | technical (IC) | task-based | Writes the fixes, with tests. |
@@ -55,11 +55,23 @@ anything network-facing.
   ids, stale transcripts and SDK session files are deleted, and per-project
   desk notes are refreshed (only when there is enough new activity to be
   worth the call — a quiet harness costs nothing to keep tidy).
+- **Danny-in-the-loop** — any agent can file a question when a decision
+  isn't theirs to make. Harry rules on them at stand-up; only what he
+  escalates reaches your queue, where you answer inline (answers flow back
+  into every relevant prompt). You can also issue standing directions —
+  desk-wide or about a single item — to respond to any report or feedback.
+- **Heartbeat** — the worker maintains a heartbeat (touched on every agent
+  message); `/health` returns 503 if the worker dies or wedges, the GUI
+  shows a warning banner, and the container healthcheck picks it up.
 - **Stall handling** — if the Claude API rate-limits or your account hits its
   usage cap, Harness pauses all agent work, records why, and resumes
   automatically the moment the limit resets (parsed from the error where
   possible, exponential backoff otherwise). In-flight fixes resume their
   session rather than starting over.
+
+Costs shown in the GUI are the SDK's API-equivalent estimates (`≈US$`) —
+on a subscription plan nothing is billed per token; treat them as a relative
+burn meter for your plan's usage limits.
 
 ## Policies
 
