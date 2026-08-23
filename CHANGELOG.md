@@ -4,6 +4,18 @@ All notable changes to Harness are recorded here. The format is
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project
 follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.3.0] - 2026-08-23
+
+### Added
+
+- **Release now** on every card on the overview, so a release can be forced
+  from the page the desks are watched on rather than one level down. The
+  override itself is not new — the request has always been honoured ahead of
+  `release_min_changes` and `release_max_age_days` — but it was only reachable
+  from the project page.
+- A `release requested` pill on the overview card, so a press is acknowledged
+  and the button cannot be fired twice by accident.
+
 ## [0.2.0] - 2026-08-23
 
 ### Added
