@@ -45,9 +45,22 @@ def health():
         status_code=200 if ok else 503)
 
 
+def active_project(request: Request, ctx: dict) -> str:
+    """Which project the page belongs to, for the nav.
+
+    The path parameter covers every `/p/<name>/...` page; a run page has no
+    name in its path, so fall back to the run's own project. Runs with no
+    project (Harry's cross-project work) highlight nothing."""
+    name = request.path_params.get("name")
+    if not name and ctx.get("run") is not None:
+        name = ctx["run"]["project"]
+    return name or ""
+
+
 def render(request: Request, template: str, **ctx):
     ctx.update(
         request=request,
+        active_project=active_project(request, ctx),
         operator=config.OPERATOR,
         version=config.DISPLAY_VERSION,
         projects=db.all_projects(),

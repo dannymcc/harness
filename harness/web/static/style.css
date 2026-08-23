@@ -61,6 +61,17 @@ nav {
   padding: .8rem .55rem; border-radius: 4px;
 }
 .navlinks a:hover { color: var(--accent); text-decoration: none; }
+/* the project you are looking at — colour alone would be lost under .dim */
+.navlinks a[aria-current="page"] {
+  color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 14%, transparent);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--accent) 45%, transparent);
+}
+.navlinks a.dim[aria-current="page"] { opacity: .75; }  /* disabled, but here */
+.nav-add {
+  display: inline-flex; align-items: center; justify-content: center;
+  min-width: 44px; min-height: 44px; font-size: 1.05rem;
+}
 .who { margin-left: auto; color: var(--dim); font: 400 .78rem var(--mono); }
 .theme-toggle { margin-left: auto; }
 .who + .theme-toggle { margin-left: 0; }  /* .who already took the free space */

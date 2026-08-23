@@ -180,3 +180,27 @@ def test_overview_release_button_overrides_the_thresholds(client, fresh_db):
     from harness import pipeline
     # one queued item, threshold three: only the request gets it over the line
     assert len(pipeline._release_due(fresh_db.get_project("may"))) == 1
+
+
+def test_add_control_is_an_icon_with_a_name(client):
+    """No label, but a screen reader and a hover still say what it does."""
+    html = client.get("/").text
+    assert "+ add" not in html
+    assert 'class="nav-add" href="/add" aria-label="Add a project"' in html
+    assert 'title="Add a project"' in html
+
+
+def test_nav_marks_the_project_you_are_looking_at(client, fresh_db):
+    fresh_db.create_project("june", "example/june")
+    fresh_db.upsert_item("may", "issue", 7, "A bug", "alice", "open", "x")
+    rid = fresh_db.start_run("may", "ic", "issue#7", "fix", "m", "Malcolm")
+    for path in ("/p/may", "/p/may/settings", "/p/may/issue/7", f"/run/{rid}"):
+        html = client.get(path).text
+        assert '<a href="/p/may" aria-current="page">' in html, path
+        assert html.count('aria-current="page"') == 1, path  # not june too
+    assert 'aria-current="page"' not in client.get("/").text
+
+    # a disabled project still reads as disabled while it is the active one
+    fresh_db.update_project("may", enabled=0)
+    assert '<a href="/p/may" class="dim" aria-current="page">' in \
+        client.get("/p/may").text

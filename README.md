@@ -91,7 +91,7 @@ cp .env.example .env    # fill in CLAUDE_CODE_OAUTH_TOKEN (or an API key),
 docker compose up -d
 ```
 
-Open http://localhost:8300, click **+ add**, and point it at a repo. New
+Open http://localhost:8300, click **+** in the nav, and point it at a repo. New
 harnesses start conservative: fixes run automatically but land only on your
 dev branch; merges, public comments, and releases all wait for your
 approval until you loosen the policies in Settings.
