@@ -414,6 +414,33 @@ def project_releases(project: str):
         ).fetchall()
 
 
+# --- persona memory ----------------------------------------------------------
+
+MEMORY_HARD_CAP = 6000  # chars; Tariq condenses well before this
+
+
+def append_memory(project: str, key: str, note: str) -> None:
+    """Add one remembered line to a desk persona's rolling memory.
+
+    Keys are role-shared: analyst (Ruth), engineering (Malcolm + hires),
+    lead, ops (Colin), security (Zaf)."""
+    note = " ".join(note.split()).strip()
+    if not note:
+        return
+    scope = f"memory:{key}"
+    latest = latest_report(scope, project)
+    text = (latest["content"] + "\n" if latest else "") + f"- {note}"
+    if len(text) > MEMORY_HARD_CAP:
+        text = text[-MEMORY_HARD_CAP:]
+        text = text[text.index("\n") + 1:] if "\n" in text else text
+    save_report(scope, project, text)
+
+
+def persona_memory(project: str, key: str) -> str:
+    latest = latest_report(f"memory:{key}", project)
+    return latest["content"] if latest else ""
+
+
 # --- reports (CTO / team-lead output) ---------------------------------------
 
 def save_report(scope: str, project: str, content: str) -> None:

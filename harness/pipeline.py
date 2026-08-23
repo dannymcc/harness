@@ -32,11 +32,23 @@ def _breaker_tripped(project, item) -> bool:
     return False
 
 
+PERSONA_MEMORY_KEY = {"Ruth": "analyst", "Malcolm": "engineering",
+                      "Colin": "ops", "Zaf": "security"}
+
+
 def _file_question(project_name: str, asked_by: str, item_key: str,
                    out: dict | None) -> None:
-    if out and out.get("question_for_danny"):
+    if not out:
+        return
+    if out.get("question_for_danny"):
         db.ask_question(project_name, asked_by, item_key,
                         out["question_for_danny"])
+    if out.get("memory_note") and project_name:
+        key = PERSONA_MEMORY_KEY.get(asked_by)
+        if key is None:
+            # team leads and hired engineers map by role
+            key = "lead" if asked_by and asked_by[0].isupper() and                 db.get_project(project_name) and                 asked_by == db.get_project(project_name)["lead_name"]                 else "engineering"
+        db.append_memory(project_name, key, out["memory_note"])
 
 
 def _login(author) -> str:
@@ -125,6 +137,7 @@ async def fix_item(project, item, persona: str = "Malcolm") -> None:
     res = await agents.fix_issue(project, detail, item["plan"], cwd,
                                  resume=item["session_id"] or None,
                                  persona=persona)
+    # (questions/memory filed under the engineer persona below)
     db.update_item(name, "issue", item["number"],
                    session_id=res.get("session_id", ""))
     if not res["ok"] or not res["output"]["success"]:
@@ -135,7 +148,7 @@ async def fix_item(project, item, persona: str = "Malcolm") -> None:
                      "warn", project=name)
         return
     out = res["output"]
-    _file_question(name, "Malcolm", f"issue#{item['number']}", out)
+    _file_question(name, persona, f"issue#{item['number']}", out)
 
     if not repo.has_changes(project, project["dev_branch"]):
         db.update_item(name, "issue", item["number"], status="blocked",

@@ -180,10 +180,31 @@ async def update_desk_notes() -> None:
             db.set_setting(marker_key, str(new[-1]["id"]))
 
 
+MEMORY_CONDENSE_AT = 2000  # chars
+
+MEMORY_KEYS = ("analyst", "engineering", "lead", "ops", "security")
+
+
+async def condense_memories() -> None:
+    for p in db.all_projects(enabled_only=True):
+        for key in MEMORY_KEYS:
+            mem = db.persona_memory(p["name"], key)
+            if len(mem) < MEMORY_CONDENSE_AT:
+                continue
+            try:
+                res = await agents.compact_memory(p["name"], key, mem)
+            except AgentStalled:
+                return
+            if res["ok"]:
+                db.save_report(f"memory:{key}", p["name"],
+                               res["output"]["notes_markdown"])
+
+
 async def run(allow_agent: bool) -> None:
     summary = prune()
     if summary:
         db.log_event(f"Tariq: {summary}")
     if allow_agent:
         await update_desk_notes()
+        await condense_memories()
     db.set_setting("last_admin_at", db.now())

@@ -202,6 +202,7 @@ TRIAGE_SCHEMA = {
         "summary": {"type": "string",
                     "description": "2-3 sentences: what this is and your assessment."},
         "question_for_danny": {"type": "string", "description": "Optional: one question needing Danny's decision, else empty."},
+        "memory_note": {"type": "string", "description": "Optional: one line worth remembering for future work on this project, else empty."},
         "plan": {"type": "string",
                  "description": "If fixable: concrete fix plan with files. Else empty."},
         "draft_comment": {"type": "string",
@@ -219,6 +220,8 @@ FIX_SCHEMA = {
         "summary": {"type": "string"},
         "question_for_danny": {"type": "string",
                                "description": "Optional: one question needing Danny's decision, else empty."},
+        "memory_note": {"type": "string",
+                        "description": "Optional: one line worth remembering for future work on this project, else empty."},
         "docs_updated": {"type": "boolean",
                          "description": "Whether README/docs needed and got updates."},
         "commit_message": {"type": "string",
@@ -239,6 +242,8 @@ REVIEW_SCHEMA = {
         "summary": {"type": "string"},
         "question_for_danny": {"type": "string",
                                "description": "Optional: one question needing Danny's decision, else empty."},
+        "memory_note": {"type": "string",
+                        "description": "Optional: one line worth remembering for future work on this project, else empty."},
         "risks": {"type": "string"},
         "draft_review": {"type": "string",
                          "description": "Polite review comment for the author."},
@@ -257,6 +262,8 @@ RELEASE_SCHEMA = {
         "summary": {"type": "string"},
         "question_for_danny": {"type": "string",
                                "description": "Optional: one question needing Danny's decision, else empty."},
+        "memory_note": {"type": "string",
+                        "description": "Optional: one line worth remembering for future work on this project, else empty."},
     },
 }
 
@@ -269,6 +276,8 @@ PLAN_SCHEMA = {
                     "description": "Team lead's read on the project this cycle."},
         "question_for_danny": {"type": "string",
                                "description": "Optional: one question needing Danny's decision, else empty."},
+        "memory_note": {"type": "string",
+                        "description": "Optional: one line worth remembering for future work on this project, else empty."},
         "tasks": {
             "type": "array",
             "maxItems": 10,
@@ -297,6 +306,8 @@ STANDUP_SCHEMA = {
         "summary": {"type": "string"},
         "question_for_danny": {"type": "string",
                                "description": "Optional: one question needing Danny's decision, else empty."},
+        "memory_note": {"type": "string",
+                        "description": "Optional: one line worth remembering for future work on this project, else empty."},
         "desks": {
             "type": "array",
             "description": "One entry per project desk.",
@@ -372,6 +383,8 @@ CTO_SCHEMA = {
         "summary": {"type": "string"},
         "question_for_danny": {"type": "string",
                                "description": "Optional: one question needing Danny's decision, else empty."},
+        "memory_note": {"type": "string",
+                        "description": "Optional: one line worth remembering for future work on this project, else empty."},
         "report_markdown": {"type": "string",
                             "description": "Concise cross-project status report."},
         "escalations": {
@@ -388,6 +401,13 @@ CTO_SCHEMA = {
         },
     },
 }
+
+
+def _desk_memory(project_name: str, key: str) -> str:
+    mem = db.persona_memory(project_name, key)
+    if not mem:
+        return ""
+    return f"\nYour desk memory for this project (accumulated on past work):\n{mem}\n"
 
 
 def _danny_answers(project_name: str, item_key: str) -> str:
@@ -419,7 +439,7 @@ Assess: is it valid? A bug or a feature request? Could Harness fix it safely
 otherwise leave them for the maintainer. Write a draft reply for the issue
 where a reply would help (asking for missing info, explaining a
 misunderstanding, or confirming the plan). Do not modify any files.
-{_danny_answers(project["name"], f"issue#{issue['number']}")}"""
+{_danny_answers(project["name"], f"issue#{issue['number']}")}{_desk_memory(project["name"], "analyst")}"""
     return await run_agent(
         project_name=project["name"], role="ic",
         item_key=f"issue#{issue['number']}", task="triage",
@@ -449,7 +469,7 @@ Requirements:
 - Do NOT commit, push, or touch git config — leave changes in the working tree.
 - If the fix is riskier or larger than the plan suggested, stop and report
   success=false with an explanation rather than forcing it.
-{_danny_answers(project["name"], f"issue#{issue['number']}")}"""
+{_danny_answers(project["name"], f"issue#{issue['number']}")}{_desk_memory(project["name"], "engineering")}"""
     return await run_agent(
         project_name=project["name"], role="ic",
         item_key=f"issue#{issue['number']}", task="fix",
@@ -490,7 +510,7 @@ Verdict "merge" only when you'd stake the release on it. "needs_work" with a
 courteous, specific draft_review when the idea is good but the execution
 isn't there. "reject" when it doesn't belong, with a kind explanation. Do not
 modify any files.
-{_danny_answers(project["name"], f"pr#{pr['number']}")}"""
+{_danny_answers(project["name"], f"pr#{pr['number']}")}{_desk_memory(project["name"], "analyst")}"""
     return await run_agent(
         project_name=project["name"], role="ic",
         item_key=f"pr#{pr['number']}", task="review",
@@ -525,7 +545,8 @@ Tasks:
 5. Write clear, understated release notes grouped by features / fixes /
    other, crediting community contributors by GitHub handle where their
    PRs or reports are included (e.g. "thanks @user").
-Do NOT commit, push or tag — leave the working tree changes in place."""
+Do NOT commit, push or tag — leave the working tree changes in place.
+{_desk_memory(project["name"], "ops")}"""
     return await run_agent(
         project_name=project["name"], role="ic",
         item_key="release", task="release",
@@ -542,8 +563,24 @@ NOTES_SCHEMA = {
         "summary": {"type": "string"},
         "question_for_danny": {"type": "string",
                                "description": "Optional: one question needing Danny's decision, else empty."},
+        "memory_note": {"type": "string",
+                        "description": "Optional: one line worth remembering for future work on this project, else empty."},
     },
 }
+
+
+async def compact_memory(project_name: str, key: str, text: str) -> dict:
+    prompt = f"""You are Tariq, the section's admin. Condense this desk
+memory for the {key} desk on {project_name}. Keep only what genuinely helps
+future work: conventions, recurring pitfalls, decisions, codebase quirks.
+Merge duplicates, drop stale or one-off detail. Output the condensed memory
+as bullet lines. Hard limit 150 words."""
+    prompt += f"\n\nCurrent memory:\n{text}"
+    return await run_agent(
+        project_name=project_name, role="admin",
+        item_key="", task="memory",
+        prompt=prompt, cwd=None, schema=NOTES_SCHEMA, readonly=True,
+        model=config.ADMIN_MODEL)
 
 
 async def compact_notes(project_name: str, old_notes: str,
@@ -579,6 +616,8 @@ SECURITY_SCHEMA = {
         "summary": {"type": "string"},
         "question_for_danny": {"type": "string",
                                "description": "Optional: one question needing Danny's decision, else empty."},
+        "memory_note": {"type": "string",
+                        "description": "Optional: one line worth remembering for future work on this project, else empty."},
         "report_markdown": {"type": "string",
                             "description": "Full security review report."},
         "findings": {
@@ -617,7 +656,8 @@ Report only genuine findings with concrete locations — no boilerplate
 checklists, no credit for things done well beyond a sentence in the summary.
 Rank by severity honestly; a self-hosted app behind a home network is still
 allowed to have real vulnerabilities. For each finding give the fix you
-would make. Do not modify any files."""
+would make. Do not modify any files.
+{_desk_memory(project["name"], "security")}"""
     return await run_agent(
         project_name=project["name"], role="ic",
         item_key="", task="security",
@@ -640,7 +680,8 @@ Prioritise: regressions and data-loss bugs, then community PRs waiting on
 review (contributors deserve timely answers), then ordinary bugs, then small
 feature requests. Use "skip" with a reason for open items deliberately not
 worth agent time this cycle. Only reference issue/PR numbers from the state
-digest above."""
+digest above.
+{_desk_memory(project["name"], "lead")}"""
     return await run_agent(
         project_name=project["name"], role="lead",
         item_key="", task="plan",
