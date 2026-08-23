@@ -405,8 +405,8 @@ def get_release(release_id: int):
 def open_release(project: str):
     with conn() as c:
         return c.execute(
-            "SELECT * FROM releases WHERE project = ? AND status = 'proposed' "
-            "ORDER BY id DESC LIMIT 1",
+            "SELECT * FROM releases WHERE project = ? AND status IN "
+            "('proposed', 'merging') ORDER BY id DESC LIMIT 1",
             (project,),
         ).fetchone()
 

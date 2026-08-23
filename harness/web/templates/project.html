@@ -52,12 +52,17 @@
   <h2>Release v{{ release.version }} proposed
     {% if release.pr_number %}· <a href="https://github.com/{{ p.repo }}/pull/{{ release.pr_number }}" target="_blank">PR #{{ release.pr_number }}</a>{% endif %}</h2>
   <div class="md">{{ release.notes }}</div>
+  {% if release.status == 'merging' %}
+    <p class="hint">Merging and tagging — this takes about a minute. Reload
+    for the result.</p>
+  {% else %}
   <div class="actions">
     <form method="post" action="/p/{{ p.name }}/release/{{ release.id }}/approve">
       <button class="primary">Merge &amp; tag v{{ release.version }}</button></form>
     <form method="post" action="/p/{{ p.name }}/release/{{ release.id }}/abandon">
       <button class="danger">Abandon</button></form>
   </div>
+  {% endif %}
 </section>
 {% endif %}
 

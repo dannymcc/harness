@@ -297,7 +297,14 @@ def approve_release(name: str, rid: int):
     p = db.get_project(name)
     release = db.get_release(rid)
     if p and release and release["status"] == "proposed":
-        pipeline.finalize_release(p, release)
+        # Claim it atomically, then finalize off the request thread —
+        # merging/tagging takes ~30s and a second tap must not double-run.
+        db.update_release(rid, status="merging")
+        db.log_event(f"Operator approved release#{rid}; merging and tagging",
+                     project=name)
+        import threading
+        threading.Thread(target=pipeline.finalize_release, args=(p, release),
+                         daemon=True).start()
     return RedirectResponse(f"/p/{name}", status_code=303)
 
 

@@ -89,6 +89,12 @@ def recover_after_restart() -> None:
             db.update_item(p["name"], it["kind"], it["number"],
                            status="approved")
             requeued.append(f"{p['name']} {it['kind']}#{it['number']}")
+    with db.conn() as c:
+        m = c.execute("UPDATE releases SET status = 'proposed' "
+                      "WHERE status = 'merging'").rowcount
+    if m:
+        db.log_event(f"Restart recovery: {m} release(s) returned to proposed "
+                     "(merge was interrupted; approve again)")
     if n or requeued:
         db.log_event(f"Restart recovery: closed {n} orphaned run(s)"
                      + (f", requeued {', '.join(requeued)}" if requeued else ""))
