@@ -4,6 +4,21 @@
 
 <h1>All harnesses</h1>
 
+<section class="card">
+  <form method="post" action="/tell" class="answer-form tell-form compose">
+    <select name="project" required>
+      {% for pr in projects %}{% if pr.enabled %}
+      <option value="{{ pr.name }}">{{ pr.name }}</option>
+      {% endif %}{% endfor %}
+    </select>
+    <input name="text" placeholder="Task the section — new work or a direction…" required>
+    <button class="primary">Send to Harry</button>
+  </form>
+  <p class="hint">New work becomes a GitHub issue and enters triage;
+  directions are actioned immediately. Harry's reply lands in the activity
+  feed and on the project page.</p>
+</section>
+
 {% if questions %}
 <section class="card accent-border">
   <h2>{{ operator|title }}-in-the-loop ({{ questions|length }})</h2>

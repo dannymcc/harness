@@ -385,6 +385,14 @@ def directions_json(name: str):
         for r in rows]})
 
 
+@app.post("/tell")
+def tell_from_overview(project: str = Form(...), text: str = Form(...)):
+    if db.get_project(project):
+        db.add_direction(project, text)
+        worker.trigger()
+    return RedirectResponse("/", status_code=303)
+
+
 @app.post("/p/{name}/tell")
 def tell_team(name: str, text: str = Form(...), item_key: str = Form("")):
     if db.get_project(name):

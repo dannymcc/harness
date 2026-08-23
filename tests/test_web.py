@@ -81,3 +81,13 @@ def test_run_tail_streams_increments(client, fresh_db, tmp_path):
     fresh_db.finish_run(rid, True, 0.1, 1, "done")
     j3 = client.get(f"/run/{rid}/tail?offset={j2['offset']}").json()
     assert j3["live"] is False
+
+
+def test_overview_composer_files_direction(client, fresh_db):
+    r = client.post("/tell", data={"project": "may",
+                                   "text": "Add CSV export to reports"},
+                    follow_redirects=False)
+    assert r.status_code == 303
+    pend = fresh_db.pending_directives("may")
+    assert pend and pend[0]["question"] == "Add CSV export to reports"
+    assert "Send to Harry" in client.get("/").text

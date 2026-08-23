@@ -406,3 +406,7 @@ a.agent-chip:hover { border-color: var(--accent); text-decoration: none; }
 
 .direction-reply { margin: .25rem 0 0 1.1rem; font-size: .86rem; }
 .direction-reply.pending { color: var(--dim); font-style: italic; }
+
+.compose { margin: 0; }
+.compose select { flex: 0 1 auto; }
+.compose input { flex: 1 1 200px; }
