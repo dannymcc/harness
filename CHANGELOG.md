@@ -4,6 +4,23 @@ All notable changes to Harness are recorded here. The format is
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project
 follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.8.0] - 2026-08-23
+
+### Added
+
+- **Desks run their cycles concurrently.** The sweep gathers every desk's
+  cycle instead of walking them in sequence, so a release on one desk is
+  never queued behind another desk's triage backlog. Directive and
+  question processing are serialized behind per-event-loop locks (Harry
+  never actions the same row twice), SQLite moves to WAL, and an API-limit
+  pause or a drain still stops every desk at once.
+
+### Security
+
+- Project-supplied setup/test commands now run in an allowlisted
+  environment with no GitHub or Claude credentials and a scratch HOME
+  (issue #4, landed on dev by the section, folded into this release).
+
 ## [0.7.1] - 2026-08-23
 
 ### Changed
