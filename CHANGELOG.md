@@ -4,6 +4,17 @@ All notable changes to Harness are recorded here. The format is
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project
 follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.7.1] - 2026-08-23
+
+### Changed
+
+- Operator directions reach Harry within a minute of being sent, whatever
+  the section is doing. An attendant runs alongside each engineer wave and
+  actions pending directions every 20 seconds; the triage loop checks
+  between items and the sweep checks before each desk. A direction typed
+  mid-cycle used to wait for the whole sweep — 17 minutes at one point
+  today.
+
 ## [0.7.0] - 2026-08-23
 
 Less talking, more landing. Yesterday's numbers: 62% of spend was the section
