@@ -696,6 +696,48 @@ def desk_events(project) -> list[str]:
     return reasons
 
 
+ATTEND_INTERVAL_S = 20   # how often a long step looks for new directions
+
+
+class _Attendant:
+    """Actions operator directions while a long step (an engineer wave,
+    a run of triages) is in progress, so a direction typed mid-cycle is
+    with Harry within a minute rather than after the sweep.
+
+        async with _Attendant():
+            await asyncio.gather(...)
+
+    Harry's directive run is read-only and has no worktree, so it is safe
+    alongside engineers — it is the same concurrency `ask_harry` already
+    relies on. Failures are logged, never raised into the step."""
+
+    def __init__(self):
+        self._stop = asyncio.Event()
+        self._task = None
+
+    async def _loop(self):
+        while not self._stop.is_set():
+            try:
+                await process_directives()
+            except Exception as e:  # never take the wave down
+                db.log_event(f"Directive attendant: {type(e).__name__}: {e}",
+                             "warn")
+            try:
+                await asyncio.wait_for(self._stop.wait(), ATTEND_INTERVAL_S)
+            except asyncio.TimeoutError:
+                pass
+
+    async def __aenter__(self):
+        self._task = asyncio.create_task(self._loop())
+        return self
+
+    async def __aexit__(self, *exc):
+        self._stop.set()
+        if self._task:
+            await self._task
+        return False
+
+
 async def run_cycle(project, force: bool = False) -> None:
     """One pass over one desk. Event-driven: new items are triaged or
     reviewed straight away, the lead plans only when something needs their
@@ -730,6 +772,7 @@ async def run_cycle(project, force: bool = False) -> None:
         for item in db.items_by_status(name, "new"):
             if done >= MAX_AGENT_TASKS_PER_CYCLE:
                 break
+            await process_directives()   # a direction never waits on a triage queue
             if item["kind"] == "issue":
                 await triage_item(project, item)
             else:
@@ -800,9 +843,10 @@ async def run_cycle(project, force: bool = False) -> None:
         wave = wave[:len(engineers)]
         if wave:
             await asyncio.to_thread(repo.ensure_test_env, project)
-            results = await asyncio.gather(*(
-                fix_item(project, item, engineers[i % len(engineers)])
-                for i, item in enumerate(wave)), return_exceptions=True)
+            async with _Attendant():
+                results = await asyncio.gather(*(
+                    fix_item(project, item, engineers[i % len(engineers)])
+                    for i, item in enumerate(wave)), return_exceptions=True)
             for item, r in zip(wave, results):
                 if isinstance(r, AgentStalled):
                     raise r
@@ -849,6 +893,7 @@ async def run_all_cycles(force: bool = False) -> bool:
     for p in projects:
         db.touch_heartbeat()
         try:
+            await process_directives()   # before each desk, not just each wake
             await run_cycle(p, force=force)
         except AgentStalled:
             break
