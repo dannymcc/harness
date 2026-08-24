@@ -87,7 +87,12 @@ told to behave.
   in flight — says so under the box and changes nothing.
 - **Mid-run control** — live transcripts for every agent run, a Stop
   button, and a circuit breaker that holds any item after two consecutive
-  failures instead of burning retries. A sticky strip above the console
+  failures instead of burning retries. A held item goes to Harry, not to
+  you: he sees both failures and rules — one fresh attempt, or the work
+  sent back to the team lead to be broken up (two runs out of turns means
+  the item is too big, not broken), or an escalation, which is the only one
+  of the three that reaches your phone. He gets one ruling per item; if it
+  trips again after it, the item is yours. A sticky strip above the console
   keeps the run's facts in view and moving — messages so far, model,
   elapsed time, and the cost, which the SDK only reports once the run
   ends, so it reads ≈US$0.00 until then rather than a guess. The run list on

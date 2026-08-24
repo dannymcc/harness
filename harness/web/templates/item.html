@@ -102,7 +102,7 @@ own clone and runs the suite first, and will not land a red one.</p>
 {% endif %}
 
 <div class="actions">
-  {% if item.status in ('waiting_human', 'triaged', 'blocked')
+  {% if item.status in ('waiting_human', 'triaged', 'blocked', 'held')
         or (item.kind == 'pr' and item.status == 'new') %}
   <form method="post" action="/p/{{ p.name }}/{{ item.kind }}/{{ item.number }}/approve">
     <button class="primary">{% if item.kind != 'pr' %}Fix it{% elif item.status == 'new' %}Merge now{% else %}Merge{% endif %}</button></form>

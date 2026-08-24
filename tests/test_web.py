@@ -505,3 +505,45 @@ def test_overview_tab_strip_marks_the_selected_tab(client, fresh_db):
         assert "US$" in html.split("<h1>", 1)[1], url  # spend on every tab
     # the activity tab is the only place the event list renders
     assert "The section" not in client.get("/?tab=activity").text
+
+
+def test_held_items_have_their_own_column(client, fresh_db):
+    """An item with Harry is not on the operator's desk — the board says so
+    rather than filing it under "Your decision"."""
+    fresh_db.upsert_item("may", "issue", 7, "flaky", "a", "open", "x")
+    fresh_db.update_item("may", "issue", 7, status="held",
+                         error="circuit breaker: with Harry for a ruling")
+    html = client.get("/p/may").text
+    board = html.split("With Harry", 1)[1]
+    assert "flaky" in board.split("Your decision", 1)[0]
+    # and the operator can still overrule from the item page
+    assert "Fix it" in client.get("/p/may/issue/7").text
+
+
+def test_operator_answering_a_breaker_question_moves_the_item(client, fresh_db):
+    """The GUI override on a held item has to act, not just record a reply."""
+    fresh_db.upsert_item("may", "issue", 7, "flaky", "a", "open", "x")
+    fresh_db.update_item("may", "issue", 7, status="held", breaker_trips=1,
+                         session_id="sess-1")
+    qid = fresh_db.ask_question("may", "harness", "issue#7",
+                                "issue#7 has failed 2 runs in a row",
+                                options=["retry", "split", "escalate"])
+    client.post(f"/p/may/question/{qid}/answer", data={"answer": "retry"})
+    item = fresh_db.get_item("may", "issue", 7)
+    assert item["status"] == "approved" and item["session_id"] == ""
+    assert item["breaker_trips"] == 0   # their say-so forgives the trip
+
+
+def test_retrying_from_scratch_clears_the_failure_history(client, fresh_db):
+    """Otherwise the stale failures trip the breaker before the fresh
+    attempt has run."""
+    from harness import pipeline
+    fresh_db.upsert_item("may", "issue", 7, "flaky", "a", "open", "x")
+    for _ in range(2):
+        rid = fresh_db.start_run("may", "ic", "issue#7", "fix", "m", "Malcolm")
+        fresh_db.finish_run(rid, False, 0.1, 1, "boom")
+    fresh_db.update_item("may", "issue", 7, breaker_trips=1)
+    client.post("/p/may/issue/7/retry")
+    item = fresh_db.get_item("may", "issue", 7)
+    assert item["status"] == "new" and item["breaker_trips"] == 0
+    assert pipeline._breaker_tripped(fresh_db.get_project("may"), item) is False

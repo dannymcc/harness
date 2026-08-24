@@ -593,6 +593,16 @@ PLAN_SCHEMA = {
     },
 }
 
+# Only read for a circuit-breaker question (asked by "harness" about a held
+# item); ignored on every other question, where a ruling is just an answer.
+ITEM_ACTION_HINT = (
+    "Circuit-breaker questions only: what to do with the held item. "
+    "retry = one fresh attempt; split = the answer goes to the team lead as "
+    "a directive to break the work up (right when the runs died on "
+    "error_max_turns); none = you have not decided, which puts the item on "
+    "the operator's desk. Escalate instead if the call is genuinely theirs."
+)
+
 STANDUP_SCHEMA = {
     "type": "object",
     "additionalProperties": False,
@@ -652,6 +662,9 @@ STANDUP_SCHEMA = {
                                "enum": ["answer", "escalate"]},
                     "answer": {"type": "string",
                                "description": "Your ruling (empty when escalating)."},
+                    "item_action": {"type": "string",
+                                    "enum": ["none", "retry", "split"],
+                                    "description": ITEM_ACTION_HINT},
                 },
             },
         },
@@ -1165,6 +1178,9 @@ RULINGS_SCHEMA = {
                                "enum": ["answer", "escalate"]},
                     "answer": {"type": "string",
                                "description": "Your ruling, in one or two plain sentences the asker can act on (empty when escalating)."},
+                    "item_action": {"type": "string",
+                                    "enum": ["none", "retry", "split"],
+                                    "description": ITEM_ACTION_HINT},
                 },
             },
         },
@@ -1192,7 +1208,17 @@ coming back. Where the options given are sensible, pick one. Escalate to
 direction, breaking changes, spend beyond the ordinary, anything with
 consequences outside the codebase. If a question shows the asker is stuck
 on something you cannot unblock with an answer, say so in your ruling and
-what they should do instead."""
+what they should do instead.
+
+Questions from "harness" are circuit-breaker trips: an item failed twice in
+a row and is held, waiting on you rather than on the operator. Answer with
+an item_action — retry for one fresh attempt, split to send the work back to
+the team lead in pieces (runs dying on error_max_turns mean the item is too
+big, not broken) — or escalate if the call is genuinely the operator's. An
+answer with no item_action lands the item on their desk, so decide. You get
+one such ruling per item: if it trips again afterwards it goes to the
+operator whatever you say, so a retry is worth spending only when you have
+reason to think the next attempt differs."""
     return await run_agent(
         project_name="", role="cto",
         item_key="", task="rulings",
@@ -1223,7 +1249,9 @@ each with an id. Rule on each: answer it yourself when it is within the
 section's remit (engineering judgement, priorities, process). Escalate to
 the operator only what is genuinely theirs — product direction, breaking changes,
 anything with consequences outside the codebase. Your answers reach the
-team automatically.
+team automatically. Questions from "harness" are circuit-breaker trips on a
+held item: answer those with an item_action (retry or split) so the item
+moves, or escalate.
 
 You also run staffing. The utilisation figures show how busy each desk's
 people are. If a desk has a backlog of fixable work, hire an extra engineer

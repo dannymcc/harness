@@ -39,6 +39,7 @@ CREATE TABLE IF NOT EXISTS items (
     gh_updated_at TEXT NOT NULL DEFAULT '',
     status TEXT NOT NULL DEFAULT 'new',
     -- new -> triaged -> approved -> working -> queued -> released
+    --                -> held (with Harry) -> approved | waiting_human
     --                -> waiting_human | blocked | rejected | closed
     verdict TEXT NOT NULL DEFAULT '',
     verdict_summary TEXT NOT NULL DEFAULT '',
@@ -142,6 +143,7 @@ MIGRATIONS = [
     "ALTER TABLE items ADD COLUMN repro_test TEXT NOT NULL DEFAULT ''",
     "ALTER TABLE steers ADD COLUMN resolution TEXT NOT NULL DEFAULT ''",
     "ALTER TABLE items ADD COLUMN breaker_reset_at TEXT NOT NULL DEFAULT ''",
+    "ALTER TABLE items ADD COLUMN breaker_trips INTEGER NOT NULL DEFAULT 0",
 ]
 
 
@@ -1047,6 +1049,21 @@ def consecutive_failures(project: str, item_key: str) -> int:
         else:
             break
     return n
+
+
+def recent_failures(project: str, item_key: str, limit: int = 2):
+    """The item's most recent failed runs, newest first.
+
+    The run summary of a failed run is the cause as the SDK reported it
+    ("error_max_turns: …", "stopped by the operator"), which is what a
+    ruling on a held item turns on — whether the work is too big for one
+    session or genuinely broken."""
+    with conn() as c:
+        return c.execute(
+            "SELECT * FROM runs WHERE project = ? AND item_key = ? "
+            "AND finished_at IS NOT NULL AND ok = 0 AND summary != ? "
+            "ORDER BY id DESC LIMIT ?",
+            (project, item_key, ORPHANED_SUMMARY, limit)).fetchall()
 
 
 def question_options(q) -> list[str]:

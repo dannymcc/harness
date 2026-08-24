@@ -168,6 +168,7 @@ KANBAN_COLUMNS = [
     ("Inbox", "Ruth", ("new",)),
     ("Assessed", "Ruth", ("triaged",)),
     ("In progress", "Malcolm", ("approved", "working")),
+    ("With Harry", "Harry", ("held",)),
     ("Your decision", "you", ("waiting_human",)),
     ("Blocked", "—", ("blocked",)),
     ("Release queue", "Colin", ("queued",)),
@@ -438,7 +439,7 @@ def approve(name: str, kind: str, number: int):
     item = db.get_item(name, kind, number)
     unreviewed = bool(item and kind == "pr" and item["status"] == "new")
     db.update_item(name, kind, number, status="approved", error="",
-                   breaker_reset_at=db.now())
+                   breaker_reset_at=db.now(), breaker_trips=0)
     db.log_event(
         f"{config.OPERATOR} sent {kind}#{number} straight to merge, without "
         "a review — the harness tests it first" if unreviewed
@@ -456,7 +457,11 @@ def reject(name: str, kind: str, number: int):
 
 @app.post("/p/{name}/{kind}/{number}/retry")
 def retry(name: str, kind: str, number: int):
-    db.update_item(name, kind, number, status="new", error="", session_id="")
+    # Starting over is the operator's say-so, so the item's failure history
+    # goes with it: without the reset the old failures trip the breaker
+    # again before the fresh attempt has run.
+    db.update_item(name, kind, number, status="new", error="", session_id="",
+                   breaker_reset_at=db.now(), breaker_trips=0)
     worker.trigger()
     return RedirectResponse(f"/p/{name}/{kind}/{number}", status_code=303)
 
@@ -528,9 +533,15 @@ def set_policy(name: str, key: str, value: str = Form(...)):
 @app.post("/p/{name}/question/{qid}/answer")
 def answer_question(name: str, qid: int, answer: str = Form(...),
                     via: str = ""):
+    q = db.question(qid)
     db.answer_question(qid, answer.strip())
     db.log_event(f"{config.OPERATOR} answered a question: {answer.strip()[:100]}",
                  project=name)
+    if q and pipeline.is_breaker_question(q):
+        # Answering a held item's question over Harry's head still has to
+        # move the item — the option buttons are the same vocabulary he uses.
+        pipeline.apply_breaker_ruling(q, answer.strip(), answer.strip(),
+                                      by=config.OPERATOR)
     worker.trigger()
     if via == "ntfy":  # ntfy http actions want a plain 2xx, not a redirect
         from fastapi.responses import JSONResponse
