@@ -307,7 +307,6 @@ def project_page(request: Request, name: str):
     return render(
         request, "project.html", p=p, items=items, board=board,
         harry_line=db.latest_report("harry", name),
-        harry_report=db.latest_report("cto"),
         roster=_agent_roster(p, runs),
         waiting=[i for i in items if i["status"] == "waiting_human"
                  and i["gh_state"] == "open"],
