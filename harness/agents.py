@@ -278,6 +278,9 @@ async def run_agent(*, project_name: str, role: str, item_key: str, task: str,
     """Run one agent session, log it, and return its structured output.
 
     Returns {"ok": bool, "output": dict|None, "session_id": str, "error": str}.
+    `output` is a dict whenever `ok` is true, and None otherwise — a session
+    that ends without calling StructuredOutput counts as a failed run, so
+    callers may subscript `output` on the strength of `ok` alone.
     Raises AgentStalled after registering a global pause on rate/usage limits.
 
     The session is steerable: the operator can post to the run (GUI "Tell
@@ -386,11 +389,19 @@ async def run_agent(*, project_name: str, role: str, item_key: str, task: str,
         return {"ok": False, "output": None, "session_id": session_id,
                 "error": summary}
 
-    db.set_setting("backoff_count", "0")  # healthy run resets the backoff
+    db.set_setting("backoff_count", "0")  # healthy round trip resets the backoff
     output = result.structured_output
-    summary = ""
-    if isinstance(output, dict):
-        summary = str(output.get("summary", ""))[:300]
+    if not isinstance(output, dict):
+        # The CLI called it a success but the session never used the
+        # StructuredOutput tool. Callers take ok=True as a promise that
+        # output is a dict and subscript it, so report the failure here
+        # rather than hand out a None and crash them.
+        err = "session ended without structured output"
+        db.finish_run(run_id, False, cost, turns, err, str(log_path))
+        return {"ok": False, "output": None, "session_id": session_id,
+                "error": err}
+
+    summary = str(output.get("summary", ""))[:300]
     db.finish_run(run_id, True, cost, turns, summary, str(log_path))
     return {"ok": True, "output": output, "session_id": session_id, "error": ""}
 
