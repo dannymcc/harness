@@ -4,6 +4,38 @@ All notable changes to Harness are recorded here. The format is
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project
 follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.13.0] - 2026-08-24
+
+### Added
+
+- **Slash commands in the composer.** The box that tasks the section now does
+  both jobs: plain prose is still a direction for Harry to judge, and text
+  starting with `/` is carried out then and there. `/approve 4`, `/merge pr 8`,
+  `/reject 4`, `/release`, `/tell Malcolm skip the probe`, `/stop 12`,
+  `/budget 100`, `/policy fix_issues approve`, `/cycle`, `/p may` to jump to a
+  desk, and `/?` for the list — which also appears under the box as soon as a
+  `/` is typed. Every command dispatches to the same route function the
+  buttons use, behind the same policy gate, so nothing here is a new outward
+  action: it is a faster way to reach one from a phone. `/merge` is an alias
+  of approve, since the approve route already sends an unreviewed PR to a
+  tested merge. The desk is the page's on a project page, the composer's
+  select on the overview, or named first (`/budget may 100`). A bare number is
+  resolved against the desk's items rather than assumed to be an issue,
+  because GitHub numbers issues and PRs from one sequence, and `/policy`
+  refuses a key or value the settings page would not offer rather than storing
+  it silently. Anything a command cannot do — an unknown verb, an agent with
+  no run in flight, a release with nothing to cut — is answered in plain text
+  under the box and changes nothing; the command itself is logged to the
+  project events, so the feed shows what was typed as well as what it did
+  (issue #23).
+
+### Changed
+
+- The name a run is shown under is now derived in one place — `config.persona()`
+  for the role and task, `db.run_persona()` for a run row — rather than in the
+  web layer alone, so `/tell malcolm` matches the name on the staff board and a
+  rename lands once.
+
 ## [0.12.1] - 2026-08-24
 
 ### Added
