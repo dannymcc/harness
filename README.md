@@ -110,9 +110,12 @@ told to behave.
   prompts and condensed hourly, so judgement stays consistent without
   prompts growing.
 - **Resilience** — API rate/usage limits pause all agent work and resume
-  automatically when the limit resets. A worker heartbeat backs `/health`,
-  the container healthcheck, and GUI warnings. Active-hours policy keeps
-  the section inside your working day if you want it to.
+  automatically when the limit resets. Agent sessions live on the data
+  volume, so a fix interrupted by a restart or an upgrade picks up where it
+  left off rather than starting over; if the session has gone for good, the
+  same run starts again fresh. A worker heartbeat backs `/health`, the
+  container healthcheck, and GUI warnings. Active-hours policy keeps the
+  section inside your working day if you want it to.
 
 ## Quick start
 

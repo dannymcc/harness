@@ -4,6 +4,23 @@ All notable changes to Harness are recorded here. The format is
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project
 follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.15.1] - 2026-08-24
+
+### Fixed
+
+- **Agent sessions now survive a container restart.** The Agent SDK writes its
+  session transcripts under `~/.claude`, which in the container was the
+  writable layer — so recreating the container threw them away and the next
+  cycle's resume died on "No conversation found with session ID", costing a
+  cycle and a circuit-breaker count for work that had already been done. At
+  boot `~/.claude` is pointed at `data/claude-home`, inside the existing
+  `./data` mount, so an interrupted fix picks up its session as intended. No
+  compose change is needed, and a real `~/.claude` on a development machine is
+  left alone (issue #27).
+- A resume against a session that has genuinely gone starts fresh in the same
+  run instead of failing the item and waiting for the next cycle. Other
+  failures are unchanged — they still requeue as before.
+
 ## [0.15.0] - 2026-08-24
 
 ### Changed
