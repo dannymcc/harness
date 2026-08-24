@@ -237,7 +237,8 @@
         {% elif r.ok is not none %}<span class="run-mark {{ 'ok' if r.ok else 'err' }}">{{ '✓' if r.ok else '✗' }}</span>{% endif %}
       </span>
       {% if r.summary %}<p class="run-summary clamp2">{{ r.summary[:200] }}</p>{% endif %}
-      <p class="run-when"><span class="ts">{{ r.started_at }}</span> · {{ r.cost_usd|money }}</p></li>
+      <p class="run-when"><span class="ts">{{ r.started_at }}</span> ·
+        {{ r.turns }} messages · {{ r.cost_usd|money }}</p></li>
   {% endfor %}
   </ul>
 </section>

@@ -152,6 +152,45 @@ def test_run_tail_streams_increments(client, fresh_db, tmp_path):
     assert j3["live"] is False
 
 
+def test_run_tail_carries_the_live_facts(client, fresh_db, tmp_path):
+    """The strip above the console has to move while the run does, so the
+    poller needs the facts back with each chunk — turns and model straight
+    away, cost and finished_at once the run is over."""
+    rid = fresh_db.start_run("may", "ic", "issue#5", "fix", "sonnet-x", "Malcolm")
+    fresh_db.update_run(rid, turns=3)
+
+    # before a log file exists the poller still wants the facts
+    j = client.get(f"/run/{rid}/tail?offset=0").json()
+    assert j["live"] is True
+    assert j["turns"] == 3 and j["model"] == "sonnet-x"
+    assert j["started_at"] and j["finished_at"] is None
+
+    log = tmp_path / "run.log"
+    log.write_text("working…")
+    fresh_db.update_run(rid, log_path=str(log), turns=4)
+    j = client.get(f"/run/{rid}/tail?offset=0").json()
+    assert j["data"] == "working…"
+    assert j["turns"] == 4 and j["model"] == "sonnet-x"
+    assert j["finished_at"] is None
+
+    fresh_db.finish_run(rid, True, 0.42, 4, "done", str(log))
+    j = client.get(f"/run/{rid}/tail?offset={j['offset']}").json()
+    assert j["live"] is False and j["finished_at"]
+    assert abs(j["cost_usd"] - 0.42) < 1e-9 and j["turns"] == 4
+
+
+def test_run_page_carries_the_facts_hooks(client, fresh_db):
+    """The strip is server-rendered first; the poller only rewrites the
+    spans, so the hooks it writes into have to be on the page."""
+    rid = fresh_db.start_run("may", "ic", "issue#6", "fix", "sonnet-x", "Beth")
+    fresh_db.update_run(rid, turns=2)
+    html = client.get(f"/run/{rid}").text
+    assert 'id="run-facts"' in html
+    for hook in ("turns", "cost", "model", "status", "elapsed", "finished"):
+        assert f'data-fact="{hook}"' in html, hook
+    assert "2 messages" in html and "sonnet-x" in html
+
+
 def test_overview_composer_files_direction(client, fresh_db):
     r = client.post("/tell", data={"project": "may",
                                    "text": "Add CSV export to reports"},

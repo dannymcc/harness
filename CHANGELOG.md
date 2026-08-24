@@ -4,6 +4,24 @@ All notable changes to Harness are recorded here. The format is
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project
 follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.14.0] - 2026-08-24
+
+### Added
+
+- **A live facts strip on the run page.** The numbers that say how a run is
+  going — messages so far, model, elapsed time and cost — now sit in a sticky
+  strip above the transcript and keep moving while the run does, so they are
+  readable on a phone without scrolling back to the top. The tail endpoint the
+  console already polls returns those facts with every chunk, including in the
+  first seconds before a log file exists, so the strip fills in rather than
+  waiting for a reload. Elapsed is the one number worked out in the browser;
+  cost stays at the server's figure, which the SDK only reports once the run
+  ends, so it reads ≈US$0.00 during the run rather than a guess. When the tail
+  reports a finish the strip says so and stops the clock, but leaves the
+  succeeded/failed verdict to the page reload a moment later rather than
+  inventing one. The run list on the project page now shows the message count
+  next to the cost as well (issue #20).
+
 ## [0.13.0] - 2026-08-24
 
 ### Added
