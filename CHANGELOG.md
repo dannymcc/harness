@@ -4,6 +4,27 @@ All notable changes to Harness are recorded here. The format is
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project
 follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.16.1] - 2026-08-24
+
+### Fixed
+
+- **The read-only roles are now told how to spell a `git` call.** Their shell
+  is an allowlist, and an allowlist rule is a prefix match against the literal
+  command: `git status` runs, `git -C <path> status` and
+  `cd <path> && git status` match nothing and are refused. The refusal the SDK
+  returns is generic, so a session that reached for the habitual `git -C` form
+  read it as a shell it no longer had, and at least one desk recorded
+  "Bash access denied" as a standing blocker that was never there. Readonly
+  sessions that actually carry a git allowlist now get a short note in their
+  system prompt: the working directory is already the checkout, git is invoked
+  bare from it, and a refusal of the `-C` or `cd` forms is a syntax miss to
+  retry rather than a lost capability. The allowlist itself is unchanged —
+  a rule admitting `git -C` would admit `git -C <path> push` with it — and the
+  note stays out of sessions with no shell and out of the fix and release
+  roles, which have a general one and may legitimately use both forms. Tests
+  pin the guidance, the denied forms, and that the rules were not widened for
+  it; SECURITY.md records the same (issue #46).
+
 ## [0.16.0] - 2026-08-24
 
 ### Added
