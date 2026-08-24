@@ -1261,10 +1261,19 @@ had no work for a week or more, stand them down (never someone hired within
 the last day — zero runs right after hiring means they have not started yet) — it keeps the board honest;
 they can be reinstated any time. Only make changes utilisation justifies.
 
+Each desk also carries back the blockers you named at the last stand-up,
+each marked changed or unchanged. Rule on those first. A blocker still
+marked unchanged after you have named it twice is not worth naming a third
+time: the next step you asked for did not happen, so decide instead —
+direct the lead, change the staffing, or escalate it. Only drop a blocker
+when it has actually moved.
+
 Run the stand-up: one line per desk on whether it's moving. Then call out
 anything genuinely stuck — an item blocked for a reason nobody is acting on,
 work waiting on the operator for days, repeated failures, unusual spend —
-as blockers, each with a concrete next step. Set all_clear only if there is
+as blockers, each with a concrete next step. Name a blocker in the same
+words as last time only when it is genuinely the same blocker; that is what
+lets the next stand-up count the repeat. Set all_clear only if there is
 truly nothing needing attention. Be brief; this happens every hour."""
     return await run_agent(
         project_name="", role="cto",

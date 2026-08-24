@@ -1228,6 +1228,126 @@ def _unstick_working() -> list[str]:
     return freed
 
 
+# --- blockers carried between stand-ups --------------------------------------
+# A blocker Harry names is only worth naming if someone then acts on it. Each
+# desk's blockers are kept until the next stand-up, which reports them back
+# with what has actually moved since — so a repeat is visibly a repeat.
+
+MAX_KEPT_BLOCKERS = 6      # per desk; a stand-up naming more is its own problem
+
+
+def _norm_blocker(message: str) -> str:
+    import re
+    return re.sub(r"[^a-z0-9]+", " ", message.lower()).strip()
+
+
+def _blocker_items(project: str, message: str) -> dict:
+    """Items a blocker names, with the status they were in when it was named.
+
+    'issue#12', 'pr#5' and a bare '#302' all count; a bare number is matched
+    against both kinds, since Harry writes as he speaks."""
+    import re
+    found = {}
+    for kind, num in re.findall(r"(?:\b(issue|pr)\s*)?#(\d+)\b",
+                                message, re.I)[:5]:
+        for k in ([kind.lower()] if kind else ["issue", "pr"]):
+            it = db.get_item(project, k, int(num))
+            if it:
+                found[f"{k}#{num}"] = it["status"]
+    return found
+
+
+def _desk_activity(project: str, since: str) -> list[str]:
+    """Work on a desk since `since` — runs and the desk's own events.
+
+    Stand-up's own lines are skipped: naming a blocker (and directing the
+    lead about it) must not read as the blocker having moved."""
+    moved = []
+    for r in db.recent_runs(30, project):
+        if r["started_at"] > since:
+            moved.append(f"{r['agent'] or r['role']} ran {r['task']}"
+                         + (f" on {r['item_key']}" if r["item_key"] else ""))
+    for e in db.recent_events(60, project):
+        if (e["project"] == project and e["ts"] > since
+                and not e["message"].startswith("Stand-up")):
+            moved.append(e["message"][:120])
+    return moved
+
+
+def _blocker_change(project: str, b: dict) -> str:
+    """What has moved on a blocker since it was named; empty if nothing has.
+
+    Judged on facts, not on wording. When the blocker names an item, that
+    item is the test — it moving to a new status, or being worked, is
+    progress, and activity elsewhere on the desk is not. When it names no
+    item, the desk's own runs and events since stand in."""
+    since = b.get("at", "")
+    items = b.get("items") or {}
+    moved = []
+    since_runs = ([r for r in db.recent_runs(30, project)
+                   if r["started_at"] > since] if items else [])
+    for key, was in items.items():
+        kind, _, num = key.partition("#")
+        it = db.get_item(project, kind, int(num))
+        now_status = it["status"] if it else "no longer tracked"
+        if now_status != was:
+            moved.append(f"{key} {was} → {now_status}")
+        runs = sum(1 for r in since_runs if r["item_key"] == key)
+        if runs:
+            moved.append(f"{runs} run(s) on {key}")
+    if not items:
+        moved += _desk_activity(project, since)
+    return "; ".join(moved[:4])
+
+
+def _prior_blockers(project: str) -> list:
+    try:
+        rows = json.loads(db.get_setting(f"standup_blockers.{project}", "[]"))
+        return rows if isinstance(rows, list) else []
+    except ValueError:
+        return []
+
+
+def _record_blockers(blockers: list) -> None:
+    """Keep each desk's blockers for the next stand-up to follow up.
+
+    Written at the end of the stand-up, once Harry's rulings and directives
+    are in, so that his own bookkeeping falls before the recorded time and
+    cannot be mistaken for movement. A blocker named again keeps counting:
+    `repeats` is how many stand-ups running it has been raised."""
+    by_project = {}
+    for b in blockers:
+        project, msg = b.get("project", ""), (b.get("message") or "").strip()
+        if msg and db.get_project(project):
+            by_project.setdefault(project, []).append(msg)
+    for p in db.all_projects(enabled_only=True):
+        name = p["name"]
+        was = {_norm_blocker(b.get("message", "")): b
+               for b in _prior_blockers(name)}
+        rows = [{"message": msg[:400], "at": db.now(),
+                 "repeats": was.get(_norm_blocker(msg), {}).get("repeats", 0) + 1,
+                 "items": _blocker_items(name, msg)}
+                for msg in by_project.get(name, [])[:MAX_KEPT_BLOCKERS]]
+        db.set_setting(f"standup_blockers.{name}", json.dumps(rows))
+
+
+def _blocker_followup(project: str) -> list[str]:
+    """The digest section that makes last stand-up's blockers answerable."""
+    prior = _prior_blockers(project)
+    if not prior:
+        return []
+    lines = ["Blockers you named last stand-up, with what changed since:"]
+    for b in prior:
+        change = _blocker_change(project, b)
+        repeats = b.get("repeats", 1)
+        lines.append(
+            f"- {b.get('message', '')[:200]}"
+            + (f" [named at {repeats} stand-ups running]" if repeats > 1 else "")
+            + (f" — changed: {change}" if change
+               else " — unchanged: no activity since"))
+    return lines
+
+
 def _standup_digest() -> str:
     now_ts = datetime.now(timezone.utc)
     inbox = db.harry_inbox()
@@ -1287,6 +1407,7 @@ def _standup_digest() -> str:
         for it in db.items_by_status(name, "queued"):
             lines.append(f"queued for release {it['kind']}#{it['number']} "
                          f"({age_days(it['queued_at'] or it['updated_at'])})")
+        lines += _blocker_followup(name)
         staff = db.staff_get(name)
         util = {}
         for r in db.recent_runs(100, name):
@@ -1362,6 +1483,7 @@ async def run_standup(force: bool = False) -> None:
                          f"{d['directive'][:150]}", project=d["project"])
     for pr in db.all_projects(enabled_only=True):
         db.set_setting(f"staffing_request.{pr['name']}", "")  # Harry has ruled
+    _record_blockers(out.get("blockers", []))
     db.set_setting("last_standup_at", db.now())
     if out["all_clear"]:
         db.log_event("Stand-up: all clear")

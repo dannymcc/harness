@@ -4,6 +4,24 @@ All notable changes to Harness are recorded here. The format is
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project
 follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.18.0] - 2026-08-24
+
+### Added
+
+- **Each stand-up now carries back the blockers Harry named at the last one.**
+  He called out blockers with a concrete next step every hour, but nothing fed
+  them back, so a blocker raised for the fifth time read as a fresh one and
+  could sit there indefinitely. Every desk's blockers are now kept until the
+  next stand-up, which reports them back marked *changed* or *unchanged*, with
+  how many stand-ups running they have been raised. A blocker that names an
+  item is judged on that item alone — its status moving, or runs on it since —
+  so a busy desk cannot make a stalled blocker look like progress; one naming
+  no item falls back to the desk's own runs and events. The record is written
+  after Harry's rulings and directives, so his own bookkeeping never reads as
+  movement on the blocker he has just named. His prompt now says a blocker
+  still unchanged after two namings must end in a directive, a staffing change
+  or an escalation, rather than a third restatement (issue #51).
+
 ## [0.17.1] - 2026-08-24
 
 ### Fixed
