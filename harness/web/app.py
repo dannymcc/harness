@@ -434,8 +434,40 @@ def item_page(request: Request, name: str, kind: str, number: int):
 
 # --- actions ----------------------------------------------------------------
 
+# NOTE: these two routes MUST be registered before the generic item route
+# below. Starlette matches in registration order, and /p/x/release/8/approve
+# also matches /p/{name}/{kind}/{number}/approve — for months every press of
+# "Merge & tag" was swallowed by the item route as kind='release' and did
+# nothing to the release.
+@app.post("/p/{name}/release/{rid}/approve")
+def approve_release(name: str, rid: int):
+    p = db.get_project(name)
+    release = db.get_release(rid)
+    if p and release and release["status"] == "proposed":
+        # Claim it atomically, then finalize off the request thread —
+        # merging/tagging takes ~30s and a second tap must not double-run.
+        db.update_release(rid, status="merging")
+        db.log_event(f"Operator approved release#{rid}; merging and tagging",
+                     project=name)
+        import threading
+        threading.Thread(target=pipeline.finalize_release, args=(p, release),
+                         daemon=True).start()
+    return RedirectResponse(f"/p/{name}", status_code=303)
+
+
+@app.post("/p/{name}/release/{rid}/abandon")
+def abandon_release(name: str, rid: int):
+    release = db.get_release(rid)
+    if release:
+        db.update_release(rid, status="abandoned")
+        db.log_event(f"Release v{release['version']} abandoned", project=name)
+    return RedirectResponse(f"/p/{name}", status_code=303)
+
+
 @app.post("/p/{name}/{kind}/{number}/approve")
 def approve(name: str, kind: str, number: int):
+    if kind not in ("issue", "pr"):
+        return RedirectResponse(f"/p/{name}", status_code=303)
     item = db.get_item(name, kind, number)
     unreviewed = bool(item and kind == "pr" and item["status"] == "new")
     db.update_item(name, kind, number, status="approved", error="",
@@ -497,29 +529,6 @@ def request_release(name: str):
     return RedirectResponse(f"/p/{name}", status_code=303)
 
 
-@app.post("/p/{name}/release/{rid}/approve")
-def approve_release(name: str, rid: int):
-    p = db.get_project(name)
-    release = db.get_release(rid)
-    if p and release and release["status"] == "proposed":
-        # Claim it atomically, then finalize off the request thread —
-        # merging/tagging takes ~30s and a second tap must not double-run.
-        db.update_release(rid, status="merging")
-        db.log_event(f"Operator approved release#{rid}; merging and tagging",
-                     project=name)
-        import threading
-        threading.Thread(target=pipeline.finalize_release, args=(p, release),
-                         daemon=True).start()
-    return RedirectResponse(f"/p/{name}", status_code=303)
-
-
-@app.post("/p/{name}/release/{rid}/abandon")
-def abandon_release(name: str, rid: int):
-    release = db.get_release(rid)
-    if release:
-        db.update_release(rid, status="abandoned")
-        db.log_event(f"Release v{release['version']} abandoned", project=name)
-    return RedirectResponse(f"/p/{name}", status_code=303)
 
 
 @app.post("/p/{name}/policy/{key}")

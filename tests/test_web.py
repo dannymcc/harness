@@ -547,3 +547,25 @@ def test_retrying_from_scratch_clears_the_failure_history(client, fresh_db):
     item = fresh_db.get_item("may", "issue", 7)
     assert item["status"] == "new" and item["breaker_trips"] == 0
     assert pipeline._breaker_tripped(fresh_db.get_project("may"), item) is False
+
+
+def test_merge_and_tag_reaches_the_release_route_not_the_item_route(
+        client, fresh_db, monkeypatch):
+    """/p/x/release/8/approve also matches the generic item route; for months
+    the item route was registered first and swallowed every press of the
+    button. The release route must win, and the item route must refuse
+    kinds it does not own."""
+    from harness import pipeline
+    finalized = []
+    monkeypatch.setattr(pipeline, "finalize_release",
+                        lambda p, r: finalized.append(r["id"]))
+    rid = fresh_db.create_release("may", "9.9.9", "notes", [])
+    client.post(f"/p/may/release/{rid}/approve")
+    import time
+    for _ in range(50):                       # finalize runs on a thread
+        if finalized:
+            break
+        time.sleep(0.05)
+    assert finalized == [rid]
+    assert fresh_db.get_release(rid)["status"] == "merging"
+    assert fresh_db.get_item("may", "release", rid) is None   # no ghost item
