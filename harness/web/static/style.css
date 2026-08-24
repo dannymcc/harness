@@ -377,6 +377,9 @@ footer {
   /* the input takes the whole first line; the buttons share the second */
   .answer-form input { flex-basis: 100%; }
   .answer-form button.primary { flex: 1 1 auto; }
+  /* the steer form has three buttons: let them all share and wrap rather
+     than the primary taking the room and squeezing the other two */
+  .steer-form button { flex: 1 1 auto; }
 }
 
 
@@ -399,6 +402,9 @@ footer {
 .question.open > p:first-child b { color: var(--dim); }
 
 .q-context { font-size: .84rem; color: var(--dim); margin: .15rem 0 0; }
+
+/* a second label inside a card — e.g. the follow-ups under the steers */
+h2.sub { margin: .9rem 0 .35rem; }
 
 /* --- compact agent strip under the page title --- */
 /* bleeds to the viewport edge so a half-visible chip signals more to scroll */

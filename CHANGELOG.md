@@ -4,6 +4,22 @@ All notable changes to Harness are recorded here. The format is
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project
 follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.10.0] - 2026-08-24
+
+### Added
+
+- **Say it now, or say it for afterwards.** The run page's "Tell <agent>"
+  box has a second button. **Send** is unchanged — it goes into the live
+  session on its agent's next message. **When they finish** files the same
+  text as an operator direction on the run's item instead, so it lands in
+  the item thread and whoever picks the item up next reads it as binding
+  context, without interrupting a run that is mid-edit. Nothing reaches the
+  live session, so a note filed while an agent is halfway through a change
+  no longer risks derailing it. Runs with no item have nowhere to file a
+  note, so the button is hidden for them. Anything queued this way since the
+  run started shows on the run page under "Queued for after", marked pending
+  or picked up, alongside the steers that were delivered (issue #18).
+
 ## [0.9.1] - 2026-08-23
 
 ### Changed

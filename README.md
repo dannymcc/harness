@@ -76,7 +76,10 @@ told to behave.
   them into actions straight away.
 - **Mid-run control** — live transcripts for every agent run, a Stop
   button, and a circuit breaker that holds any item after two consecutive
-  failures instead of burning retries.
+  failures instead of burning retries. Say something to a running agent
+  and choose when it lands: **Send** goes into the session on its next
+  message, **When they finish** files it on the item instead, so whoever
+  picks the item up next reads it without the current run being derailed.
 - **Desk memory** — agents bank one-line learnings, recalled into future
   prompts and condensed hourly, so judgement stays consistent without
   prompts growing.
