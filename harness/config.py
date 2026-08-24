@@ -12,7 +12,7 @@ from pathlib import Path
 # The single source of truth for the number: the release process bumps this
 # line (version file `harness/config.py`, pattern `VERSION\s*=\s*"..."`) and
 # tags the commit. Don't edit it by hand.
-VERSION = "0.12.1"
+VERSION = "0.13.0"
 
 _SHA_RE = re.compile(r"^[0-9a-f]{7,40}$")
 _STAMP_FILE = Path(__file__).resolve().parent / "_build_sha"
@@ -137,6 +137,19 @@ IC_NAMES = {
     "release": "Colin",   # ops
     "security": "Zaf",    # security reviews (manually triggered)
 }
+
+
+def persona(role: str, task: str, lead_name: str = "") -> str:
+    """Who a run belongs to, by role and task. One mapping for the GUI, the
+    run pages and the composer's /tell, so a hire or a rename lands once."""
+    if role == "cto":
+        return CTO_NAME
+    if role == "admin":
+        return ADMIN_NAME
+    if role == "lead":
+        return lead_name or "lead"
+    return IC_NAMES.get(task, "IC")
+
 
 # --- Per-project defaults ---------------------------------------------------
 # "auto"    – harness acts on its own verdict

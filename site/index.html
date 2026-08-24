@@ -424,7 +424,7 @@
   }
   .step h3 { font-size: 1.05rem; font-weight: 600; margin: 0.6rem 0 0.35rem; letter-spacing: -0.01em; }
   .step p { color: var(--muted); font-size: 0.97rem; }
-  .step p code, .prose code {
+  .step p code, .operator-copy p code, .prose code {
     font-family: var(--mono);
     font-size: 0.85em;
     background: var(--green-wash);
@@ -433,7 +433,7 @@
     padding: 0.1em 0.4em;
   }
   @media (prefers-color-scheme: dark) {
-    .step p code, .prose code { color: var(--code-ink); }
+    .step p code, .operator-copy p code, .prose code { color: var(--code-ink); }
   }
   .pipeline-coda {
     margin-top: 2.4rem;
@@ -912,6 +912,11 @@
         <p>The dashboard is mobile-first — a kanban board per repo, live agent
           transcripts, policies editable in place. Pin it to your home screen and
           run the section from the queue.</p>
+        <p>The box you task the section with takes <strong>slash commands</strong>
+          as well as prose: <code>/approve 4</code>, <code>/release</code>,
+          <code>/tell Malcolm skip the probe</code>, <code>/?</code> for the list.
+          They run the same code the buttons do, behind the same gates — just
+          quicker to reach with one thumb.</p>
       </div>
       <div class="phones">
         <figure class="phone">

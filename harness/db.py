@@ -978,6 +978,34 @@ def get_run(run_id: int):
         return c.execute("SELECT * FROM runs WHERE id = ?", (run_id,)).fetchone()
 
 
+def run_persona(run, lead_name: str = "") -> str:
+    """The name the GUI shows for a run's agent.
+
+    `runs.agent` is filled in by the desk cycle, but rows written before that
+    column existed — and any written by a path that doesn't name the agent —
+    leave it empty, so fall back to the persona the role and task imply, as
+    the staff board does."""
+    return run["agent"] or config.persona(run["role"], run["task"], lead_name)
+
+
+def live_runs(project: str, agent: str = ""):
+    """Runs still in flight on a desk, newest first.
+
+    `agent` is matched case-insensitively against the display name, so
+    "malcolm" finds Malcolm's run. Used by the composer's /tell and /stop to
+    turn a name the operator knows into a run id."""
+    with conn() as c:
+        rows = c.execute(
+            "SELECT * FROM runs WHERE finished_at IS NULL AND project = ? "
+            "ORDER BY id DESC", (project,)).fetchall()
+    if not agent:
+        return rows
+    p = get_project(project)
+    lead = p["lead_name"] if p else ""
+    want = agent.strip().lower()
+    return [r for r in rows if run_persona(r, lead).lower() == want]
+
+
 ORPHANED_SUMMARY = "orphaned by restart"
 
 

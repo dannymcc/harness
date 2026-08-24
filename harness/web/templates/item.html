@@ -92,6 +92,7 @@
     <input name="text" placeholder="Your direction on {{ item.kind }}#{{ item.number }}…" required>
     <button class="primary">Send</button>
   </form>
+  <pre class="cheatsheet" hidden>{{ cheatsheet }}</pre>
 </section>
 
 {% if item.kind == 'pr' and item.status == 'new' %}

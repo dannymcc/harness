@@ -11,12 +11,14 @@
       <option value="{{ pr.name }}">{{ pr.name }}</option>
       {% endif %}{% endfor %}
     </select>
-    <input name="text" placeholder="Task the section — new work or a direction…" required>
+    <input name="text" placeholder="Task the section, or /approve 4 …" required>
     <button class="primary">Send to Harry</button>
   </form>
+  <pre class="cheatsheet" hidden>{{ cheatsheet }}</pre>
   <p class="hint">New work becomes a GitHub issue and enters triage;
   directions are actioned immediately. Harry's reply lands in the activity
-  feed and on the project page.</p>
+  feed and on the project page. Start with / to run a command yourself
+  instead — /? for the list.</p>
 </section>
 
 {% set escalated = questions|selectattr('status', 'equalto', 'escalated')|list %}

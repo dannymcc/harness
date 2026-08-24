@@ -74,6 +74,17 @@ told to behave.
   one-tap answer buttons when the question has discrete options. You can
   also issue standing directions, desk-wide or per-item, and Harry turns
   them into actions straight away.
+- **Slash commands** — the same box takes commands as well as prose. Plain
+  text goes to Harry to judge; a leading `/` is carried out then and there
+  by the same code the buttons run, behind the same policy gates. `/approve
+  4`, `/merge pr 8`, `/reject 4`, `/release`, `/tell Malcolm skip the probe`
+  (steers their live run), `/stop 12`, `/budget 100`, `/policy fix_issues
+  approve`, `/cycle`, `/p may` to jump to a desk, `/?` for the list — which
+  also appears under the box as soon as you type a `/`. On a project page
+  the desk is the page's; from the overview it is the one in the composer's
+  own select, or named first (`/budget may 100`). Anything it can't do —
+  an unknown command, a policy key that doesn't exist, an agent with no run
+  in flight — says so under the box and changes nothing.
 - **Mid-run control** — live transcripts for every agent run, a Stop
   button, and a circuit breaker that holds any item after two consecutive
   failures instead of burning retries. Say something to a running agent
