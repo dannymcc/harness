@@ -71,7 +71,9 @@ told to behave.
   isn't theirs. It goes to Harry, who rules within minutes on anything in
   the section's remit (engineering judgement, priorities, process); only
   what he escalates reaches your queue and (via ntfy) your phone — with
-  one-tap answer buttons when the question has discrete options. You can
+  one-tap answer buttons when the question has discrete options. A question
+  of Harry's own is yours by definition: he cannot rule on himself, so it is
+  filed for you straight away rather than sitting in his inbox. You can
   also issue standing directions, desk-wide or per-item, and Harry turns
   them into actions straight away.
 - **Slash commands** — the same box takes commands as well as prose. Plain

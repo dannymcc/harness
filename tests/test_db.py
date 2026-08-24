@@ -35,6 +35,21 @@ def test_questions_flow(fresh_db, may):
     assert fresh_db.answers_for("may", "issue#1")[0]["answered_by"] == "Harry"
 
 
+def test_harrys_own_question_is_filed_escalated(fresh_db, may):
+    """Whoever the caller is — the ask_harry tool inside his own session
+    included — a question from Harry goes to the operator at filing. Filed
+    'open' it would be in nobody's hands: harry_inbox() skips his rows."""
+    qid = fresh_db.ask_question("may", "Harry", "issue#1", "Drop the runner?")
+    assert fresh_db.question(qid)["status"] == "escalated"
+    assert fresh_db.harry_inbox("may") == []
+    assert [q["id"] for q in fresh_db.escalated_questions("may")] == [qid]
+    assert any(m["message"].startswith("Harry has escalated to the operator: ")
+               for m in fresh_db.recent_events())
+    # and the derived event is dropped from the stream, which has the row
+    texts = [r["text"] for r in fresh_db.stream(project="may")]
+    assert sum("Drop the runner?" in t for t in texts) == 1
+
+
 def test_persona_memory_append_and_cap(fresh_db, may):
     fresh_db.append_memory("may", "analyst", "remember this")
     assert "remember this" in fresh_db.persona_memory("may", "analyst")
