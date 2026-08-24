@@ -210,6 +210,18 @@ async def fix_item(project, item, persona: str = "Malcolm") -> None:
     res = await agents.fix_issue(project, detail, item["plan"], str(wt),
                                  resume=item["session_id"] or None,
                                  persona=persona, repro_path=repro_path)
+    if (not res["ok"] and item["session_id"]
+            and "no conversation found" in (res["error"] or "").lower()):
+        # The saved session did not survive whatever restarted the container.
+        # Starting fresh here costs one wasted call; leaving it to the next
+        # cycle costs a whole cycle and a circuit-breaker count.
+        db.thread_append(name, key, persona, "event",
+                         "No saved session for that id (likely lost in a "
+                         "restart) — starting fresh in this run instead of "
+                         "losing a cycle.")
+        res = await agents.fix_issue(project, detail, item["plan"], str(wt),
+                                     resume=None, persona=persona,
+                                     repro_path=repro_path)
     db.update_item(name, "issue", item["number"],
                    session_id=res.get("session_id", ""))
     if not res["ok"] or not res["output"]["success"]:

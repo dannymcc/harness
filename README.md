@@ -228,6 +228,13 @@ clones, worktrees, per-run transcripts). Deleting `data/repos`,
 `data/worktrees`, `data/pr-runs` or `data/sandbox` is always safe — they're
 rebuilt.
 
+`data/claude-home` holds the Agent SDK's own session transcripts: in the
+container `~/.claude` is symlinked there at boot, so a fix cut off by a
+restart resumes its session rather than starting over. It sits inside the
+existing `./data` mount, so no extra volume is needed. Deleting it only
+costs in-flight sessions their memory — the next attempt starts fresh. On a
+development machine an existing `~/.claude` is left alone.
+
 Harness can maintain itself — add this repo as a harness with version file
 `harness/config.py`, version pattern `VERSION\s*=\s*"(?P<version>[^"]+)"`,
 and test command `python -m pytest -x -q`. We do.
