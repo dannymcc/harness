@@ -2,6 +2,15 @@
 {% block title %}Run {{ run.id }} · {{ run.task }}{% endblock %}
 {% block content %}
 
+{% macro followup_list(rows, sub=True) %}
+  <h2 {% if sub %}class="sub"{% endif %}>Queued for after</h2>
+  {% for d in rows %}
+  <p class="q-context">{{ d.created_at }} — {{ d.question }}
+    {% if d.status == 'directive' %}<span class="pill">pending</span>
+    {% else %}<span class="pill ok">picked up</span>{% endif %}</p>
+  {% endfor %}
+{% endmacro %}
+
 <p><a href="{{ '/p/' + run.project if run.project else '/' }}">← back</a></p>
 <h1>Run {{ run.id }}: {{ display_name }} · {{ run.task }}
   {% if run.item_key and '#' in run.item_key and run.project %}
@@ -25,21 +34,32 @@
 {% if run.finished_at is none and not run.cancel_requested %}
 <section class="card">
   <h2>Tell {{ display_name }} while they work</h2>
-  <p class="hint">Delivered into the session on its next message — steer
-  the approach, add context, narrow the scope. Stop ends the run instead.</p>
-  <form method="post" action="/run/{{ run.id }}/steer" class="answer-form">
+  <p class="hint">Send delivers into the session on its next message — steer
+  the approach, add context, narrow the scope.
+  {% if run.item_key and run.project %}Not urgent enough to interrupt? When
+  they finish files it on {{ run.item_key }} instead, for whoever picks the
+  item up next.{% endif %}
+  Stop ends the run instead.</p>
+  <form method="post" action="/run/{{ run.id }}/steer" class="answer-form steer-form">
     <input name="text" placeholder="e.g. skip the git probe, use the stamp file" required>
     <button class="primary">Send</button>
+    {% if run.item_key and run.project %}
+    <button formaction="/run/{{ run.id }}/followup">When they finish</button>
+    {% endif %}
     <button formaction="/run/{{ run.id }}/stop" formnovalidate class="danger">Stop this run</button>
   </form>
   {% for st in steers %}
   <p class="q-context">{{ st.created_at }} — {{ st.text }}
     {% if st.delivered_at %}<span class="pill ok">delivered</span>{% else %}<span class="pill">queued</span>{% endif %}</p>
   {% endfor %}
+  {% if followups %}{{ followup_list(followups) }}{% endif %}
 </section>
-{% elif steers %}
-<section class="card"><h2>Steered</h2>
+{% elif steers or followups %}
+<section class="card">
+  {% if steers %}<h2>Steered</h2>
   {% for st in steers %}<p class="q-context">{{ st.created_at }} — {{ st.text }}</p>{% endfor %}
+  {% endif %}
+  {% if followups %}{{ followup_list(followups, sub=steers) }}{% endif %}
 </section>
 {% endif %}
 

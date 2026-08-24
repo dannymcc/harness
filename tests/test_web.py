@@ -340,3 +340,36 @@ def test_item_thread_and_run_steer(client, fresh_db):
     assert any("skip the git probe" in r["text"] for r in fresh_db.thread("may", "issue#9"))
     fresh_db.finish_run(rid, True, 0.1, 1, "done")
     assert "Tell Malcolm while they work" not in client.get(f"/run/{rid}").text
+
+
+def test_run_followup_queues_direction_without_steering(client, fresh_db):
+    from harness import agents
+    fresh_db.upsert_item("may", "issue", 11, "Footer", "a", "open", "x")
+    rid = fresh_db.start_run("may", "ic", "issue#11", "fix", "m", "Malcolm")
+
+    html = client.get(f"/run/{rid}").text
+    assert f"/run/{rid}/followup" in html          # offered alongside the steer
+
+    r = client.post(f"/run/{rid}/followup",
+                    data={"text": "add a note to the changelog"},
+                    follow_redirects=False)
+    assert r.status_code == 303
+
+    # it lands on the item thread as a direction, not in the live session
+    thread = fresh_db.thread("may", "issue#11")
+    assert any(t["kind"] == "direction" and "changelog" in t["text"]
+               for t in thread)
+    assert fresh_db.take_steers(rid) == []
+    assert any(q["item_key"] == "issue#11" and "changelog" in q["question"]
+               for q in fresh_db.pending_directives("may"))
+
+    # and the next agent on the item reads it as binding context
+    assert "changelog" in agents._item_context("may", "issue#11")
+
+    # the run page shows it as queued rather than delivered
+    assert "Queued for after" in client.get(f"/run/{rid}").text
+
+
+def test_run_followup_hidden_without_item(client, fresh_db):
+    rid = fresh_db.start_run("may", "lead", "", "plan", "m", "Harry")
+    assert f"/run/{rid}/followup" not in client.get(f"/run/{rid}").text

@@ -569,8 +569,13 @@ def run_page(request: Request, run_id: int):
     if run["project"]:
         proj = db.get_project(run["project"])
         lead = proj["lead_name"] if proj else ""
+    # directions filed on the item since this run began — the ones the
+    # operator queued instead of steering, waiting on whoever comes next
+    followups = (db.item_directions(run["project"], run["item_key"],
+                                    since=run["started_at"])
+                 if run["project"] and run["item_key"] else [])
     return render(request, "run.html", run=run, transcript=transcript,
-                  steers=db.run_steers(run_id),
+                  steers=db.run_steers(run_id), followups=followups,
                   display_name=run["agent"] or agent_name(run["role"],
                                                           run["task"], lead))
 
@@ -616,6 +621,23 @@ def steer_run(run_id: int, text: str = Form(...)):
         db.log_event(f"{config.OPERATOR} steered run {run_id} "
                      f"({run['task']} {run['item_key']}): {text.strip()[:100]}",
                      project=run["project"])
+    return RedirectResponse(f"/run/{run_id}", status_code=303)
+
+
+@app.post("/run/{run_id}/followup")
+def followup_run(run_id: int, text: str = Form(...)):
+    """The other half of the steer box: say it, but don't interrupt.
+
+    The message becomes an operator direction on the run's item, so it lands
+    in the thread and the next agent to pick the item up reads it as binding
+    context. Nothing reaches the live session. Runs with no item have nowhere
+    to file it, so the button is hidden and this does nothing. Deliberately
+    not gated on the run still being live — a note filed as the run ends is
+    still worth keeping."""
+    run = db.get_run(run_id)
+    if run and run["project"] and run["item_key"] and text.strip():
+        db.add_direction(run["project"], text, run["item_key"])
+        worker.trigger()
     return RedirectResponse(f"/run/{run_id}", status_code=303)
 
 

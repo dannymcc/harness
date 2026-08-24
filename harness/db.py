@@ -634,6 +634,23 @@ def recent_directions(project: str, limit: int = 3):
             "ORDER BY id DESC LIMIT ?", (project, limit)).fetchall()
 
 
+def item_directions(project: str, item_key: str, since: str = ""):
+    """Operator directions filed against one item, oldest first.
+
+    Reading the thread and filtering on kind would also pick up the mid-run
+    steer mirrors, which are a different thing, so ask the table directly.
+    `since` bounds it to directions filed from that timestamp on — the run
+    page uses the run's own start, so it shows what was queued during it."""
+    q = ("SELECT * FROM questions WHERE project = ? AND item_key = ? "
+         "AND asked_by = 'operator'")
+    args = [project, item_key]
+    if since:
+        q += " AND created_at >= ?"
+        args.append(since)
+    with conn() as c:
+        return c.execute(q + " ORDER BY id", args).fetchall()
+
+
 def answers_for(project: str, item_key: str):
     with conn() as c:
         return c.execute(
