@@ -124,7 +124,8 @@ CREATE TABLE IF NOT EXISTS steers (
     run_id INTEGER NOT NULL,
     text TEXT NOT NULL,
     created_at TEXT NOT NULL,
-    delivered_at TEXT
+    delivered_at TEXT,
+    resolution TEXT NOT NULL DEFAULT ''   -- '' | kept | discarded
 );
 """
 
@@ -139,6 +140,7 @@ MIGRATIONS = [
     "ALTER TABLE runs ADD COLUMN cancel_requested INTEGER NOT NULL DEFAULT 0",
     "ALTER TABLE questions ADD COLUMN options TEXT NOT NULL DEFAULT ''",
     "ALTER TABLE items ADD COLUMN repro_test TEXT NOT NULL DEFAULT ''",
+    "ALTER TABLE steers ADD COLUMN resolution TEXT NOT NULL DEFAULT ''",
 ]
 
 
@@ -372,6 +374,19 @@ def finish_run(run_id: int, ok: bool, cost_usd: float, turns: int,
                               log_path = ?, finished_at = ? WHERE id = ?""",
             (1 if ok else 0, cost_usd, turns, summary, log_path, now(), run_id),
         )
+        # Anything the operator queued but the session never took is still
+        # theirs to keep or drop — say so rather than losing it quietly.
+        stranded = c.execute(
+            "SELECT COUNT(*) AS n FROM steers WHERE run_id = ? "
+            "AND delivered_at IS NULL AND resolution = ''", (run_id,)
+        ).fetchone()["n"]
+        project = c.execute("SELECT project FROM runs WHERE id = ?",
+                            (run_id,)).fetchone()
+        project = project["project"] if project else ""
+    if stranded:  # outside the conn(), which holds the write lock
+        log_event(f"Run {run_id} ended with {stranded} undelivered "
+                  f"steer{'' if stranded == 1 else 's'} — keep or discard "
+                  "them on the run page", "warn", project=project)
 
 
 def recent_runs(limit: int = 30, project: str | None = None):
@@ -589,11 +604,15 @@ def recent_answers(project: str, limit: int = 8):
             "ORDER BY answered_at DESC LIMIT ?", (project, limit)).fetchall()
 
 
-def add_direction(project: str, text: str, item_key: str = "") -> None:
+def add_direction(project: str, text: str, item_key: str = "",
+                  note_thread: bool = True) -> None:
     """An operator direction: pending until Harry turns it into actions.
 
     The direction text is the question; Harry's acknowledgement becomes the
-    answer, after which it flows into prompt digests like any ruling."""
+    answer, after which it flows into prompt digests like any ruling.
+    `note_thread=False` skips the thread line for callers whose text is
+    already in the thread — keeping an undelivered steer, which the steer
+    box mirrored there when it was sent."""
     text = text.strip()
     if not text:
         return
@@ -603,7 +622,7 @@ def add_direction(project: str, text: str, item_key: str = "") -> None:
             "status, answer, answered_by, created_at) VALUES "
             "(?, 'operator', ?, ?, 'directive', '', '', ?)",
             (project, item_key, text, now()))
-    if item_key:
+    if item_key and note_thread:
         thread_append(project, item_key, config.OPERATOR, "direction", text)
     log_event(f"Operator direction: {text[:120]}", project=project)
 
@@ -722,14 +741,18 @@ def add_steer(run_id: int, text: str) -> None:
 
 
 def take_steers(run_id: int):
-    """Undelivered steers for a run, marked delivered on the way out."""
+    """Undelivered steers for a run, marked delivered on the way out.
+
+    A steer the operator has already kept or discarded on the run page is
+    settled: it must never reappear in a session."""
     with conn() as c:
         rows = c.execute(
             "SELECT * FROM steers WHERE run_id = ? AND delivered_at IS NULL "
-            "ORDER BY id", (run_id,)).fetchall()
+            "AND resolution = '' ORDER BY id", (run_id,)).fetchall()
         if rows:
             c.execute("UPDATE steers SET delivered_at = ? WHERE run_id = ? "
-                      "AND delivered_at IS NULL", (now(), run_id))
+                      "AND delivered_at IS NULL AND resolution = ''",
+                      (now(), run_id))
     return rows
 
 
@@ -737,6 +760,31 @@ def run_steers(run_id: int):
     with conn() as c:
         return c.execute("SELECT * FROM steers WHERE run_id = ? ORDER BY id",
                          (run_id,)).fetchall()
+
+
+def undelivered_steers(run_id: int):
+    """Steers the session never took and the operator has not settled."""
+    with conn() as c:
+        return c.execute(
+            "SELECT * FROM steers WHERE run_id = ? AND delivered_at IS NULL "
+            "AND resolution = '' ORDER BY id", (run_id,)).fetchall()
+
+
+def get_steer(steer_id: int):
+    with conn() as c:
+        return c.execute("SELECT * FROM steers WHERE id = ?",
+                         (steer_id,)).fetchone()
+
+
+def resolve_steer(steer_id: int, resolution: str) -> None:
+    """Settle an undelivered steer: kept as a direction, or discarded.
+
+    Stamping delivered_at too keeps a settled steer out of take_steers even
+    if a later session somehow asks for the same run."""
+    with conn() as c:
+        c.execute(
+            "UPDATE steers SET resolution = ?, delivered_at = ? "
+            "WHERE id = ? AND resolution = ''", (resolution, now(), steer_id))
 
 
 def spend_since(project: str, since_iso: str) -> float:

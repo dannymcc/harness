@@ -574,8 +574,16 @@ def run_page(request: Request, run_id: int):
     followups = (db.item_directions(run["project"], run["item_key"],
                                     since=run["started_at"])
                  if run["project"] and run["item_key"] else [])
+    # Three states worth telling apart on a finished run: the session took it,
+    # the operator sent it on as a direction, or it is still theirs to settle.
+    # A discarded steer is gone from the page entirely.
+    steers = [s for s in db.run_steers(run_id) if s["resolution"] != "discarded"]
+    settled = [s for s in steers
+               if s["resolution"] == "kept" or
+               (s["delivered_at"] and not s["resolution"])]
     return render(request, "run.html", run=run, transcript=transcript,
-                  steers=db.run_steers(run_id), followups=followups,
+                  steers=steers, followups=followups,
+                  undelivered=db.undelivered_steers(run_id), settled=settled,
                   display_name=run["agent"] or agent_name(run["role"],
                                                           run["task"], lead))
 
@@ -620,6 +628,45 @@ def steer_run(run_id: int, text: str = Form(...)):
                              f"mid-run) {text.strip()}")
         db.log_event(f"{config.OPERATOR} steered run {run_id} "
                      f"({run['task']} {run['item_key']}): {text.strip()[:100]}",
+                     project=run["project"])
+    return RedirectResponse(f"/run/{run_id}", status_code=303)
+
+
+def _pending_steer(run_id: int, steer_id: int):
+    """A steer of this run the session never took and nobody has settled."""
+    steer = db.get_steer(steer_id)
+    if (steer and steer["run_id"] == run_id and steer["delivered_at"] is None
+            and not steer["resolution"]):
+        return steer
+    return None
+
+
+@app.post("/run/{run_id}/steer/{steer_id}/keep")
+def keep_steer(run_id: int, steer_id: int):
+    """Send an undelivered steer on as an operator direction instead.
+
+    The session never saw it, so this is an action rather than a note: the
+    direction is pending until Harry actions it on the next cycle, and it
+    can move the item on. The text is already in the item thread — the steer
+    box mirrored it there when it was sent — so don't write it twice."""
+    run = db.get_run(run_id)
+    steer = _pending_steer(run_id, steer_id)
+    if run and steer and run["project"]:
+        db.add_direction(run["project"], steer["text"], run["item_key"],
+                         note_thread=False)
+        db.resolve_steer(steer_id, "kept")
+        worker.trigger()
+    return RedirectResponse(f"/run/{run_id}", status_code=303)
+
+
+@app.post("/run/{run_id}/steer/{steer_id}/discard")
+def discard_steer(run_id: int, steer_id: int):
+    run = db.get_run(run_id)
+    steer = _pending_steer(run_id, steer_id)
+    if run and steer:
+        db.resolve_steer(steer_id, "discarded")
+        db.log_event(f"{config.OPERATOR} discarded an undelivered steer on "
+                     f"run {run_id}: {steer['text'][:100]}",
                      project=run["project"])
     return RedirectResponse(f"/run/{run_id}", status_code=303)
 

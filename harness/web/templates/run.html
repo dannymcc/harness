@@ -54,12 +54,39 @@
   {% endfor %}
   {% if followups %}{{ followup_list(followups) }}{% endif %}
 </section>
-{% elif steers or followups %}
+{% elif settled or followups %}
 <section class="card">
-  {% if steers %}<h2>Steered</h2>
-  {% for st in steers %}<p class="q-context">{{ st.created_at }} — {{ st.text }}</p>{% endfor %}
+  {% if settled %}<h2>Steered</h2>
+  {% for st in settled %}<p class="q-context">{{ st.created_at }} — {{ st.text }}
+    {% if st.resolution == 'kept' %}<span class="pill">sent on as a direction</span>{% endif %}</p>
+  {% endfor %}
   {% endif %}
-  {% if followups %}{{ followup_list(followups, sub=steers) }}{% endif %}
+  {% if followups %}{{ followup_list(followups, sub=settled) }}{% endif %}
+</section>
+{% endif %}
+
+{% if undelivered %}
+<section class="card">
+  <h2>Undelivered</h2>
+  <p class="hint">{% if run.finished_at is none %}The run is stopping and the
+  session has not taken {{ 'these' if undelivered|length > 1 else 'this' }}.
+  {% else %}The run ended before the session took
+  {{ 'these' if undelivered|length > 1 else 'this' }}.{% endif %}
+  {% if run.project %}Send as direction files it on
+  {{ run.item_key or run.project }} as an operator direction, actioned on the
+  next cycle — it can move the item on, so it is more than a note.
+  {% else %}This run has no project to file it against, so it can only be
+  discarded.{% endif %}</p>
+  {% for st in undelivered %}
+  <form method="post" action="/run/{{ run.id }}/steer/{{ st.id }}/keep"
+        class="answer-form">
+    <p class="q-context">{{ st.created_at }} — {{ st.text }}
+      <span class="pill">never delivered</span></p>
+    {% if run.project %}<button class="primary">Send as direction</button>{% endif %}
+    <button formaction="/run/{{ run.id }}/steer/{{ st.id }}/discard"
+            class="danger">Discard</button>
+  </form>
+  {% endfor %}
 </section>
 {% endif %}
 
