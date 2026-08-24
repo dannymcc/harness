@@ -4,6 +4,23 @@ All notable changes to Harness are recorded here. The format is
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project
 follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.14.1] - 2026-08-24
+
+### Changed
+
+- **The stand-up no longer takes the middle of the overview.** Harry's hourly
+  stand-up card sat open between the roster and recent activity, repeating
+  what those two already show and pushing the activity feed below the fold on
+  a phone. It is now a disclosure, closed on load and summarised as "Harry —
+  stand-up" with its timestamp; the prose is still the only place blockers are
+  written up in full, so one tap gets it back. The open state is not
+  remembered — expanding it is a per-visit action — and nothing renders at all
+  when there is no report yet. Server-side behaviour is unchanged (issue #24).
+
+### Removed
+
+- A dead `harry_report` variable the project page was handed and never used.
+
 ## [0.14.0] - 2026-08-24
 
 ### Added
