@@ -4,6 +4,26 @@ All notable changes to Harness are recorded here. The format is
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project
 follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.11.0] - 2026-08-24
+
+### Added
+
+- **A steer the session never took is handed back, not lost.** Anything
+  typed into "Tell <agent>" while a run was live but never picked up by the
+  session used to sit unread in the database and show on the finished run
+  page among the steers that had landed, so a note written seconds before a
+  stop looked delivered when it wasn't. The run page now lists those under
+  **Undelivered**, with two ways out: **Send as direction** files the text
+  as an operator direction on the run's item, pending until Harry actions it
+  on the next cycle — so it can move the item on, not merely annotate it —
+  and **Discard** drops it. Runs with no project have nothing to file
+  against, so only Discard is offered. When a run ends holding undelivered
+  steers, the project events carry a warning naming the count, so it is
+  visible without opening the run. Either choice settles the steer for good:
+  it can never be handed to a later session, and keeping one doesn't repeat
+  the text in the item thread, where the steer box already mirrored it
+  (issue #19).
+
 ## [0.10.0] - 2026-08-24
 
 ### Added
