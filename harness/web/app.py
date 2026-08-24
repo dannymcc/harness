@@ -13,6 +13,7 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 
 from .. import config, db, gh, pipeline, repo, worker
+from . import commands
 
 BASE = Path(__file__).parent
 app = FastAPI(title="Harness")
@@ -66,13 +67,7 @@ async def block_cross_site(request: Request, call_next):
 
 
 def agent_name(role: str, task: str, lead_name: str = "") -> str:
-    if role == "cto":
-        return config.CTO_NAME
-    if role == "admin":
-        return config.ADMIN_NAME
-    if role == "lead":
-        return lead_name or "lead"
-    return config.IC_NAMES.get(task, "IC")
+    return config.persona(role, task, lead_name)
 
 
 templates.env.globals["agent_name"] = agent_name
@@ -114,6 +109,7 @@ def render(request: Request, template: str, **ctx):
         paused_reason=db.get_setting("paused_reason"),
         worker=worker.status(),
         who=request.headers.get("Tailscale-User-Login", ""),
+        cheatsheet=commands.CHEATSHEET,
         theme="dark" if request.cookies.get("theme") == "dark" else "light",
     )
     return templates.TemplateResponse(request, template, ctx)
@@ -549,8 +545,54 @@ def directions_json(name: str):
         for r in rows]})
 
 
+def _run_command(text: str, project: str):
+    """Carry out a slash command typed into the composer, or return None.
+
+    None means the text was prose and belongs to Harry. Everything else ends
+    here: a command is dispatched to the ordinary route function — the same
+    code the buttons run, with the same policy gates — and anything that
+    cannot be acted on comes back as plain text under the box.
+    """
+    try:
+        cmd = commands.parse(text, project)
+    except commands.CommandError as err:
+        return PlainTextResponse(str(err), status_code=400)
+    if cmd is None:
+        return None
+    if cmd.name == "help":
+        return PlainTextResponse(commands.CHEATSHEET)
+    if cmd.name == "p":
+        return RedirectResponse(f"/p/{cmd.project}", status_code=303)
+    if cmd.name == "release":
+        p = db.get_project(cmd.project)
+        if db.open_release(cmd.project):
+            return PlainTextResponse(
+                f"{cmd.project} already has a release open.", status_code=400)
+        if not pipeline.anything_to_release(p):
+            return PlainTextResponse(
+                f"Nothing to release on {cmd.project} yet.", status_code=400)
+    # Log the command itself, so the stream shows what was typed as well as
+    # what the route then did.
+    db.log_event(f"{config.OPERATOR}: {text.strip()}", project=cmd.project)
+    if cmd.name in ("approve", "reject"):
+        route = approve if cmd.name == "approve" else reject
+        return route(cmd.project, cmd.kind, cmd.number)
+    if cmd.name == "release":
+        return request_release(cmd.project)
+    if cmd.name == "tell":
+        return steer_run(cmd.run_id, cmd.text)
+    if cmd.name == "stop":
+        return stop_run(cmd.run_id)
+    if cmd.name == "policy":
+        return set_policy(cmd.project, cmd.key, cmd.value)
+    return run_now()  # cycle — the only verb left
+
+
 @app.post("/tell")
 def tell_from_overview(project: str = Form(...), text: str = Form(...)):
+    done = _run_command(text, project)
+    if done is not None:
+        return done
     if db.get_project(project):
         db.add_direction(project, text)
         worker.trigger()
@@ -559,6 +601,9 @@ def tell_from_overview(project: str = Form(...), text: str = Form(...)):
 
 @app.post("/p/{name}/tell")
 def tell_team(name: str, text: str = Form(...), item_key: str = Form("")):
+    done = _run_command(text, name)
+    if done is not None:
+        return done
     if db.get_project(name):
         db.add_direction(name, text, item_key)
         worker.trigger()

@@ -1,3 +1,17 @@
+// A reply from the server shown under a composer; "" clears it.
+function say(form, message) {
+  let box = form.nextElementSibling;
+  if (!box || !box.classList.contains("compose-reply")) {
+    if (!message) return;
+    box = document.createElement("pre");
+    box.className = "compose-reply";
+    form.after(box);
+  }
+  box.textContent = message;
+  box.hidden = !message;
+}
+
+
 // Progressive enhancement: submit decision forms in the background and
 // update the page in place, instead of a full reload. Everything still
 // works with JS disabled — these are ordinary POST forms underneath.
@@ -14,9 +28,30 @@ document.addEventListener("submit", async (e) => {
 
   try {
     const res = await fetch(action, { method: "POST", body: new FormData(form) });
-    if (!res.ok && !res.redirected) throw new Error(String(res.status));
-
     const textInput = form.querySelector('input[name="text"]');
+
+    // A plain-text answer — a slash command that could not act, the
+    // cheatsheet, a refused cross-site POST — is for the operator to read,
+    // so put it under the box rather than reloading it away.
+    const plain = (res.headers.get("content-type") || "").startsWith("text/plain");
+    if (textInput && (plain || !res.ok)) {
+      say(form, plain ? await res.text() : `Sorry — that failed (${res.status}).`);
+      buttons.forEach((b) => (b.disabled = false));
+      return;
+    }
+    if (!res.ok && !res.redirected) throw new Error(String(res.status));
+    if (textInput) say(form, "");
+
+    // Only the composer takes slash commands — a steer starting with "/" is
+    // just text for the agent.
+    const composer = new URL(form.action).pathname.endsWith("/tell");
+    if (textInput && composer && textInput.value.trim().startsWith("/")) {
+      // A command acted: show what it did, wherever its route landed.
+      const to = res.redirected ? new URL(res.url) : null;
+      if (to && to.pathname !== location.pathname) location.href = to.href;
+      else location.reload();
+      return;
+    }
     if (textInput) {
       // "Direct the team" style form: confirm in place and show the
       // direction in the standing list immediately.
@@ -72,6 +107,16 @@ document.addEventListener("submit", async (e) => {
   } catch {
     location.reload();
   }
+});
+
+
+// Slash commands: show the cheatsheet while the composer holds one, so the
+// operator can see what is on offer without sending anything.
+document.addEventListener("input", (e) => {
+  const input = e.target;
+  if (!input.matches('.answer-form input[name="text"]')) return;
+  const sheet = input.form.parentElement.querySelector(".cheatsheet");
+  if (sheet) sheet.hidden = !input.value.trim().startsWith("/");
 });
 
 

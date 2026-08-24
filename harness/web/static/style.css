@@ -447,6 +447,11 @@ a.agent-chip:hover { border-color: var(--accent); text-decoration: none; }
 .direction-reply { margin: .25rem 0 0 1.1rem; font-size: .86rem; }
 .direction-reply.pending { color: var(--dim); font-style: italic; }
 
+/* Slash commands: the cheatsheet while one is being typed, and whatever the
+   server said back about it. Both sit directly under the composer. */
+.cheatsheet, .compose-reply { margin: .5rem 0 0; max-height: 40vh; }
+.compose-reply { border-color: var(--accent); }
+
 .compose { margin: 0; }
 .compose select { flex: 0 1 auto; }
 .compose input { flex: 1 1 200px; }

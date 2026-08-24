@@ -138,6 +138,19 @@ IC_NAMES = {
     "security": "Zaf",    # security reviews (manually triggered)
 }
 
+
+def persona(role: str, task: str, lead_name: str = "") -> str:
+    """Who a run belongs to, by role and task. One mapping for the GUI, the
+    run pages and the composer's /tell, so a hire or a rename lands once."""
+    if role == "cto":
+        return CTO_NAME
+    if role == "admin":
+        return ADMIN_NAME
+    if role == "lead":
+        return lead_name or "lead"
+    return IC_NAMES.get(task, "IC")
+
+
 # --- Per-project defaults ---------------------------------------------------
 # "auto"    – harness acts on its own verdict
 # "approve" – harness prepares the action and waits for a click in the GUI

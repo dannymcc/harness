@@ -150,9 +150,10 @@
     </div>
   </div>
   <form method="post" action="/p/{{ p.name }}/tell" class="answer-form tell-form">
-    <input name="text" placeholder="Direct the team…" required>
+    <input name="text" placeholder="Direct the team, or /approve 4 …" required>
     <button class="primary">Send</button>
   </form>
+  <pre class="cheatsheet" hidden>{{ cheatsheet }}</pre>
   <ul class="events directions" id="directions-list" data-project="{{ p.name }}">
     {% for d in directions %}
     <li><span class="ts">{{ d.created_at }}</span> {{ d.question }}
