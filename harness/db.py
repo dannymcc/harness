@@ -269,8 +269,10 @@ def stream(project: str | None = None, since: str | None = None,
         return (" WHERE " + " AND ".join(where)) if where else ""
 
     if wanted is None or "event" in wanted:
-        where = ["message NOT LIKE ?", "message NOT LIKE ?"]
-        vals = [DIRECTION_EVENT_PREFIX + "%", "%" + ASK_EVENT_INFIX + "%"]
+        where = ["message NOT LIKE ?", "message NOT LIKE ?",
+                 "message NOT LIKE ?"]
+        vals = [DIRECTION_EVENT_PREFIX + "%", "%" + ASK_EVENT_INFIX + "%",
+                "%" + ESCALATED_EVENT_INFIX + "%"]
         selects.append(
             "SELECT ts AS ts, project AS project, '' AS who, 'event' AS kind, "
             "message AS text, '' AS item_key, 0 AS src, id AS rid, "
@@ -611,19 +613,26 @@ def latest_report(scope: str, project: str = ""):
 # --- operator-in-the-loop -------------------------------------------------------
 # Both writers below log an event alongside their questions row, so the plain
 # activity list still shows them. `stream()` drops those derived events again —
-# it has the questions row itself. The two shapes live here as constants so the
+# it has the questions row itself. The shapes live here as constants so the
 # writer and the filter cannot drift apart.
 
 DIRECTION_EVENT_PREFIX = "Operator direction: "
 ASK_EVENT_INFIX = " has asked Harry: "
+ESCALATED_EVENT_INFIX = " has escalated to the operator: "
 
 
 def ask_question(project: str, asked_by: str, item_key: str,
                  question: str, options: list[str] | None = None) -> int | None:
-    """File a question. Returns its id, or None if empty/duplicate."""
+    """File a question. Returns its id, or None if empty/duplicate.
+
+    Harry cannot rule on his own question, so anything he asks is filed as
+    escalated: it is the operator's by definition. Filing it 'open' would
+    leave it in nobody's hands — `harry_inbox()` excludes his own rows, so
+    it would never be ruled on and never reach the operator either."""
     question = question.strip()
     if not question:
         return None
+    own = asked_by == config.CTO_NAME
     opts = json.dumps([o.strip()[:80] for o in (options or []) if o.strip()][:3])
     with conn() as c:
         dup = c.execute(
@@ -634,11 +643,13 @@ def ask_question(project: str, asked_by: str, item_key: str,
             return None
         cur = c.execute(
             "INSERT INTO questions (project, asked_by, item_key, question, "
-            "options, created_at) VALUES (?, ?, ?, ?, ?, ?)",
+            "options, status, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
             (project, asked_by, item_key, question,
-             opts if opts != "[]" else "", now()))
+             opts if opts != "[]" else "",
+             "escalated" if own else "open", now()))
         qid = cur.lastrowid
-    log_event(f"{asked_by}{ASK_EVENT_INFIX}{question[:120]}", project=project)
+    infix = ESCALATED_EVENT_INFIX if own else ASK_EVENT_INFIX
+    log_event(f"{asked_by}{infix}{question[:120]}", project=project)
     return qid
 
 

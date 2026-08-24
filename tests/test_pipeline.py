@@ -568,6 +568,37 @@ def test_harrys_own_question_goes_to_operator(fresh_db, may):
     assert [q["question"] for q in fresh_db.escalated_questions()] == ["Budget?"]
 
 
+def test_standup_question_is_the_operators_not_harrys_own_inbox(
+        fresh_db, may, monkeypatch):
+    """Stand-up is Harry speaking: what he cannot decide there is an
+    escalation, not a row he would have to rule on himself."""
+    import asyncio
+    from harness import pipeline, agents
+
+    async def fake_standup(digest):
+        return {"ok": True, "error": "", "output": {
+            "standup_markdown": "# Stand-up",
+            "all_clear": True,
+            "desks": [], "blockers": [], "decisions": [],
+            "staffing": [], "directives": [],
+            "question_for_human": "Do we keep paying for the flaky runner?",
+            "question_options": ["Keep", "Drop"]}}
+
+    monkeypatch.setattr(agents, "standup", fake_standup)
+    asyncio.run(pipeline.run_standup(force=True))
+    assert fresh_db.harry_inbox() == []          # never his own to rule on
+    esc = fresh_db.escalated_questions()
+    assert [q["question"] for q in esc] == ["Do we keep paying for the "
+                                            "flaky runner?"]
+    assert esc[0]["asked_by"] == "Harry"
+    assert fresh_db.question_options(esc[0]) == ["Keep", "Drop"]
+    # and the activity log reads as an escalation, not a self-dialogue
+    msgs = [e["message"] for e in fresh_db.recent_events()]
+    assert not any(" has asked Harry: " in m for m in msgs)
+    assert any(m.startswith("Harry has escalated to the operator: ")
+               for m in msgs)
+
+
 def test_undecided_questions_escalate_after_two_passes(fresh_db, may, monkeypatch):
     import asyncio
     from harness import pipeline, agents

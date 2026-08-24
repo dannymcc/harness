@@ -165,12 +165,11 @@ def _file_question(project_name: str, asked_by: str, item_key: str,
     if not out:
         return
     if out.get("question_for_human"):
-        qid = db.ask_question(project_name, asked_by, item_key,
-                              out["question_for_human"],
-                              options=out.get("question_options"))
-        if qid and asked_by == config.CTO_NAME:
-            # Harry can't rule on his own question — it is the operator's.
-            db.escalate_question(qid)
+        # Harry's own questions are filed straight to the operator by
+        # db.ask_question — he cannot rule on himself.
+        db.ask_question(project_name, asked_by, item_key,
+                        out["question_for_human"],
+                        options=out.get("question_options"))
     if out.get("memory_note") and project_name:
         key = PERSONA_MEMORY_KEY.get(asked_by)
         if key is None:

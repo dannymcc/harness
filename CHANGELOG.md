@@ -4,6 +4,23 @@ All notable changes to Harness are recorded here. The format is
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project
 follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.17.1] - 2026-08-24
+
+### Fixed
+
+- **A question of Harry's own now reaches you instead of sitting in nobody's
+  hands.** His inbox excludes his own rows by construction, so a question he
+  asked was one he could never rule on. The stand-up path worked around that
+  by escalating just after filing, but the `ask_harry` tool — which every
+  session gets, his own runs included — files directly and skipped the
+  workaround: those questions stayed `open`, never ruled on, never escalated,
+  never in front of the operator, and were logged as the self-dialogue "Harry
+  has asked Harry: …". The rule now lives at the single point where questions
+  are filed: anything asked by the head of section is filed escalated and
+  logged as an escalation, so it goes to your queue and your phone whichever
+  path asked it. The activity list drops the derived event as it already does
+  for the other two shapes, so the question still appears once (issue #50).
+
 ## [0.17.0] - 2026-08-24
 
 ### Added
