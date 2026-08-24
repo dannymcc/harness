@@ -79,6 +79,22 @@ GIT_READ_RULES = [
     "Bash(git branch --list:*)",
     "Bash(git tag --contains:*)",
 ]
+# The rules above are prefixes matched against the literal command, so how a
+# session spells a git call decides whether it runs. Sessions are started with
+# cwd set to the checkout, so the bare form always works; the habitual `git -C`
+# and `cd` forms match nothing and come back as a flat refusal that reads like
+# a withdrawn capability. Saying so up front is cheaper than another desk
+# recording "Bash access denied" as a blocker.
+READONLY_GIT_NOTE = """
+- Your working directory is already the project's checkout, and your shell is
+  an allowlist of read-only `git` plus the project's test command. Invoke git
+  bare from where you are — `git status`, `git log --oneline -20`,
+  `git diff`, `git grep -n thing`. `git -C <path> ...` and
+  `cd <path> && git ...` are different literal commands, are not on the
+  allowlist, and will be denied. A refusal of those is a syntax miss, not a
+  revoked capability: retry the bare form before concluding you have lost
+  shell access, and never report it as a blocker without doing so.
+"""
 # Credentials are in the parent process's environment; agent sessions have no
 # business with them. The SDK merges options.env over the inherited
 # environment, so blanking here blanks it for every session, fix role included.
@@ -264,8 +280,14 @@ def build_options(*, model: str, cwd: str | None, schema: dict,
     not the tool policy.
     """
     tools = list(READONLY_TOOLS if readonly else IC_TOOLS)
+    prompt = BASE_RULES
     if readonly:
         tools += list(bash_rules or [])
+        if bash_rules:
+            # Only where there is an allowlist to explain. A readonly session
+            # with no project has no shell at all, and the fix and release
+            # roles have a general one, where `cd` and `git -C` are fine.
+            prompt += READONLY_GIT_NOTE
     tools += SECTION_TOOLS
     extra = dict(extra or {})
     extra["env"] = {**extra.get("env", {}), **SCRUBBED_ENV}
@@ -275,7 +297,7 @@ def build_options(*, model: str, cwd: str | None, schema: dict,
         allowed_tools=tools,
         disallowed_tools=BLOCKED,
         permission_mode="dontAsk",
-        system_prompt=BASE_RULES,
+        system_prompt=prompt,
         max_turns=config.MAX_TURNS,
         max_budget_usd=config.MAX_BUDGET_USD_PER_RUN,
         output_format={"type": "json_schema", "schema": schema},
