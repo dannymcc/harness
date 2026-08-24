@@ -23,7 +23,7 @@ Harness runs your repos with a small agent organisation, staffed from Spooks:
 
 | Agent | Role | Job |
 |---|---|---|
-| **Harry** | head of section | Hourly stand-up across every desk. Runs the section through the team leads: blockers become directives, questions come to him first and he escalates to you only what's genuinely yours, staffing requests land on his desk and he decides against spend. |
+| **Harry** | head of section | Hourly stand-up across every desk. Runs the section through the team leads: blockers become directives, questions come to him first and he escalates to you only what's genuinely yours, staffing requests land on his desk and he decides against spend. Each stand-up carries back the blockers he named at the last one, marked changed or unchanged, so a repeat has to end in a decision rather than a restatement. |
 | **Tom, Adam, Ros…** | team leads (one per repo) | Own execution: plan each cycle, action Harry's directives, assign work, request staffing when the backlog outgrows the desk. |
 | **Ruth** | analyst | Triages issues against the actual code; reviews PRs for *value* (is this worth having?) as well as quality. |
 | **Malcolm** + hires | engineers | Fix bugs and small features in parallel git worktrees, with tests. |

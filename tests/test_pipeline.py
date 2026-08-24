@@ -937,3 +937,73 @@ def test_approving_a_held_item_resets_the_breaker_window(fresh_db, may, client):
         c.execute("UPDATE runs SET started_at = '2999-01-01T00:00:01Z' "
                   "WHERE id = ?", (rid,))
     assert fresh_db.consecutive_failures("may", "issue#9") == 1
+
+
+def _standup_returning(blockers):
+    """A fake stand-up that names the given blockers and records the digest
+    it was handed, so a test can read what Harry actually saw."""
+    seen = []
+
+    async def fake_standup(digest):
+        seen.append(digest)
+        return {"ok": True, "error": "", "output": {
+            "standup_markdown": "# Stand-up", "all_clear": False,
+            "desks": [], "blockers": list(blockers), "decisions": [],
+            "staffing": [], "directives": [], "question_for_human": ""}}
+    return fake_standup, seen
+
+
+def test_repeated_blocker_comes_back_marked_unchanged(fresh_db, may,
+                                                      monkeypatch):
+    """The same blocker twice running, with nothing done about it, must
+    reach Harry as his own words plus the fact that nothing moved."""
+    import asyncio
+    from harness import pipeline, agents
+    fake, seen = _standup_returning(
+        [{"project": "may", "message": "The roan demo has no owner"}])
+    monkeypatch.setattr(agents, "standup", fake)
+    asyncio.run(pipeline.run_standup(force=True))
+    assert "Blockers you named last stand-up" not in seen[0]  # nothing before
+    asyncio.run(pipeline.run_standup(force=True))
+    assert "Blockers you named last stand-up, with what changed since:" in seen[1]
+    assert "- The roan demo has no owner — unchanged: no activity since" \
+        in seen[1]
+    # and it is counted, so a third stand-up reads as a third telling
+    asyncio.run(pipeline.run_standup(force=True))
+    assert "[named at 2 stand-ups running]" in seen[2]
+    assert "unchanged" in seen[2]
+
+
+def test_blocker_on_an_item_that_moved_comes_back_changed(fresh_db, may,
+                                                          monkeypatch):
+    """A blocker naming an item is judged on that item, not on desk noise:
+    the item changing status is what makes it 'changed'."""
+    import asyncio
+    from harness import pipeline, agents
+    fresh_db.upsert_item("may", "issue", 7, "gate", "a", "open", "x")
+    fresh_db.update_item("may", "issue", 7, status="held")
+    fake, seen = _standup_returning(
+        [{"project": "may", "message": "#7 is held behind the breaker"}])
+    monkeypatch.setattr(agents, "standup", fake)
+    asyncio.run(pipeline.run_standup(force=True))
+    fresh_db.update_item("may", "issue", 7, status="approved")
+    asyncio.run(pipeline.run_standup(force=True))
+    assert "changed: issue#7 held → approved" in seen[1]
+
+
+def test_blocker_that_is_dropped_is_not_carried_further(fresh_db, may,
+                                                        monkeypatch):
+    """A blocker Harry stops naming is done with: the next digest must not
+    keep asking about it."""
+    import asyncio
+    from harness import pipeline, agents
+    fake, seen = _standup_returning(
+        [{"project": "may", "message": "Spend is drifting"}])
+    monkeypatch.setattr(agents, "standup", fake)
+    asyncio.run(pipeline.run_standup(force=True))
+    quiet, seen2 = _standup_returning([])
+    monkeypatch.setattr(agents, "standup", quiet)
+    asyncio.run(pipeline.run_standup(force=True))     # sees it, names nothing
+    assert "Spend is drifting" in seen2[0]
+    asyncio.run(pipeline.run_standup(force=True))
+    assert "Spend is drifting" not in seen2[1]
