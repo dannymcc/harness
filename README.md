@@ -154,7 +154,8 @@ decision, the repo cards and the section roster, with total spend at the top.
 The event log lives behind the **recent activity** tab beside them. The tabs
 are plain links (`/?tab=activity`), so the URL says what you are looking at —
 it bookmarks, it survives a reload, and an unknown value just gives you the
-default view.
+default view. The composer and the question queue sit above the tab strip, so
+they are there whichever tab you are on.
 
 ### Notifications
 
