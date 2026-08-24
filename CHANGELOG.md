@@ -4,6 +4,22 @@ All notable changes to Harness are recorded here. The format is
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project
 follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.15.2] - 2026-08-24
+
+### Fixed
+
+- **A run that ends without structured output is now recorded as a failure
+  rather than crashing the item.** An agent session could finish cleanly by
+  the CLI's reckoning and still never call the `StructuredOutput` tool, which
+  left the result empty. `run_agent` reported that as a success anyway, and
+  every caller reads a success as a promise that there is a result to read —
+  so the empty one surfaced as a `TypeError` inside the fix step. The item was
+  parked with the raw exception and logged as "could not start", which said
+  nothing about the real cause, and two of those in a row tripped the circuit
+  breaker. Such a run now finishes as failed with the cause named,
+  "session ended without structured output", and the item parks for an
+  ordinary retry through the handling that was already there (issue #42).
+
 ## [0.15.1] - 2026-08-24
 
 ### Fixed
