@@ -199,6 +199,111 @@ def test_fix_failures_retry_then_breaker(fresh_db, may):
     assert fresh_db.get_item("may", "issue", 20)["status"] == "waiting_human"
 
 
+def test_dead_session_resumes_fresh_in_the_same_run(fresh_db, may, monkeypatch, tmp_path):
+    """A resume against a session that didn't survive a container restart
+    ('No conversation found ...') must fall back to a fresh attempt in the
+    same cycle, not burn a cycle and a circuit-breaker count waiting for the
+    next one. (Issue #27.)"""
+    import asyncio
+    from harness import agents, gh, pipeline, repo
+
+    fresh_db.upsert_item("may", "issue", 30, "flaky io", "a", "open", "x")
+    fresh_db.update_item("may", "issue", 30, status="approved", plan="do it",
+                         session_id="stale-session-id")
+
+    monkeypatch.setattr(gh, "issue_detail",
+                        lambda repo_, number: {"number": 30, "title": "t",
+                                               "body": "b"})
+    monkeypatch.setattr(repo, "add_worktree", lambda project, branch: tmp_path)
+    monkeypatch.setattr(repo, "wt_has_changes", lambda project, wt: True)
+    monkeypatch.setattr(repo, "run_tests",
+                        lambda project, cwd=None, setup=True, scratch=None:
+                        (True, "ok"))
+    monkeypatch.setattr(repo, "wt_diff",
+                        lambda project, wt: ("1 file changed", "diff"))
+    monkeypatch.setattr(repo, "wt_commit_all",
+                        lambda project, wt, message: None)
+    monkeypatch.setattr(repo, "remove_worktree", lambda project, wt: None)
+    monkeypatch.setattr(repo, "push_worktree_to_dev",
+                        lambda project, wt, branch: (True, ""))
+
+    resumes_seen = []
+
+    async def fake_fix_issue(project, issue, plan, cwd, resume=None,
+                             persona="Malcolm", repro_path=""):
+        resumes_seen.append(resume)
+        rid = fresh_db.start_run("may", "ic", "issue#30", "fix", "m", persona)
+        if resume:
+            # The session transcript lived in the container filesystem and
+            # didn't survive the restart that interrupted the earlier run.
+            err = f"No conversation found with session ID: {resume}"
+            fresh_db.finish_run(rid, False, 0.1, 1, err)
+            return {"ok": False, "output": None, "session_id": "", "error": err}
+        fresh_db.finish_run(rid, True, 0.1, 1, "fixed it")
+        return {"ok": True, "error": "", "session_id": "new-session-id",
+                "output": {"success": True, "summary": "fixed it",
+                          "docs_updated": False, "notes": "",
+                          "commit_message": "fix: issue #30 (#30)"}}
+
+    monkeypatch.setattr(agents, "fix_issue", fake_fix_issue)
+
+    item = fresh_db.get_item("may", "issue", 30)
+    asyncio.run(pipeline.fix_item(may, item))
+
+    # Retried fresh within this same call, instead of leaving it for the
+    # worker's next cycle.
+    assert resumes_seen == ["stale-session-id", None]
+    after = fresh_db.get_item("may", "issue", 30)
+    assert after["session_id"] == "new-session-id"
+    assert after["status"] == "queued"
+    # The dead session's resume failure did not cost the item a
+    # circuit-breaker count.
+    assert fresh_db.consecutive_failures("may", "issue#30") == 0
+    assert pipeline._breaker_tripped(may, after) is False
+
+
+def test_dead_session_retries_once_and_only_for_that_error(fresh_db, may,
+                                                           monkeypatch,
+                                                           tmp_path):
+    """The fresh-start fallback fires once, and only on a lost session: an
+    ordinary crash still requeues for the next cycle on the first failure."""
+    import asyncio
+    from harness import agents, gh, pipeline, repo
+
+    monkeypatch.setattr(gh, "issue_detail",
+                        lambda repo_, number: {"number": number, "title": "t",
+                                               "body": "b"})
+    monkeypatch.setattr(repo, "add_worktree", lambda project, branch: tmp_path)
+
+    calls = []
+
+    def failing(error):
+        async def fake_fix_issue(project, issue, plan, cwd, resume=None,
+                                 persona="Malcolm", repro_path=""):
+            calls.append(resume)
+            return {"ok": False, "output": None, "session_id": "", "error": error}
+        return fake_fix_issue
+
+    # A session that stays lost: one fallback attempt, then the usual requeue.
+    fresh_db.upsert_item("may", "issue", 31, "t", "a", "open", "x")
+    fresh_db.update_item("may", "issue", 31, status="approved", plan="do it",
+                         session_id="stale")
+    monkeypatch.setattr(agents, "fix_issue",
+                        failing("No conversation found with session ID: stale"))
+    asyncio.run(pipeline.fix_item(may, fresh_db.get_item("may", "issue", 31)))
+    assert calls == ["stale", None]
+    assert fresh_db.get_item("may", "issue", 31)["status"] == "approved"
+
+    # An ordinary mechanical failure is not a lost session — no second call.
+    calls.clear()
+    fresh_db.upsert_item("may", "issue", 32, "t", "a", "open", "x")
+    fresh_db.update_item("may", "issue", 32, status="approved", plan="do it",
+                         session_id="live")
+    monkeypatch.setattr(agents, "fix_issue", failing("transport crash"))
+    asyncio.run(pipeline.fix_item(may, fresh_db.get_item("may", "issue", 32)))
+    assert calls == ["live"]
+
+
 def test_directive_actions_executor(fresh_db, may):
     from harness import pipeline
     fresh_db.upsert_item("may", "issue", 30, "t", "a", "open", "x")
