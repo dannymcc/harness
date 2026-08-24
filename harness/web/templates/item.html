@@ -1,5 +1,23 @@
 {% extends "base.html" %}
 {% block title %}{{ item.kind }}#{{ item.number }} · {{ p.name }}{% endblock %}
+
+{# One thread entry. Anything past 12 lines folds away so a run of test
+   output doesn't bury the entries either side of it. #}
+{% macro thread_entry(t) %}
+  {% set lines = t.text.split('\n') %}
+  <div class="thread-entry kind-{{ t.kind }}">
+    <p class="thread-meta"><b>{{ t.who }}</b> <span class="pill">{{ t.kind }}</span>
+      <span class="ts">{{ t.created_at }}</span></p>
+    <div class="md">{{ lines[:12]|join('\n') }}</div>
+    {% if lines|length > 12 %}
+    <details class="thread-more">
+      <summary>show {{ lines|length - 12 }} more lines</summary>
+      <div class="md">{{ lines[12:]|join('\n') }}</div>
+    </details>
+    {% endif %}
+  </div>
+{% endmacro %}
+
 {% block content %}
 
 <p><a href="/p/{{ p.name }}">← {{ p.name }}</a></p>
@@ -44,13 +62,24 @@
   about this item. Each agent reads it whole before working and writes back
   to it; your directions below land here too.</p>
   {% if thread %}
+  <p class="thread-filters">
+    {% for key, label in thread_filters %}<a href="?kind={{ key }}"
+      {%- if key == thread_kind %} aria-current="page"{% endif %}>{{ label }}</a>
+    {% endfor %}
+  </p>
+  {% set binding = thread|selectattr('kind', 'in', ['ruling', 'direction'])|list %}
+  {% if binding %}
+  <div class="thread-pinned">
+    <p class="hint">Binding on everyone working this item, newest first —
+    shown whatever the filter.</p>
+    {% for t in binding|reverse %}{{ thread_entry(t) }}{% endfor %}
+  </div>
+  {% endif %}
   <div class="thread">
-  {% for t in thread %}
-    <div class="thread-entry kind-{{ t.kind }}">
-      <p class="thread-meta"><b>{{ t.who }}</b> <span class="pill">{{ t.kind }}</span>
-        <span class="ts">{{ t.created_at }}</span></p>
-      <div class="md">{{ t.text }}</div>
-    </div>
+  {% for t in thread if thread_kinds is none or t.kind in thread_kinds %}
+    {{ thread_entry(t) }}
+  {% else %}
+    <p class="hint">Nothing on this item under that filter.</p>
   {% endfor %}
   </div>
   {% else %}<p class="hint">Nothing yet.</p>{% endif %}

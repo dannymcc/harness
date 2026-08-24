@@ -342,6 +342,37 @@ def test_item_thread_and_run_steer(client, fresh_db):
     assert "Tell Malcolm while they work" not in client.get(f"/run/{rid}").text
 
 
+def test_thread_kind_filter_and_pinned_binding_entries(client, fresh_db):
+    """The thread is the hand-off artefact and gets long: the operator has to
+    be able to pick out what Harry ruled and what they themselves directed."""
+    fresh_db.upsert_item("may", "issue", 21, "Long thread", "a", "open", "x")
+    fresh_db.thread_append("may", "issue#21", "Ruth", "finding", "FINDING-ENTRY")
+    fresh_db.thread_append("may", "issue#21", "Harry", "ruling", "RULING-ENTRY")
+    fresh_db.thread_append("may", "issue#21", "Danny", "direction",
+                           "DIRECTION-ENTRY")
+    fresh_db.thread_append("may", "issue#21", "harness", "test",
+                           "\n".join(f"test output line {i}" for i in range(40)))
+
+    html = client.get("/p/may/issue/21").text        # everything, by default
+    for text in ("FINDING-ENTRY", "RULING-ENTRY", "DIRECTION-ENTRY",
+                 "test output line 39"):
+        assert text in html, text
+    assert "?kind=ruling" in html                    # the filter links
+    assert "thread-pinned" in html                   # the binding block
+    assert "<details" in html                        # long entry folded away
+    assert "Thread (4)" in html                      # the count stays a total
+
+    ruled = client.get("/p/may/issue/21?kind=ruling").text
+    assert "RULING-ENTRY" in ruled
+    assert "FINDING-ENTRY" not in ruled              # filtered out
+    assert "test output line 39" not in ruled
+    # rulings and directions bind every agent: they stay whatever the filter
+    assert "DIRECTION-ENTRY" in ruled and "thread-pinned" in ruled
+
+    # a filter nobody offers falls back to showing everything
+    assert "FINDING-ENTRY" in client.get("/p/may/issue/21?kind=nonsense").text
+
+
 def test_run_followup_queues_direction_without_steering(client, fresh_db):
     from harness import agents
     fresh_db.upsert_item("may", "issue", 11, "Footer", "a", "open", "x")
