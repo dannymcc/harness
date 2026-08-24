@@ -186,6 +186,7 @@ def test_release_now_button_and_request(client, fresh_db):
     _queue_item(fresh_db)
     html = client.get("/p/may").text
     assert "Release now (Colin)" in html
+    assert "Release now" in client.get("/").text  # and on the overview card
     r = client.post("/p/may/release/request", follow_redirects=False)
     assert r.status_code == 303
     assert fresh_db.get_setting("release_requested.may") == "1"
@@ -212,6 +213,7 @@ def test_release_now_survives_work_landed_outside_the_harness(
     from harness import repo
     monkeypatch.setattr(repo, "dev_ahead_count", lambda p: 2)
     assert "Release now (Colin)" in client.get("/p/may").text
+    assert "Release now" in client.get("/").text  # and on the overview card
     client.post("/p/may/release/request", follow_redirects=False)
     assert fresh_db.get_setting("release_requested.may") == "1"
 
