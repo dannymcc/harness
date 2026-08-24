@@ -4,6 +4,19 @@ All notable changes to Harness are recorded here. The format is
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project
 follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.9.1] - 2026-08-23
+
+### Changed
+
+- **Coverage for "Release now" on the overview, not just the project page.**
+  Issue #17 asked for the button to appear only when there is something to
+  cut. That behaviour already shipped in 0.8.3 with issue #10, and re-reading
+  the code confirmed every acceptance criterion was met — but the web tests
+  only checked the project page, so the overview card could have regressed
+  unnoticed. The queued-items and dev-ahead-of-main tests now assert the card
+  as well, covering all three states on both views. No behaviour change, and
+  no reason to hurry the upgrade (issue #17).
+
 ## [0.9.0] - 2026-08-23
 
 ### Changed
