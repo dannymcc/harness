@@ -4,6 +4,52 @@ All notable changes to Harness are recorded here. The format is
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project
 follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.17.0] - 2026-08-24
+
+### Added
+
+- **A held item now goes to Harry, not straight to you.** Two consecutive
+  failed runs trip the circuit breaker, and the trip used to put the item in
+  `waiting_human` and page the operator — which contradicts the section's own
+  rule that questions go to the head of section first, and asked for a
+  decision the section is perfectly able to make. Pressing Fix simply ran the
+  same oversized job into the same `error_max_turns` wall and bounced back
+  with nobody having asked why. The first trip now holds the item in a new
+  `held` status and files a question to Harry carrying both failures' error
+  kinds, with the three options he already had: retry it in a fresh session,
+  split it — the right call when a run keeps running out of turns, which
+  means the item is too big rather than broken, and the answer goes to the
+  team lead as a directive — or escalate, which is the only one of the three
+  that reaches your phone. Rulings are carried out through the existing
+  `retry_item` and `tell_desk` primitives via a new optional `item_action`
+  field on his decisions, so every branch is something the GUI could already
+  do. The floor under it is a new `items.breaker_trips` column (schema-safe
+  `ALTER`, default 0): Harry's retry deliberately keeps the count, so he gets
+  one ruling per item and a second trip goes to `waiting_human` and your
+  phone whatever he said. Your own approve or retry forgives the count — you
+  have looked at the thing. A ruling that gives no direction, and an item
+  that goes two ruling passes undecided, both land on your desk rather than
+  sitting held with nobody acting (issue #49).
+
+### Fixed
+
+- **Approving a held item resets the circuit-breaker window.** The breaker
+  counts trailing failed runs, so re-approving a held item re-tripped it on
+  the same stale failures before a single new attempt had run: one desk took
+  two overnight session-loss failures, three approvals, three pages and zero
+  new runs. A deliberate approval now stamps `breaker_reset_at`
+  (schema-safe `ALTER` with a default) — through the GUI approve route and
+  through Harry's `approve_item` and `retry_item` — and the failure count
+  ignores runs started at or before it. "Re-run from scratch" stamps it too,
+  which it did not.
+- **"Merge & tag" on a proposed release now merges and tags.** The release
+  approve URL also matched the item route registered before it, so every
+  press approved a nonexistent item of kind `release` and left the release
+  untouched — four presses against a green PR, no merge, no feedback. The
+  release routes register first now and the item route refuses kinds it does
+  not own; a regression test posts to the URL and asserts the release
+  actually finalises (issue #53).
+
 ## [0.16.1] - 2026-08-24
 
 ### Fixed

@@ -168,10 +168,10 @@ they are there whichever tab you are on.
 ### Notifications
 
 Set `HARNESS_NTFY_TOPIC` (and `HARNESS_PUBLIC_URL`, reachable from your
-phone) to get pushes for escalated questions, release proposals, held
-items, and usage-limit pauses — with one-tap answer buttons. On the public
-ntfy.sh server the topic name is effectively a password; pick something
-unguessable. The dashboard also installs as a PWA.
+phone) to get pushes for escalated questions, release proposals, the held
+items Harry could not settle himself, and usage-limit pauses — with one-tap
+answer buttons. On the public ntfy.sh server the topic name is effectively
+a password; pick something unguessable. The dashboard also installs as a PWA.
 
 ### Light and dark
 
