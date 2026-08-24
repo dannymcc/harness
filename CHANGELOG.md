@@ -4,6 +4,26 @@ All notable changes to Harness are recorded here. The format is
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project
 follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.12.1] - 2026-08-24
+
+### Added
+
+- **Groundwork for the conversation-first dashboard — nothing on screen yet.**
+  `db.stream()` merges the four lists the GUI currently keeps apart — project
+  events, the operator's directions, questions on their way to Harry, and the
+  item threads — into one chronological feed, newest first, filterable by
+  project, kind and timestamp, with the payload an inline decision card will
+  need to act on a row. The events that `add_direction` and `ask_question`
+  write alongside their own row are dropped from the feed, so a transcript
+  built on it won't say everything twice; the two message shapes are now
+  module constants shared by the writers and the filter, rather than strings
+  in two places waiting to drift apart. No template, route or web test is
+  touched, and nothing calls it yet, so the dashboard is unchanged and there
+  is no reason to hurry the upgrade. This is the first of four slices of
+  issue #22, which stays open as the parent; the version is a patch because
+  the release adds no behaviour the operator can see, whatever the parent
+  item is labelled.
+
 ## [0.12.0] - 2026-08-24
 
 ### Added
