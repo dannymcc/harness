@@ -149,10 +149,10 @@
 </section>
 
 {% if cto_report %}
-<section class="card">
-  <h2>Harry — stand-up <span class="ts">{{ cto_report.created_at }}</span></h2>
+<details class="card">
+  <summary>Harry — stand-up <span class="ts">{{ cto_report.created_at }}</span></summary>
   <div class="md">{{ cto_report.content }}</div>
-</section>
+</details>
 {% endif %}
 
 <section class="card">

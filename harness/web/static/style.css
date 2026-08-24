@@ -464,6 +464,14 @@ a.agent-chip:hover { border-color: var(--accent); text-decoration: none; }
 .compose select { flex: 0 1 auto; }
 .compose input { flex: 1 1 200px; }
 
+/* A card that folds away: the stand-up is worth keeping but not worth the
+   room it took, so it opens on a click and stays shut on load. */
+details.card > summary {
+  font: 600 .72rem/1.4 var(--mono); text-transform: uppercase;
+  letter-spacing: .14em; color: var(--dim); cursor: pointer;
+}
+details.card[open] > summary { margin-bottom: .7rem; }
+
 .question details.override { margin-top: .2rem; }
 .question details.override summary { font-size: .8rem; color: var(--dim); cursor: pointer; }
 .question details.override[open] summary { margin-bottom: .4rem; }

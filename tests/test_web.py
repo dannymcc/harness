@@ -443,3 +443,26 @@ def test_run_followup_queues_direction_without_steering(client, fresh_db):
 def test_run_followup_hidden_without_item(client, fresh_db):
     rid = fresh_db.start_run("may", "lead", "", "plan", "m", "Harry")
     assert f"/run/{rid}/followup" not in client.get(f"/run/{rid}").text
+
+
+def test_standup_is_a_closed_disclosure_on_overview(client, fresh_db):
+    """The stand-up repeats what the roster/event log already show and is up
+    to an hour stale — it must not render open on load, but its markdown
+    should still be reachable by expanding the disclosure (issue #24)."""
+    fresh_db.save_report("cto", "", "Blocked on the flaky release pipeline")
+    html = client.get("/").text
+    assert "Blocked on the flaky release pipeline" in html
+    marker = html.index("Blocked on the flaky release pipeline")
+    details_start = html.rindex("<details", 0, marker)
+    details_open_tag_end = html.index(">", details_start)
+    details_tag = html[details_start:details_open_tag_end]
+    assert "open" not in details_tag.split()
+    summary_start = html.index("<summary", details_start)
+    summary_end = html.index("</summary>", summary_start)
+    assert "Harry — stand-up" in html[summary_start:summary_end]
+
+
+def test_standup_disclosure_absent_without_a_report(client, fresh_db):
+    r = client.get("/")
+    assert r.status_code == 200
+    assert "Harry — stand-up" not in r.text
