@@ -658,16 +658,24 @@ def run_page(request: Request, run_id: int):
 
 @app.get("/run/{run_id}/tail")
 def run_tail(run_id: int, offset: int = 0):
-    """Incremental transcript bytes for the live console view."""
+    """Incremental transcript bytes, plus the facts strip above the console.
+
+    The facts ride along with every chunk — including the first few seconds
+    before a log file exists — so the strip moves while the run does."""
     from fastapi.responses import JSONResponse
     run = db.get_run(run_id)
     if not run:
-        return JSONResponse({"data": "", "offset": 0, "live": False})
+        return JSONResponse({"data": "", "offset": 0, "live": False,
+                             "turns": 0, "cost_usd": 0.0, "model": "",
+                             "started_at": None, "finished_at": None})
+    facts = {"turns": run["turns"], "cost_usd": run["cost_usd"],
+             "model": run["model"], "started_at": run["started_at"],
+             "finished_at": run["finished_at"]}
     live = run["finished_at"] is None
     if not run["log_path"]:
         # Nothing to tail yet, but the run is not over: saying live=False here
         # is what stops the poller for good.
-        return JSONResponse({"data": "", "offset": 0, "live": live})
+        return JSONResponse({"data": "", "offset": 0, "live": live, **facts})
     from pathlib import Path as _P
     try:
         f = _P(run["log_path"])
@@ -679,10 +687,12 @@ def run_tail(run_id: int, offset: int = 0):
         return JSONResponse({
             "data": chunk.decode("utf-8", errors="replace"),
             "offset": offset + len(chunk),
-            "live": run["finished_at"] is None,
+            "live": live,
+            **facts,
         })
     except OSError:
-        return JSONResponse({"data": "", "offset": offset, "live": live})
+        return JSONResponse({"data": "", "offset": offset, "live": live,
+                             **facts})
 
 
 @app.post("/run/{run_id}/steer")

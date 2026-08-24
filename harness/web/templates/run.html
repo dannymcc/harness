@@ -16,17 +16,23 @@
   {% if run.item_key and '#' in run.item_key and run.project %}
   <a href="/p/{{ run.project }}/{{ run.item_key.replace('#', '/') }}">{{ run.item_key }}</a>
   {% else %}{{ run.item_key }}{% endif %}</h1>
-<p class="run-facts">
+<p class="run-facts" id="run-facts" data-started="{{ run.started_at }}"
+   data-finished="{{ run.finished_at or '' }}">
+  <span data-fact="status">
   {% if run.finished_at is none %}
     <span class="pill warn">live</span>
     {% if run.cancel_requested %}<span class="pill">stopping…</span>{% endif %}
   {% elif run.ok %}<span class="pill ok">succeeded</span>
   {% else %}<span class="pill">failed</span>{% endif %}
+  </span>
   <span>started {{ run.started_at }}</span>
-  {% if run.finished_at %}<span>finished {{ run.finished_at }}</span>{% endif %}
-  <span>{{ run.cost_usd|money }}</span>
-  <span>{{ run.turns }} messages</span>
-  <span>{{ run.model }}</span>
+  <span data-fact="finished" {% if not run.finished_at %}hidden{% endif %}
+    >{% if run.finished_at %}finished {{ run.finished_at }}{% endif %}</span>
+  <!-- elapsed is clock arithmetic in the browser; nothing to render without JS -->
+  <span data-fact="elapsed" hidden></span>
+  <span data-fact="cost">{{ run.cost_usd|money }}</span>
+  <span data-fact="turns">{{ run.turns }} messages</span>
+  <span data-fact="model">{{ run.model }}</span>
 </p>
 {% if run.summary %}<section class="card"><h2>Summary</h2>
   <div class="md">{{ run.summary }}</div></section>{% endif %}

@@ -175,6 +175,83 @@ document.addEventListener("DOMContentLoaded", () => {
 });
 
 
+// Run facts strip: turns · cost · model · elapsed above the console, kept
+// moving by the same poller that feeds the transcript. Elapsed is the only
+// number the browser works out for itself; cost stays whatever the server
+// says, which is nothing until the run ends and the SDK reports it.
+function elapsedText(ms) {
+  const s = Math.max(0, Math.floor(ms / 1000));
+  const pad = (n) => String(n).padStart(2, "0");
+  if (s < 3600) return `${Math.floor(s / 60)}m ${pad(s % 60)}s`;
+  return `${Math.floor(s / 3600)}h ${pad(Math.floor(s / 60) % 60)}m`;
+}
+
+const runFacts = {
+  strip: null,
+  started: null,
+  finished: "",
+  fact(key) {
+    return this.strip && this.strip.querySelector(`[data-fact="${key}"]`);
+  },
+  show(key, text) {
+    const el = this.fact(key);
+    if (el) {
+      el.textContent = text;
+      el.hidden = false;
+    }
+  },
+  paintElapsed() {
+    if (!this.started) return;
+    const end = this.finished ? new Date(this.finished) : new Date();
+    this.show("elapsed",
+              `${elapsedText(end - this.started)} ${this.finished ? "in total"
+                                                                 : "elapsed"}`);
+  },
+  update(j) {
+    if (!this.strip) return;
+    if (typeof j.turns === "number") this.show("turns", `${j.turns} messages`);
+    if (j.model) this.show("model", j.model);
+    if (typeof j.cost_usd === "number") {
+      this.show("cost", `≈US$${j.cost_usd.toLocaleString(undefined, {
+        minimumFractionDigits: 2, maximumFractionDigits: 2 })}`);
+    }
+    if (j.finished_at && !this.finished) {
+      this.finished = j.finished_at;
+      this.show("finished", `finished ${j.finished_at}`);
+      // The tail says the run is over but not how it went; the reload a
+      // moment later brings back succeeded/failed. Don't guess in between.
+      const status = this.fact("status");
+      if (status) {
+        const pill = document.createElement("span");
+        pill.className = "pill";
+        pill.textContent = "finished";
+        status.replaceChildren(pill);
+      }
+    }
+    this.paintElapsed();
+  },
+};
+
+document.addEventListener("DOMContentLoaded", () => {
+  runFacts.strip = document.getElementById("run-facts");
+  if (!runFacts.strip) return;
+  runFacts.started = runFacts.strip.dataset.started
+    ? new Date(runFacts.strip.dataset.started) : null;
+  runFacts.finished = runFacts.strip.dataset.finished || "";
+  // The strip sticks below the nav, which wraps to two rows on a phone;
+  // measure rather than guess at the fallback in :root.
+  const nav = document.querySelector("nav");
+  if (nav) {
+    const setNavHeight = () => document.documentElement.style
+      .setProperty("--nav-h", `${nav.offsetHeight}px`);
+    setNavHeight();
+    window.addEventListener("resize", setNavHeight);
+  }
+  runFacts.paintElapsed();
+  if (!runFacts.finished) setInterval(() => runFacts.paintElapsed(), 1000);
+});
+
+
 // Live console: tail the run transcript while the run is in flight.
 document.addEventListener("DOMContentLoaded", () => {
   const pre = document.querySelector("[data-tail-run]");
@@ -190,6 +267,7 @@ document.addEventListener("DOMContentLoaded", () => {
       const res = await fetch(`/run/${runId}/tail?offset=${offset}`);
       if (res.ok) {
         const j = await res.json();
+        runFacts.update(j);
         if (j.data) {
           const follow = nearBottom();
           pre.append(j.data);
