@@ -90,10 +90,12 @@ told to behave.
   failures instead of burning retries. A sticky strip above the console
   keeps the run's facts in view and moving — messages so far, model,
   elapsed time, and the cost, which the SDK only reports once the run
-  ends, so it reads ≈US$0.00 until then rather than a guess. Say something to a running agent
-  and choose when it lands: **Send** goes into the session on its next
-  message, **When they finish** files it on the item instead, so whoever
-  picks the item up next reads it without the current run being derailed.
+  ends, so it reads ≈US$0.00 until then rather than a guess. The run list on
+  the project page carries the message count alongside the cost too. Say
+  something to a running agent and choose when it lands: **Send** goes into
+  the session on its next message, **When they finish** files it on the item
+  instead, so whoever picks the item up next reads it without the current
+  run being derailed.
   If a run ends — stopped, or of its own accord — before it took what you
   sent, the message isn't lost: the finished run page lists it under
   **Undelivered**, to send on as a direction on the item or discard.
