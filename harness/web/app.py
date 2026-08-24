@@ -390,14 +390,37 @@ def project_settings(request: Request, name: str):
                   staff=db.staff_get(name))
 
 
+# How the item thread can be narrowed: query key -> (link label, the entry
+# kinds it keeps; None keeps everything). Rulings and directions are pinned
+# above the list whatever is picked — they bind every agent that reads the
+# thread, which is how `agents._item_context` frames them.
+THREAD_FILTERS = {
+    "all": ("all", None),
+    "ruling": ("rulings", ("ruling",)),
+    "direction": ("directions", ("direction",)),
+    "work": ("findings/plans", ("finding", "plan")),
+    "note": ("notes", ("note",)),
+    "log": ("events/tests", ("event", "test")),
+}
+
+
 @app.get("/p/{name}/{kind}/{number}")
 def item_page(request: Request, name: str, kind: str, number: int):
     p = db.get_project(name)
     item = db.get_item(name, kind, number)
     if not (p and item):
         return RedirectResponse(f"/p/{name}", status_code=303)
+    # `kind` is already the path parameter (issue|pr), so the thread filter
+    # is read straight off the query string. No persistence: the URL is the
+    # only thing that decides what an item page shows.
+    sel = request.query_params.get("kind", "all")
+    if sel not in THREAD_FILTERS:
+        sel = "all"
     return render(request, "item.html", p=p, item=item,
                   thread=db.thread(name, f"{kind}#{number}"),
+                  thread_filters=[(key, label)
+                                  for key, (label, _) in THREAD_FILTERS.items()],
+                  thread_kind=sel, thread_kinds=THREAD_FILTERS[sel][1],
                   gh_url=f"https://github.com/{p['repo']}/"
                          f"{'issues' if kind == 'issue' else 'pull'}/{number}")
 

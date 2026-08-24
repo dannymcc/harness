@@ -83,6 +83,13 @@ told to behave.
   If a run ends — stopped, or of its own accord — before it took what you
   sent, the message isn't lost: the finished run page lists it under
   **Undelivered**, to send on as a direction on the item or discard.
+- **The item thread** — every agent's findings, plans, notes, test runs and
+  your own directions land on one page per item, in order. It can be
+  narrowed by kind (rulings, directions, findings/plans, notes,
+  events/tests) from plain links, so the filter is part of the URL and a
+  shared link shows everyone the same thing; rulings and directions stay
+  pinned at the top whatever the filter, since they bind every agent that
+  reads the thread. Long entries fold away after twelve lines.
 - **Desk memory** — agents bank one-line learnings, recalled into future
   prompts and condensed hourly, so judgement stays consistent without
   prompts growing.
