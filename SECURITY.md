@@ -36,7 +36,11 @@ Shell access depends on the role, because the roles differ in what they read:
   the object store and prints; the two with destructive forms are allowed
   only past the reading flag, because a prefix rule cannot exclude `-d`.
   They can still reproduce a report by running the suite; they cannot run
-  `curl`, read a credentials file, or start anything else.
+  `curl`, read a credentials file, or start anything else. Because the rules
+  match the literal command, their system prompt also tells them how to spell
+  one: the session's working directory is already the checkout, git is invoked
+  bare from it, and `git -C <path> ...` or `cd <path> && git ...` are denied —
+  a syntax miss rather than a withdrawn capability.
 - **Fix and release** keep a general shell: they have to run builds,
   installs and test suites. This is accepted residual risk. What contains
   them is not the tool policy but the disposable worktree they work in, the

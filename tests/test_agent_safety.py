@@ -106,6 +106,47 @@ def test_the_read_only_git_rules_are_all_there(opts):
     assert _allows(rules, "git ls-files harness")
 
 
+def test_the_readonly_prompt_says_how_to_invoke_git(opts):
+    """issue #46: the rules are prefix-anchored, so `git -C` and `cd` are
+    denied. Without saying so, sessions read the refusal as lost Bash access
+    and record a blocker that isn't there."""
+    prompt = opts.system_prompt
+    assert "git -C" in prompt and "cd " in prompt
+    assert "denied" in prompt
+    assert "checkout" in prompt and "working directory" in prompt
+    assert "git status" in prompt
+
+
+def test_the_denied_git_forms_really_are_denied(opts):
+    """The prompt's claim, checked against the rules it describes."""
+    rules = [t for t in opts.allowed_tools if t.startswith("Bash")]
+    assert not _allows(rules, "git -C /data/repos/harness-app log --oneline")
+    assert not _allows(rules, "cd /data/repos/harness-app && git status")
+    assert _allows(rules, "git status")
+
+
+def test_the_git_note_stays_out_of_sessions_that_have_no_allowlist():
+    """A readonly session with no project has no shell, and the fix role has a
+    general one where `cd` and `git -C` are legitimate."""
+    from harness import agents
+    no_shell = agents.build_options(model="m", cwd=None, schema={},
+                                    readonly=True)
+    fix = agents.build_options(model="m", cwd="/tmp", schema={},
+                               readonly=False)
+    assert no_shell.system_prompt == agents.BASE_RULES
+    assert fix.system_prompt == agents.BASE_RULES
+
+
+def test_the_read_only_git_rules_were_not_widened_for_it(opts, may):
+    """The fix is guidance, not a wider allowlist: `git -C x push` would come
+    with any rule that admitted `git -C`."""
+    from harness import agents
+    rules = [t for t in opts.allowed_tools if t.startswith("Bash")]
+    assert set(rules) == set(agents.GIT_READ_RULES) | {
+        f"Bash({may['test_command']}:*)"}
+    assert not any("-C" in r for r in agents.GIT_READ_RULES)
+
+
 @pytest.mark.parametrize("mutating", [
     "git branch -d topic",
     "git branch -D topic",
