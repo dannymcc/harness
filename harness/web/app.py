@@ -117,8 +117,17 @@ def render(request: Request, template: str, **ctx):
 
 # --- overview ---------------------------------------------------------------
 
+OVERVIEW_TABS = {
+    "projects": "projects & section",
+    "activity": "recent activity",
+}
+
+
 @app.get("/")
 def overview(request: Request):
+    tab = request.query_params.get("tab", "")
+    if tab not in OVERVIEW_TABS:
+        tab = "projects"          # unknown or missing: the default view
     cards = []
     for p in db.all_projects():
         counts = db.counts_by_status(p["name"])
@@ -147,8 +156,10 @@ def overview(request: Request):
                   questions=_enrich_questions(db.open_questions()),
                   staff=_staff_board(),
                   cto_report=db.latest_report("cto"),
-                  events=db.recent_events(20),
-                  total_cost=db.total_cost())
+                  events=db.recent_events(20) if tab == "activity" else [],
+                  total_cost=db.total_cost(),
+                  tab=tab,
+                  tabs=list(OVERVIEW_TABS.items()))
 
 
 # --- project pages ----------------------------------------------------------

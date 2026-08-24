@@ -346,6 +346,11 @@ def test_add_control_is_an_icon_with_a_name(client):
     assert 'title="Add a project"' in html
 
 
+def _navlinks(html):
+    """The nav's project links alone — the page body marks its own state."""
+    return html.split('class="navlinks"', 1)[1].split("</div>", 1)[0]
+
+
 def test_nav_marks_the_project_you_are_looking_at(client, fresh_db):
     fresh_db.create_project("june", "example/june")
     fresh_db.upsert_item("may", "issue", 7, "A bug", "alice", "open", "x")
@@ -353,8 +358,9 @@ def test_nav_marks_the_project_you_are_looking_at(client, fresh_db):
     for path in ("/p/may", "/p/may/settings", "/p/may/issue/7", f"/run/{rid}"):
         html = client.get(path).text
         assert '<a href="/p/may" aria-current="page">' in html, path
-        assert html.count('aria-current="page"') == 1, path  # not june too
-    assert 'aria-current="page"' not in client.get("/").text
+        nav = _navlinks(html)
+        assert nav.count('aria-current="page"') == 1, path  # not june too
+    assert 'aria-current="page"' not in _navlinks(client.get("/").text)
 
     # a disabled project still reads as disabled while it is the active one
     fresh_db.update_project("may", enabled=0)
@@ -466,3 +472,36 @@ def test_standup_disclosure_absent_without_a_report(client, fresh_db):
     r = client.get("/")
     assert r.status_code == 200
     assert "Harry — stand-up" not in r.text
+
+
+def test_recent_activity_is_behind_a_tab(client, fresh_db):
+    fresh_db.log_event("distinctive-test-event-marker", project="may")
+    rid = fresh_db.start_run("may", "ic", "issue#1", "fix", "m", "Malcolm")
+    fresh_db.finish_run(rid, True, 12.34, 1, "done")
+
+    default_html = client.get("/").text
+    assert "distinctive-test-event-marker" not in default_html
+    assert "The section" in default_html  # roster still on default view
+    assert "US$12.34" in default_html  # total spend headline stays visible
+
+    activity_html = client.get("/?tab=activity").text
+    assert "distinctive-test-event-marker" in activity_html
+
+    fallback_html = client.get("/?tab=bogus")
+    assert fallback_html.status_code == 200
+    assert "distinctive-test-event-marker" not in fallback_html.text
+
+
+def test_overview_tab_strip_marks_the_selected_tab(client, fresh_db):
+    """The URL is the only state, so the strip has to read back off it."""
+    fresh_db.log_event("an event", project="may")
+    for url, current in (("/", "/?tab=projects"),
+                         ("/?tab=projects", "/?tab=projects"),
+                         ("/?tab=activity", "/?tab=activity"),
+                         ("/?tab=bogus", "/?tab=projects")):
+        html = client.get(url).text
+        assert f'<a href="{current}" aria-current="page"' in html, url
+        assert html.count('aria-current="page"') == 1, url
+        assert "US$" in html.split("<h1>", 1)[1], url  # spend on every tab
+    # the activity tab is the only place the event list renders
+    assert "The section" not in client.get("/?tab=activity").text

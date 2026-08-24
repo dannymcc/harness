@@ -147,6 +147,15 @@ no other site can drive it from your browser, every state-changing request
 that a browser marks as coming from elsewhere is refused; requests with no
 origin headers at all (the ntfy buttons, `curl`, health checks) still work.
 
+### The overview at a glance
+
+The overview opens on what needs you: the composer, anything awaiting your
+decision, the repo cards and the section roster, with total spend at the top.
+The event log lives behind the **recent activity** tab beside them. The tabs
+are plain links (`/?tab=activity`), so the URL says what you are looking at —
+it bookmarks, it survives a reload, and an unknown value just gives you the
+default view.
+
 ### Notifications
 
 Set `HARNESS_NTFY_TOPIC` (and `HARNESS_PUBLIC_URL`, reachable from your

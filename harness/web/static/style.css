@@ -87,6 +87,7 @@ h1 {
   font: 700 1.3rem/1.3 var(--sans); letter-spacing: -.01em;
   margin: .6rem 0 1rem;
 }
+.total-spend { font: 500 .85rem/1 var(--mono); color: var(--dim); margin: -.6rem 0 .9rem; }
 h2 {
   font: 600 .72rem/1.4 var(--mono); text-transform: uppercase;
   letter-spacing: .14em; color: var(--dim); margin: 0 0 .7rem;
@@ -476,14 +477,16 @@ details.card[open] > summary { margin-bottom: .7rem; }
 .question details.override summary { font-size: .8rem; color: var(--dim); cursor: pointer; }
 .question details.override[open] summary { margin-bottom: .4rem; }
 
-/* --- item thread: filter row, pinned binding entries, folded long runs --- */
-.thread-filters { display: flex; flex-wrap: wrap; gap: .1rem; margin: .4rem 0 .6rem; }
-.thread-filters a {
+/* --- link rows: item thread filters, overview tabs ---------------------- */
+.thread-filters, .tabs {
+  display: flex; flex-wrap: wrap; gap: .1rem; margin: .4rem 0 .6rem;
+}
+.thread-filters a, .tabs a {
   font: 500 .8rem/1 var(--mono); color: var(--dim);
   padding: .45rem .55rem; border-radius: 4px;
 }
-.thread-filters a:hover { color: var(--accent); text-decoration: none; }
-.thread-filters a[aria-current="page"] {
+.thread-filters a:hover, .tabs a:hover { color: var(--accent); text-decoration: none; }
+.thread-filters a[aria-current="page"], .tabs a[aria-current="page"] {
   color: var(--accent);
   background: color-mix(in srgb, var(--accent) 14%, transparent);
   box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--accent) 45%, transparent);
