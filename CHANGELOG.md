@@ -4,6 +4,25 @@ All notable changes to Harness are recorded here. The format is
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project
 follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.12.0] - 2026-08-24
+
+### Added
+
+- **The item thread can be narrowed to what binds.** An item's thread is the
+  hand-off artefact every agent reads, and it gets long: a single run of test
+  output could bury the ruling and the direction either side of it. The item
+  page now carries a row of plain filter links above the thread — all,
+  rulings, directions, findings/plans, notes, events/tests — and rulings and
+  directions also sit pinned in a block at the top, newest first, whatever
+  filter is picked, because they bind everyone working the item. Anything
+  past twelve lines folds behind a "show N more lines" toggle, so long test
+  output no longer swamps the page. The filter lives only in the URL, with no
+  client-side memory, so a shared item link shows everyone the same thing and
+  the back button behaves; an unrecognised `?kind=` falls back to showing
+  everything. The "Thread (N)" count stays a total of the whole thread, and
+  the text handed to agents in their prompts is unchanged — this is a reading
+  aid for the operator, not a change to what agents are told (issue #21).
+
 ## [0.11.0] - 2026-08-24
 
 ### Added
