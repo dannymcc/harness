@@ -3,6 +3,7 @@
 {% block content %}
 
 <h1>All harnesses</h1>
+<p class="total-spend">{{ total_cost|money }} total spend</p>
 
 <section class="card">
   <form method="post" action="/tell" class="answer-form tell-form compose">
@@ -96,6 +97,13 @@
 </section>
 {% endif %}
 
+<p class="tabs">
+  {% for key, label in tabs %}<a href="/?tab={{ key }}"
+    {%- if key == tab %} aria-current="page"{% endif %}>{{ label }}</a>
+  {% endfor %}
+</p>
+
+{% if tab == "projects" %}
 <div class="cards">
 {% for c in cards %}
   <div class="project-slot">
@@ -154,9 +162,11 @@
   <div class="md">{{ cto_report.content }}</div>
 </details>
 {% endif %}
+{% endif %}{# projects tab #}
 
+{% if tab == "activity" %}
 <section class="card">
-  <h2>Recent activity · {{ total_cost|money }} total spend</h2>
+  <h2>Recent activity</h2>
   <ul class="events">
   {% for e in events %}
     <li class="{{ e.level }}"><span class="ts">{{ e.ts }}</span>
@@ -164,5 +174,6 @@
   {% endfor %}
   </ul>
 </section>
+{% endif %}
 
 {% endblock %}

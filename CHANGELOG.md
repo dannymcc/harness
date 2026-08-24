@@ -4,6 +4,21 @@ All notable changes to Harness are recorded here. The format is
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project
 follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.15.0] - 2026-08-24
+
+### Changed
+
+- **Recent activity now sits behind a tab on the overview.** The full event
+  list rendered inline on every load, pushing the repo cards and the section
+  roster down the page for the sake of reference material. The default view is
+  now the projects and the section; the log is one link away under **recent
+  activity**. The tabs are plain links (`/?tab=activity`), so the URL is the
+  only state — the view bookmarks, survives a reload, and an unknown value
+  gives the default rather than an error. The events query only runs for the
+  tab that shows them (issue #25).
+- Total spend has left the activity heading for a headline line under the page
+  title, so it is visible on whichever tab you are on.
+
 ## [0.14.1] - 2026-08-24
 
 ### Changed
