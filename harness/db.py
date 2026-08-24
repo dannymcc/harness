@@ -226,6 +226,102 @@ def recent_events(limit: int = 50, project: str | None = None):
         ).fetchall()
 
 
+# --- the stream ---------------------------------------------------------------
+# One conversation instead of a dozen lists: events, the operator's directions,
+# questions on their way to Harry and the item threads, merged into a single
+# feed. Plain dicts rather than sqlite3.Row, because `action_payload` — what an
+# inline card needs to act on the row — is a dict.
+
+def stream(project: str | None = None, since: str | None = None,
+           kinds=None, limit: int = 200) -> list[dict]:
+    """Rows of (ts, project, who, kind, text, item_key, action_payload).
+
+    Newest first — the transcript view reverses them. `project=None` merges
+    every desk; a name matches exactly, since section-wide rows (empty project)
+    belong to the merged view only. `since` is strictly greater than, `kinds`
+    an iterable of kind names (None means all), `limit` caps the result.
+
+    Kinds are `event`, `direction` (the operator's, pending or answered),
+    `question` (still with Harry or escalated) and whatever an item thread
+    carries: note | finding | plan | ruling | direction | test | event.
+
+    The events `add_direction` and `ask_question` write alongside their
+    questions row are dropped: that row is already here under its own kind,
+    and a transcript that says everything twice is worse than no transcript.
+    """
+    wanted = None if kinds is None else set(kinds)
+    if wanted is not None and not wanted:
+        return []
+    selects, args = [], []
+
+    def scoped(where: list[str], vals: list, ts_col: str) -> str:
+        """Add the project/since bounds shared by all three sources."""
+        if project is not None:
+            where.append("project = ?")
+            vals.append(project)
+        if since:
+            where.append(f"{ts_col} > ?")
+            vals.append(since)
+        args.extend(vals)
+        return (" WHERE " + " AND ".join(where)) if where else ""
+
+    if wanted is None or "event" in wanted:
+        where = ["message NOT LIKE ?", "message NOT LIKE ?"]
+        vals = [DIRECTION_EVENT_PREFIX + "%", "%" + ASK_EVENT_INFIX + "%"]
+        selects.append(
+            "SELECT ts AS ts, project AS project, '' AS who, 'event' AS kind, "
+            "message AS text, '' AS item_key, 0 AS src, id AS rid, "
+            "NULL AS qid, '' AS status, '' AS answer, '' AS options "
+            "FROM events" + scoped(where, vals, "ts"))
+
+    asks = {
+        "direction": "(asked_by = 'operator' "
+                     "AND status IN ('directive', 'answered'))",
+        "question": "(asked_by != 'operator' AND status IN ('open', 'escalated'))",
+    }
+    picked = [clause for k, clause in asks.items()
+              if wanted is None or k in wanted]
+    if picked:
+        selects.append(
+            "SELECT created_at AS ts, project AS project, asked_by AS who, "
+            "CASE WHEN asked_by = 'operator' THEN 'direction' ELSE 'question' "
+            "END AS kind, question AS text, item_key AS item_key, 1 AS src, "
+            "id AS rid, id AS qid, status AS status, answer AS answer, "
+            "options AS options FROM questions"
+            + scoped(["(" + " OR ".join(picked) + ")"], [], "created_at"))
+
+    where, vals = [], []
+    if wanted is not None:
+        where.append("kind IN (%s)" % ", ".join("?" * len(wanted)))
+        vals.extend(sorted(wanted))
+    selects.append(
+        "SELECT created_at AS ts, project AS project, who AS who, kind AS kind, "
+        "text AS text, item_key AS item_key, 2 AS src, id AS rid, NULL AS qid, "
+        "'' AS status, '' AS answer, '' AS options FROM thread"
+        + scoped(where, vals, "created_at"))
+
+    # db.now() is second-resolution, so ties are common: break them on each
+    # table's own id.
+    sql = " UNION ALL ".join(selects) + " ORDER BY ts DESC, src, rid DESC LIMIT ?"
+    args.append(limit)
+    with conn() as c:
+        rows = c.execute(sql, args).fetchall()
+
+    out = []
+    for r in rows:
+        payload = None
+        if r["src"] == 1 and r["kind"] == "question":
+            payload = {"type": "question", "id": r["qid"], "status": r["status"],
+                       "options": question_options(r)}
+        elif r["src"] == 1:
+            payload = {"type": "direction", "id": r["qid"], "status": r["status"],
+                       "reply": r["answer"]}
+        out.append({"ts": r["ts"], "project": r["project"], "who": r["who"],
+                    "kind": r["kind"], "text": r["text"],
+                    "item_key": r["item_key"], "action_payload": payload})
+    return out
+
+
 # --- settings / policy ------------------------------------------------------
 
 def get_setting(key: str, default: str = "") -> str:
@@ -510,6 +606,14 @@ def latest_report(scope: str, project: str = ""):
 
 
 # --- operator-in-the-loop -------------------------------------------------------
+# Both writers below log an event alongside their questions row, so the plain
+# activity list still shows them. `stream()` drops those derived events again —
+# it has the questions row itself. The two shapes live here as constants so the
+# writer and the filter cannot drift apart.
+
+DIRECTION_EVENT_PREFIX = "Operator direction: "
+ASK_EVENT_INFIX = " has asked Harry: "
+
 
 def ask_question(project: str, asked_by: str, item_key: str,
                  question: str, options: list[str] | None = None) -> int | None:
@@ -531,7 +635,7 @@ def ask_question(project: str, asked_by: str, item_key: str,
             (project, asked_by, item_key, question,
              opts if opts != "[]" else "", now()))
         qid = cur.lastrowid
-    log_event(f"{asked_by} has asked Harry: {question[:120]}", project=project)
+    log_event(f"{asked_by}{ASK_EVENT_INFIX}{question[:120]}", project=project)
     return qid
 
 
@@ -624,7 +728,7 @@ def add_direction(project: str, text: str, item_key: str = "",
             (project, item_key, text, now()))
     if item_key and note_thread:
         thread_append(project, item_key, config.OPERATOR, "direction", text)
-    log_event(f"Operator direction: {text[:120]}", project=project)
+    log_event(f"{DIRECTION_EVENT_PREFIX}{text[:120]}", project=project)
 
 
 def pending_directives(project: str | None = None):
