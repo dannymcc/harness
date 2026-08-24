@@ -746,3 +746,28 @@ def test_concurrent_directive_processing_actions_each_direction_once(
                              pipeline.process_directives())
     asyncio.run(both())
     assert actioned == ["paint it blue"]
+
+
+def test_approving_a_held_item_resets_the_breaker_window(fresh_db, may, client):
+    """Two stale failures must not re-hold (and re-page) an item the operator
+    has just deliberately approved — the approval says 'try again'."""
+    from harness import pipeline
+    fresh_db.upsert_item("may", "issue", 9, "t", "a", "open", "x")
+    for _ in range(2):
+        rid = fresh_db.start_run("may", "ic", "issue#9", "fix", "m", "Malcolm")
+        fresh_db.finish_run(rid, False, 0.1, 1, "boom")
+    item = fresh_db.get_item("may", "issue", 9)
+    assert pipeline._breaker_tripped(may, item) is True     # held, as before
+    client.post("/p/may/issue/9/approve")                   # the operator's say-so
+    assert fresh_db.consecutive_failures("may", "issue#9") == 0
+    item = fresh_db.get_item("may", "issue", 9)
+    assert pipeline._breaker_tripped(may, item) is False
+    assert item["status"] == "approved"
+    # a fresh failure after the reset still counts (nudge the clock one
+    # second forward: in the test everything happens inside one second)
+    rid = fresh_db.start_run("may", "ic", "issue#9", "fix", "m", "Malcolm")
+    fresh_db.finish_run(rid, False, 0.1, 1, "boom again")
+    with fresh_db.conn() as c:
+        c.execute("UPDATE runs SET started_at = '2999-01-01T00:00:01Z' "
+                  "WHERE id = ?", (rid,))
+    assert fresh_db.consecutive_failures("may", "issue#9") == 1

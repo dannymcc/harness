@@ -1379,6 +1379,8 @@ def _apply_directive_actions(project, actions: list) -> list[str]:
                           "hold_item": "waiting_human",
                           "retry_item": "approved"}[act]
                 fields = {"status": status}
+                if act in ("approve_item", "retry_item"):
+                    fields["breaker_reset_at"] = db.now()
                 if act == "retry_item":
                     fields.update(error="", session_id="")
                 db.update_item(name, kind, num, **fields)

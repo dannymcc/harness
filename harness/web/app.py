@@ -437,7 +437,8 @@ def item_page(request: Request, name: str, kind: str, number: int):
 def approve(name: str, kind: str, number: int):
     item = db.get_item(name, kind, number)
     unreviewed = bool(item and kind == "pr" and item["status"] == "new")
-    db.update_item(name, kind, number, status="approved", error="")
+    db.update_item(name, kind, number, status="approved", error="",
+                   breaker_reset_at=db.now())
     db.log_event(
         f"{config.OPERATOR} sent {kind}#{number} straight to merge, without "
         "a review — the harness tests it first" if unreviewed

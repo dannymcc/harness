@@ -141,6 +141,7 @@ MIGRATIONS = [
     "ALTER TABLE questions ADD COLUMN options TEXT NOT NULL DEFAULT ''",
     "ALTER TABLE items ADD COLUMN repro_test TEXT NOT NULL DEFAULT ''",
     "ALTER TABLE steers ADD COLUMN resolution TEXT NOT NULL DEFAULT ''",
+    "ALTER TABLE items ADD COLUMN breaker_reset_at TEXT NOT NULL DEFAULT ''",
 ]
 
 
@@ -1015,14 +1016,30 @@ def consecutive_failures(project: str, item_key: str) -> int:
     Runs orphaned by a restart are skipped, not counted: the process was
     killed under the agent, which says nothing about the item. Counting
     them meant two deploys in a row tripped the circuit breaker on
-    whatever happened to be in flight."""
+    whatever happened to be in flight.
+
+    Failures from before the item's last deliberate approval are also
+    ignored: an operator (or Harry) re-approving a held item is saying
+    "try again" — counting the old failures re-held the item and paged
+    the operator before any new attempt had run.
+    """
+    kind, _, number = item_key.partition("#")
+    reset = ""
     with conn() as c:
+        it = c.execute("SELECT breaker_reset_at FROM items WHERE project = ? "
+                       "AND kind = ? AND number = ?",
+                       (project, kind, number)).fetchone()
+        if it:
+            reset = it["breaker_reset_at"] or ""
         rows = c.execute(
-            "SELECT ok, summary FROM runs WHERE project = ? AND item_key = ? "
-            "AND finished_at IS NOT NULL ORDER BY id DESC LIMIT 8",
+            "SELECT ok, summary, started_at FROM runs WHERE project = ? "
+            "AND item_key = ? AND finished_at IS NOT NULL "
+            "ORDER BY id DESC LIMIT 8",
             (project, item_key)).fetchall()
     n = 0
     for r in rows:
+        if reset and r["started_at"] <= reset:
+            break
         if r["summary"] == ORPHANED_SUMMARY:
             continue
         if r["ok"] == 0:
