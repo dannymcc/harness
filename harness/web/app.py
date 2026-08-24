@@ -168,6 +168,7 @@ KANBAN_COLUMNS = [
     ("Inbox", "Ruth", ("new",)),
     ("Assessed", "Ruth", ("triaged",)),
     ("In progress", "Malcolm", ("approved", "working")),
+    ("With Harry", "Harry", ("held",)),
     ("Your decision", "you", ("waiting_human",)),
     ("Blocked", "—", ("blocked",)),
     ("Release queue", "Colin", ("queued",)),
@@ -433,11 +434,44 @@ def item_page(request: Request, name: str, kind: str, number: int):
 
 # --- actions ----------------------------------------------------------------
 
+# NOTE: these two routes MUST be registered before the generic item route
+# below. Starlette matches in registration order, and /p/x/release/8/approve
+# also matches /p/{name}/{kind}/{number}/approve — for months every press of
+# "Merge & tag" was swallowed by the item route as kind='release' and did
+# nothing to the release.
+@app.post("/p/{name}/release/{rid}/approve")
+def approve_release(name: str, rid: int):
+    p = db.get_project(name)
+    release = db.get_release(rid)
+    if p and release and release["status"] == "proposed":
+        # Claim it atomically, then finalize off the request thread —
+        # merging/tagging takes ~30s and a second tap must not double-run.
+        db.update_release(rid, status="merging")
+        db.log_event(f"Operator approved release#{rid}; merging and tagging",
+                     project=name)
+        import threading
+        threading.Thread(target=pipeline.finalize_release, args=(p, release),
+                         daemon=True).start()
+    return RedirectResponse(f"/p/{name}", status_code=303)
+
+
+@app.post("/p/{name}/release/{rid}/abandon")
+def abandon_release(name: str, rid: int):
+    release = db.get_release(rid)
+    if release:
+        db.update_release(rid, status="abandoned")
+        db.log_event(f"Release v{release['version']} abandoned", project=name)
+    return RedirectResponse(f"/p/{name}", status_code=303)
+
+
 @app.post("/p/{name}/{kind}/{number}/approve")
 def approve(name: str, kind: str, number: int):
+    if kind not in ("issue", "pr"):
+        return RedirectResponse(f"/p/{name}", status_code=303)
     item = db.get_item(name, kind, number)
     unreviewed = bool(item and kind == "pr" and item["status"] == "new")
-    db.update_item(name, kind, number, status="approved", error="")
+    db.update_item(name, kind, number, status="approved", error="",
+                   breaker_reset_at=db.now(), breaker_trips=0)
     db.log_event(
         f"{config.OPERATOR} sent {kind}#{number} straight to merge, without "
         "a review — the harness tests it first" if unreviewed
@@ -455,7 +489,11 @@ def reject(name: str, kind: str, number: int):
 
 @app.post("/p/{name}/{kind}/{number}/retry")
 def retry(name: str, kind: str, number: int):
-    db.update_item(name, kind, number, status="new", error="", session_id="")
+    # Starting over is the operator's say-so, so the item's failure history
+    # goes with it: without the reset the old failures trip the breaker
+    # again before the fresh attempt has run.
+    db.update_item(name, kind, number, status="new", error="", session_id="",
+                   breaker_reset_at=db.now(), breaker_trips=0)
     worker.trigger()
     return RedirectResponse(f"/p/{name}/{kind}/{number}", status_code=303)
 
@@ -491,29 +529,6 @@ def request_release(name: str):
     return RedirectResponse(f"/p/{name}", status_code=303)
 
 
-@app.post("/p/{name}/release/{rid}/approve")
-def approve_release(name: str, rid: int):
-    p = db.get_project(name)
-    release = db.get_release(rid)
-    if p and release and release["status"] == "proposed":
-        # Claim it atomically, then finalize off the request thread —
-        # merging/tagging takes ~30s and a second tap must not double-run.
-        db.update_release(rid, status="merging")
-        db.log_event(f"Operator approved release#{rid}; merging and tagging",
-                     project=name)
-        import threading
-        threading.Thread(target=pipeline.finalize_release, args=(p, release),
-                         daemon=True).start()
-    return RedirectResponse(f"/p/{name}", status_code=303)
-
-
-@app.post("/p/{name}/release/{rid}/abandon")
-def abandon_release(name: str, rid: int):
-    release = db.get_release(rid)
-    if release:
-        db.update_release(rid, status="abandoned")
-        db.log_event(f"Release v{release['version']} abandoned", project=name)
-    return RedirectResponse(f"/p/{name}", status_code=303)
 
 
 @app.post("/p/{name}/policy/{key}")
@@ -527,9 +542,15 @@ def set_policy(name: str, key: str, value: str = Form(...)):
 @app.post("/p/{name}/question/{qid}/answer")
 def answer_question(name: str, qid: int, answer: str = Form(...),
                     via: str = ""):
+    q = db.question(qid)
     db.answer_question(qid, answer.strip())
     db.log_event(f"{config.OPERATOR} answered a question: {answer.strip()[:100]}",
                  project=name)
+    if q and pipeline.is_breaker_question(q):
+        # Answering a held item's question over Harry's head still has to
+        # move the item — the option buttons are the same vocabulary he uses.
+        pipeline.apply_breaker_ruling(q, answer.strip(), answer.strip(),
+                                      by=config.OPERATOR)
     worker.trigger()
     if via == "ntfy":  # ntfy http actions want a plain 2xx, not a redirect
         from fastapi.responses import JSONResponse

@@ -35,24 +35,125 @@ def within_active_hours(name: str) -> bool:
         return start <= hour < end
     return hour >= start or hour < end  # overnight range like 22-06
 BREAKER_THRESHOLD = 2  # consecutive failed runs before an item is held
+BREAKER_ASKER = "harness"   # who a circuit-breaker question comes from
+BREAKER_OPTIONS = ["retry", "split", "escalate"]
+MAX_BREAKER_TRIPS = 2       # trips before the item goes to the operator, ruling or no
+
+
+def _failure_digest(name: str, key: str) -> str:
+    """Why this item's last runs failed, as a ruling needs to read it."""
+    lines = []
+    for r in db.recent_failures(name, key, BREAKER_THRESHOLD):
+        who = r["agent"] or r["role"]
+        lines.append(f"- {r['started_at']} {who} ({r['task']}): "
+                     f"{(r['summary'] or 'no cause recorded')[:200]}")
+    return "\n".join(reversed(lines)) or "- (no run summaries recorded)"
 
 
 def _breaker_tripped(project, item) -> bool:
-    """Hold items that keep failing instead of burning retries forever."""
+    """Hold items that keep failing instead of burning retries forever.
+
+    The first trip goes to Harry, not the operator: a question on the item
+    carrying both failures, answered on the next questions pass. He can
+    retry it fresh, tell the desk to split it, or escalate — and only his
+    escalation pages the operator. A second trip after that ruling stops
+    asking and puts the item on the operator's desk, so a retry ruling
+    cannot loop.
+    """
     name = project["name"]
-    key = f"{item['kind']}#{item['number']}"
-    if db.consecutive_failures(name, key) >= BREAKER_THRESHOLD:
-        db.update_item(name, item["kind"], item["number"],
-                       status="waiting_human",
+    kind, number = item["kind"], item["number"]
+    key = f"{kind}#{number}"
+    if db.consecutive_failures(name, key) < BREAKER_THRESHOLD:
+        return False
+    # Read the trip count fresh: a ruling may have landed since the caller
+    # picked this row up.
+    current = db.get_item(name, kind, number) or item
+    trips = (current["breaker_trips"] or 0) + 1
+    digest = _failure_digest(name, key)
+    if trips >= MAX_BREAKER_TRIPS:
+        db.update_item(name, kind, number, status="waiting_human",
+                       breaker_trips=trips,
                        error=f"circuit breaker: {BREAKER_THRESHOLD} consecutive "
-                             "failed runs — held for a human decision")
-        db.log_event(f"Circuit breaker held {key} after repeated failures",
-                     "warn", project=name)
+                             "failed runs again after a ruling — held for "
+                             f"{config.OPERATOR}")
+        db.log_event(f"Circuit breaker held {key} again after a ruling — "
+                     f"{config.OPERATOR}'s decision now", "warn", project=name)
         notify.send(f"Held: {key} ({name})",
-                    "Two consecutive failed runs — needs your look.",
-                    tags="warning", click_path=f"/p/{name}/{item['kind']}/{item['number']}")
+                    "Failed again after Harry's ruling — needs your look.",
+                    tags="warning", click_path=f"/p/{name}/{kind}/{number}")
         return True
-    return False
+    db.update_item(name, kind, number, status="held", breaker_trips=trips,
+                   error=f"circuit breaker: {BREAKER_THRESHOLD} consecutive "
+                         "failed runs — with Harry for a ruling")
+    db.ask_question(
+        name, BREAKER_ASKER, key,
+        f"{key} ({item['title'][:80]}) has failed {BREAKER_THRESHOLD} runs in "
+        f"a row and is held. The failures:\n{digest}\n"
+        "Rule on it: retry (a fresh session on the same item), split (tell "
+        "the desk to break the work up — the right call when a run keeps "
+        "hitting error_max_turns, which means the item is too big rather "
+        "than broken), or escalate if this is genuinely the operator's.",
+        options=BREAKER_OPTIONS)
+    db.log_event(f"Circuit breaker held {key} after repeated failures — "
+                 "asked Harry for a ruling", "warn", project=name)
+    return True
+
+
+def is_breaker_question(q) -> bool:
+    return bool(q["asked_by"] == BREAKER_ASKER and q["item_key"]
+                and q["project"])
+
+
+def apply_breaker_ruling(q, ruling: str, answer: str, by: str = "Harry") -> None:
+    """Carry out a ruling on a held item. `ruling` is one of the breaker
+    options; anything else means no direction was given, so the item goes to
+    the operator rather than sitting held with nobody acting.
+
+    Every branch is an action the GUI could already take — the ruling only
+    chooses between them."""
+    project = db.get_project(q["project"])
+    if not project:
+        return
+    name = project["name"]
+    kind, _, num = q["item_key"].partition("#")
+    item = db.get_item(name, kind, int(num)) if num.isdigit() else None
+    if not item or item["status"] != "held":
+        return  # already moved on (operator click, item closed)
+    ruling = (ruling or "").strip().lower()
+    if ruling == "retry":
+        # Harry's retry deliberately keeps the trip count, so the next trip
+        # on this item is the operator's rather than another ruling. Their
+        # own retry forgives it: they have looked at the thing.
+        _apply_directive_actions(project, [{"action": "retry_item",
+                                            "kind": kind, "number": int(num)}],
+                                 reset_trips=(by == config.OPERATOR))
+        db.log_event(f"{by} sent {q['item_key']} back for a fresh attempt",
+                     project=name)
+        return
+    if ruling == "split":
+        _apply_directive_actions(project, [{"action": "tell_desk",
+                                            "text": f"{q['item_key']}: "
+                                                    + (answer or "split this "
+                                                       "into smaller issues")}])
+        db.update_item(name, kind, int(num),
+                       error=f"held: {by} has told {project['lead_name']} to "
+                             "take this apart")
+        db.log_event(f"{by} sent {q['item_key']} back to "
+                     f"{project['lead_name']} to be split", project=name)
+        return
+    db.update_item(name, kind, int(num), status="waiting_human",
+                   error=f"circuit breaker: held for {config.OPERATOR}"
+                         + (f" — {by}: {answer[:160]}" if answer else ""))
+    if ruling == "escalate":
+        return  # the escalation itself pages the operator
+    db.log_event(f"{by}'s ruling on {q['item_key']} gave no direction "
+                 f"({answer[:80]}) — held for {config.OPERATOR}", "warn",
+                 project=name)
+    if by != config.OPERATOR:
+        notify.send(f"Held: {q['item_key']} ({name})",
+                    f"{by} ruled but gave no direction — needs your look.",
+                    tags="warning",
+                    click_path=f"/p/{name}/{kind}/{num}")
 
 
 PERSONA_MEMORY_KEY = {"Ruth": "analyst", "Malcolm": "engineering",
@@ -1090,6 +1191,9 @@ async def _process_questions_locked(project_name: str | None = None) -> None:
             continue
         _undecided[q["id"]] = _undecided.get(q["id"], 0) + 1
         if _undecided[q["id"]] >= 2:
+            if is_breaker_question(q):
+                # The item cannot sit held with nobody ruling on it.
+                apply_breaker_ruling(q, "escalate", "no ruling after two passes")
             db.escalate_question(q["id"])
             _undecided.pop(q["id"], None)
             db.log_event(f"Harry left {q['asked_by']}'s question undecided "
@@ -1162,6 +1266,11 @@ def _standup_digest() -> str:
         for it in db.items_by_status(name, "blocked"):
             lines.append(f"BLOCKED {it['kind']}#{it['number']} "
                          f"({age_days(it['updated_at'])}): {it['error'][:200]}")
+        for it in db.items_by_status(name, "held"):
+            if it["gh_state"] == "open":
+                lines.append(f"HELD (yours to rule on) {it['kind']}#"
+                             f"{it['number']} ({age_days(it['updated_at'])}): "
+                             f"{it['error'][:200]}")
         for it in db.items_by_status(name, "waiting_human"):
             if it["gh_state"] == "open":
                 lines.append(f"waiting on operator {it['kind']}#{it['number']} "
@@ -1270,7 +1379,13 @@ def _apply_decisions(decisions: list) -> None:
             db.log_event(f"Harry ruled on {q['asked_by']}'s question "
                          f"({q['question'][:60]}…): {d['answer'][:150]}",
                          project=q["project"])
+            if is_breaker_question(q):
+                # A held item needs the ruling carried out, not just recorded.
+                apply_breaker_ruling(q, d.get("item_action", ""),
+                                     d["answer"].strip())
         elif d["action"] == "escalate":
+            if is_breaker_question(q):
+                apply_breaker_ruling(q, "escalate", d.get("answer", "").strip())
             db.escalate_question(q["id"])
             db.log_event(f"Harry escalated {q['asked_by']}'s question to {config.OPERATOR}",
                          "warn", project=q["project"])
@@ -1363,9 +1478,15 @@ async def run_security_review(project) -> None:
 
 # --- operator directives -----------------------------------------------------
 
-def _apply_directive_actions(project, actions: list) -> list[str]:
+def _apply_directive_actions(project, actions: list,
+                             reset_trips: bool = True) -> list[str]:
     """Deterministically execute Harry's directive actions. Every action is
-    something the GUI could already do — no new privileges."""
+    something the GUI could already do — no new privileges.
+
+    `reset_trips` forgives the item's circuit-breaker trips along with the
+    failure window. That is right when the operator says "try again" and
+    wrong for a ruling on a held item, which must not be able to buy itself
+    an unlimited supply of retries."""
     name = project["name"]
     done = []
     for a in actions or []:
@@ -1379,6 +1500,10 @@ def _apply_directive_actions(project, actions: list) -> list[str]:
                           "hold_item": "waiting_human",
                           "retry_item": "approved"}[act]
                 fields = {"status": status}
+                if act in ("approve_item", "retry_item"):
+                    fields["breaker_reset_at"] = db.now()
+                    if reset_trips:
+                        fields["breaker_trips"] = 0
                 if act == "retry_item":
                     fields.update(error="", session_id="")
                 db.update_item(name, kind, num, **fields)

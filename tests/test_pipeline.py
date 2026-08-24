@@ -2,18 +2,152 @@ import datetime as dt
 from unittest.mock import patch
 
 
-def test_circuit_breaker(fresh_db, may):
+def _fail_twice(db, key="issue#9", first="boom", second="boom again"):
+    for summary in (first, second):
+        rid = db.start_run("may", "ic", key, "fix", "m", "Malcolm")
+        db.finish_run(rid, False, 0.1, 1, summary)
+
+
+def test_circuit_breaker_goes_to_harry_not_the_operator(fresh_db, may,
+                                                        monkeypatch):
+    """The first trip is a question for Harry, carrying both failures. The
+    operator hears nothing: that is his ruling to make, not theirs."""
     from harness import pipeline
+    paged = []
+    monkeypatch.setattr(pipeline.notify, "send",
+                        lambda *a, **k: paged.append(a))
     fresh_db.upsert_item("may", "issue", 9, "flaky", "a", "open", "x")
-    for _ in range(2):
-        rid = fresh_db.start_run("may", "ic", "issue#9", "fix", "m", "Malcolm")
-        fresh_db.finish_run(rid, False, 0.1, 1, "boom")
+    _fail_twice(fresh_db, first="error_max_turns: ran out",
+                second="error_max_turns: again")
     item = fresh_db.get_item("may", "issue", 9)
     assert pipeline._breaker_tripped(may, item) is True
-    assert fresh_db.get_item("may", "issue", 9)["status"] == "waiting_human"
+    held = fresh_db.get_item("may", "issue", 9)
+    assert held["status"] == "held" and held["breaker_trips"] == 1
+    assert paged == []
+    q = fresh_db.harry_inbox("may")[0]
+    assert q["asked_by"] == "harness" and q["item_key"] == "issue#9"
+    failures = q["question"].split("The failures:", 1)[1].split("Rule on it")[0]
+    assert failures.count("error_max_turns") == 2   # both runs' error kinds
+    assert fresh_db.question_options(q) == ["retry", "split", "escalate"]
     rid = fresh_db.start_run("may", "ic", "issue#9", "fix", "m", "Malcolm")
     fresh_db.finish_run(rid, True, 0.1, 1, "ok")
     assert fresh_db.consecutive_failures("may", "issue#9") == 0
+
+
+def test_harry_rules_retry_on_a_held_item(fresh_db, may, monkeypatch):
+    """A retry ruling re-approves the item with a cleared session — and does
+    not forgive the trip, so it buys exactly one more attempt."""
+    import asyncio
+    from harness import agents, pipeline
+    monkeypatch.setattr(pipeline.notify, "send", lambda *a, **k: None)
+    fresh_db.upsert_item("may", "issue", 9, "flaky", "a", "open", "x")
+    fresh_db.update_item("may", "issue", 9, status="working",
+                         session_id="sess-1")
+    _fail_twice(fresh_db)
+    pipeline._breaker_tripped(may, fresh_db.get_item("may", "issue", 9))
+    qid = fresh_db.harry_inbox("may")[0]["id"]
+
+    async def fake_rule(inbox, ctx):
+        return {"ok": True, "error": "", "output": {"summary": "", "decisions": [
+            {"question_id": qid, "action": "answer", "item_action": "retry",
+             "answer": "Worth one clean run."}]}}
+    monkeypatch.setattr(agents, "rule_questions", fake_rule)
+    asyncio.run(pipeline.process_questions("may"))
+
+    after = fresh_db.get_item("may", "issue", 9)
+    assert after["status"] == "approved" and after["session_id"] == ""
+    assert after["breaker_trips"] == 1          # the trip stands
+    assert fresh_db.consecutive_failures("may", "issue#9") == 0
+
+
+def test_second_trip_after_a_ruling_goes_to_the_operator(fresh_db, may,
+                                                         monkeypatch):
+    """The hard floor: Harry gets one ruling per item, then it is the
+    operator's, whatever he says."""
+    from harness import pipeline
+    paged = []
+    monkeypatch.setattr(pipeline.notify, "send",
+                        lambda *a, **k: paged.append(a))
+    fresh_db.upsert_item("may", "issue", 9, "flaky", "a", "open", "x")
+    fresh_db.update_item("may", "issue", 9, breaker_trips=1)
+    _fail_twice(fresh_db)
+    item = fresh_db.get_item("may", "issue", 9)
+    assert pipeline._breaker_tripped(may, item) is True
+    after = fresh_db.get_item("may", "issue", 9)
+    assert after["status"] == "waiting_human" and after["breaker_trips"] == 2
+    assert len(paged) == 1                      # the operator is paged
+    assert fresh_db.harry_inbox("may") == []    # and Harry is not asked again
+
+
+def test_harry_rules_split_on_a_held_item(fresh_db, may, monkeypatch):
+    """Split reaches the team lead as a directive; the item stays held
+    rather than being retried into the same wall."""
+    import asyncio
+    from harness import agents, pipeline
+    monkeypatch.setattr(pipeline.notify, "send", lambda *a, **k: None)
+    fresh_db.upsert_item("may", "issue", 9, "huge", "a", "open", "x")
+    _fail_twice(fresh_db)
+    pipeline._breaker_tripped(may, fresh_db.get_item("may", "issue", 9))
+    qid = fresh_db.harry_inbox("may")[0]["id"]
+
+    async def fake_rule(inbox, ctx):
+        return {"ok": True, "error": "", "output": {"summary": "", "decisions": [
+            {"question_id": qid, "action": "answer", "item_action": "split",
+             "answer": "Too big for one run — break it into three."}]}}
+    monkeypatch.setattr(agents, "rule_questions", fake_rule)
+    asyncio.run(pipeline.process_questions("may"))
+
+    assert "issue#9" in fresh_db.get_setting("directives.may")
+    assert "break it into three" in fresh_db.get_setting("directives.may")
+    assert fresh_db.get_item("may", "issue", 9)["status"] == "held"
+
+
+def test_harry_escalating_a_held_item_pages_the_operator(fresh_db, may,
+                                                         monkeypatch):
+    import asyncio
+    from harness import agents, pipeline
+    paged = []
+    monkeypatch.setattr(pipeline.notify, "send",
+                        lambda *a, **k: paged.append(a))
+    fresh_db.upsert_item("may", "issue", 9, "odd", "a", "open", "x")
+    _fail_twice(fresh_db)
+    pipeline._breaker_tripped(may, fresh_db.get_item("may", "issue", 9))
+    assert paged == []
+    qid = fresh_db.harry_inbox("may")[0]["id"]
+
+    async def fake_rule(inbox, ctx):
+        return {"ok": True, "error": "", "output": {"summary": "", "decisions": [
+            {"question_id": qid, "action": "escalate", "answer": ""}]}}
+    monkeypatch.setattr(agents, "rule_questions", fake_rule)
+    asyncio.run(pipeline.process_questions("may"))
+
+    assert len(fresh_db.escalated_questions("may")) == 1
+    assert len(paged) == 1
+    assert fresh_db.get_item("may", "issue", 9)["status"] == "waiting_human"
+
+
+def test_a_ruling_without_a_direction_lands_on_the_operators_desk(
+        fresh_db, may, monkeypatch):
+    """An answer that moves nothing would leave the item held with nobody
+    acting; it goes to the operator instead."""
+    import asyncio
+    from harness import agents, pipeline
+    paged = []
+    monkeypatch.setattr(pipeline.notify, "send",
+                        lambda *a, **k: paged.append(a))
+    fresh_db.upsert_item("may", "issue", 9, "odd", "a", "open", "x")
+    _fail_twice(fresh_db)
+    pipeline._breaker_tripped(may, fresh_db.get_item("may", "issue", 9))
+    qid = fresh_db.harry_inbox("may")[0]["id"]
+
+    async def fake_rule(inbox, ctx):
+        return {"ok": True, "error": "", "output": {"summary": "", "decisions": [
+            {"question_id": qid, "action": "answer", "answer": "Noted."}]}}
+    monkeypatch.setattr(agents, "rule_questions", fake_rule)
+    asyncio.run(pipeline.process_questions("may"))
+
+    assert fresh_db.get_item("may", "issue", 9)["status"] == "waiting_human"
+    assert len(paged) == 1
 
 
 def test_restart_orphans_do_not_trip_the_breaker(fresh_db, may):
@@ -196,7 +330,7 @@ def test_fix_failures_retry_then_breaker(fresh_db, may):
     rid2 = fresh_db.start_run("may", "ic", "issue#20", "fix", "m", "Malcolm")
     fresh_db.finish_run(rid2, False, 0.1, 1, "transport crash again")
     assert pipeline._breaker_tripped(may, item) is True
-    assert fresh_db.get_item("may", "issue", 20)["status"] == "waiting_human"
+    assert fresh_db.get_item("may", "issue", 20)["status"] == "held"
 
 
 def test_dead_session_resumes_fresh_in_the_same_run(fresh_db, may, monkeypatch, tmp_path):
@@ -746,3 +880,29 @@ def test_concurrent_directive_processing_actions_each_direction_once(
                              pipeline.process_directives())
     asyncio.run(both())
     assert actioned == ["paint it blue"]
+
+
+def test_approving_a_held_item_resets_the_breaker_window(fresh_db, may, client):
+    """Two stale failures must not re-hold (and re-page) an item the operator
+    has just deliberately approved — the approval says 'try again'."""
+    from harness import pipeline
+    fresh_db.upsert_item("may", "issue", 9, "t", "a", "open", "x")
+    for _ in range(2):
+        rid = fresh_db.start_run("may", "ic", "issue#9", "fix", "m", "Malcolm")
+        fresh_db.finish_run(rid, False, 0.1, 1, "boom")
+    item = fresh_db.get_item("may", "issue", 9)
+    assert pipeline._breaker_tripped(may, item) is True     # held, as before
+    client.post("/p/may/issue/9/approve")                   # the operator's say-so
+    assert fresh_db.consecutive_failures("may", "issue#9") == 0
+    assert fresh_db.get_item("may", "issue", 9)["breaker_trips"] == 0
+    item = fresh_db.get_item("may", "issue", 9)
+    assert pipeline._breaker_tripped(may, item) is False
+    assert item["status"] == "approved"
+    # a fresh failure after the reset still counts (nudge the clock one
+    # second forward: in the test everything happens inside one second)
+    rid = fresh_db.start_run("may", "ic", "issue#9", "fix", "m", "Malcolm")
+    fresh_db.finish_run(rid, False, 0.1, 1, "boom again")
+    with fresh_db.conn() as c:
+        c.execute("UPDATE runs SET started_at = '2999-01-01T00:00:01Z' "
+                  "WHERE id = ?", (rid,))
+    assert fresh_db.consecutive_failures("may", "issue#9") == 1
