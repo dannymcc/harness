@@ -59,9 +59,25 @@ BLOCKED = [
     "WebFetch", "WebSearch", "Task",
 ]
 # Read-only git inspection: enough to see what moved, never to move anything.
+# Every entry is a subcommand that only reads the object store and prints —
+# none can write a ref, change the working tree, or reach the network. The
+# rules are prefixes, so where a subcommand has a destructive form the prefix
+# is narrowed past it rather than admitting the whole subcommand.
 GIT_READ_RULES = [
-    "Bash(git status:*)", "Bash(git log:*)", "Bash(git diff:*)",
-    "Bash(git show:*)",
+    "Bash(git status:*)",     # prints the working tree state
+    "Bash(git log:*)",        # prints history
+    "Bash(git diff:*)",       # prints a diff; no --exit-code side effects
+    "Bash(git show:*)",       # prints an object
+    "Bash(git rev-list:*)",   # counts commits (ahead/behind, divergence)
+    "Bash(git rev-parse:*)",  # resolves a ref or path to a string
+    "Bash(git ls-files:*)",   # lists tracked paths
+    "Bash(git grep:*)",       # searches a tree, including one Read cannot open
+    # `git branch` and `git tag` have destructive forms (-d/-D/-m, -d), and a
+    # prefix rule cannot exclude a flag, so the prefix stops after the reading
+    # subcommand instead: `--list` and `--contains` cover the uses this desk
+    # actually has (which branches exist, which release contains a commit).
+    "Bash(git branch --list:*)",
+    "Bash(git tag --contains:*)",
 ]
 # Credentials are in the parent process's environment; agent sessions have no
 # business with them. The SDK merges options.env over the inherited

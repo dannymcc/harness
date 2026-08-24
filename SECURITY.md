@@ -29,10 +29,14 @@ Shell access depends on the role, because the roles differ in what they read:
 
 - **Triage, review, planning and security review** read text written by
   anyone on the internet, so they get no general shell. Their `Bash` is an
-  allowlist — the project's configured `test_command`, and read-only `git
-  status` / `log` / `diff` / `show` — and everything else is denied without a
-  prompt. They can still reproduce a report by running the suite; they cannot
-  run `curl`, read a credentials file, or start anything else.
+  allowlist — the project's configured `test_command`, and read-only `git`
+  inspection (`status`, `log`, `diff`, `show`, `rev-list`, `rev-parse`,
+  `ls-files`, `grep`, plus `branch --list` and `tag --contains`) — and
+  everything else is denied without a prompt. Every one of those only reads
+  the object store and prints; the two with destructive forms are allowed
+  only past the reading flag, because a prefix rule cannot exclude `-d`.
+  They can still reproduce a report by running the suite; they cannot run
+  `curl`, read a credentials file, or start anything else.
 - **Fix and release** keep a general shell: they have to run builds,
   installs and test suites. This is accepted residual risk. What contains
   them is not the tool policy but the disposable worktree they work in, the

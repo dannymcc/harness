@@ -82,6 +82,46 @@ def test_the_analyst_can_still_reproduce(opts, may):
     assert _allows(rules, "git log --oneline -20")
 
 
+def test_the_analyst_can_check_divergence_and_search_history(opts):
+    """issue #43: rev-list/branch/tag/grep are read-only and should be allowed
+    for readonly roles, so triage/planning don't have to fall back to git log
+    gymnastics to answer routine questions like ahead/behind counts."""
+    rules = [t for t in opts.allowed_tools if t.startswith("Bash")]
+    assert _allows(rules,
+        "git rev-list --left-right --count origin/main...origin/dev")
+    assert _allows(rules, "git grep -n TODO")
+    assert _allows(rules, "git branch --list -a")
+    assert _allows(rules, "git tag --contains abc123")
+
+
+def test_the_read_only_git_rules_are_all_there(opts):
+    """The widened set, pinned: dropping one silently is a regression."""
+    from harness import agents
+    rules = [t for t in opts.allowed_tools if t.startswith("Bash")]
+    for rule in ("Bash(git rev-list:*)", "Bash(git rev-parse:*)",
+                 "Bash(git ls-files:*)", "Bash(git grep:*)",
+                 "Bash(git branch --list:*)", "Bash(git tag --contains:*)"):
+        assert rule in agents.GIT_READ_RULES and rule in rules
+    assert _allows(rules, "git rev-parse --abbrev-ref HEAD")
+    assert _allows(rules, "git ls-files harness")
+
+
+@pytest.mark.parametrize("mutating", [
+    "git branch -d topic",
+    "git branch -D topic",
+    "git branch -m old new",
+    "git branch --delete topic",
+    "git tag -d v1.0.0",
+    "git tag v1.0.0",
+    "git tag --delete v1.0.0",
+])
+def test_the_mutating_forms_of_branch_and_tag_stay_out(opts, mutating):
+    """Why the prefixes stop at `--list` / `--contains`: a prefix rule cannot
+    exclude a flag, so `Bash(git branch:*)` would admit `git branch -D` too."""
+    rules = [t for t in opts.allowed_tools if t.startswith("Bash")]
+    assert not _allows(rules, mutating)
+
+
 def test_a_shell_flavoured_test_command_does_not_widen_the_allowlist(may):
     from harness import agents
     project = dict(may)

@@ -4,6 +4,28 @@ All notable changes to Harness are recorded here. The format is
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project
 follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.16.0] - 2026-08-24
+
+### Added
+
+- **The read-only roles can now inspect git properly.** Triage, review,
+  planning and security review get no general shell — only the project's test
+  command and a short allowlist of read-only `git`. That list was narrower
+  than its own intent: it held `status`, `log`, `diff` and `show`, so a
+  planning session could not run
+  `git rev-list --left-right --count origin/main...origin/dev`, the ordinary
+  way to ask whether dev and main have diverged, nor list branches, search a
+  tree, or check which tag contains a commit. `rev-list`, `rev-parse`,
+  `ls-files` and `grep` are now allowed outright: none has a destructive
+  form, and none can move a ref or reach the network. `branch` and `tag` do
+  have destructive forms, and an allowlist rule is a prefix match that cannot
+  exclude a flag, so those two stop past the reading flag — `git branch
+  --list` and `git tag --contains` only, which covers the read uses without
+  admitting `git branch -D` alongside them. Tests pin the new rules, the read
+  forms, and that the mutating forms still match nothing; SECURITY.md named
+  the old four subcommands explicitly and has been brought back into line
+  (issue #43).
+
 ## [0.15.2] - 2026-08-24
 
 ### Fixed
