@@ -471,8 +471,17 @@ async def fix_item(project, item, persona: str = "Malcolm") -> None:
     if not landed:
         db.update_item(name, "issue", item["number"], status="approved",
                        diff=diff, error=err[:2000])
-        db.log_event(f"Issue #{item['number']}: {err[:120]} — retrying "
+        db.thread_append(name, key, "harness", "event",
+                         f"Tests passed but the fix did not land on "
+                         f"{project['dev_branch']}:\n{err[:1200]}")
+        db.log_event(f"Issue #{item['number']}: {err[:160]} — retrying "
                      "next cycle", "warn", project=name)
+        if repo.SAFETY_PUSH_FAILED in err:
+            # The one case where the commit exists nowhere but this box:
+            # say so plainly rather than leave it inside a truncated error.
+            db.log_event(f"Issue #{item['number']}: the fix could not be "
+                         f"pushed to origin/{branch} either — it exists only "
+                         "in the worktree on this box", "warn", project=name)
         return
     repo.remove_worktree(project, wt)
     db.update_item(
