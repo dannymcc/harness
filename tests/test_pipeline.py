@@ -709,12 +709,13 @@ def test_lead_opens_tracking_issues(fresh_db, may, monkeypatch):
         {"title": "Cover policy-gates with tests!", "body": "again"}])
     assert len(created) == 1
     # the daily cap holds, and the policy can switch it off entirely
+    cap = pipeline.TRACKING_ISSUES_PER_DAY
     pipeline._open_tracking_issues(may, [
-        {"title": f"Issue {n}", "body": "b"} for n in range(3)])
-    assert len(created) == 3   # 1 + 2 more = cap of 3 per day
+        {"title": f"Issue {n}", "body": "b"} for n in range(cap)])
+    assert len(created) == cap   # 1 + (cap - 1) more = the daily cap
     fresh_db.set_policy("may", "file_issues", "off")
     pipeline._open_tracking_issues(may, [{"title": "Nope", "body": "b"}])
-    assert len(created) == 3
+    assert len(created) == cap
 
 
 def test_reconcile_branches_logs(fresh_db, may, monkeypatch):
@@ -1197,3 +1198,54 @@ def test_salvaged_work_from_a_previous_attempt_is_named_on_the_thread(
 
     assert any("harness/issue-63-attempt-1" in r["text"]
                for r in fresh_db.thread("may", "issue#63"))
+
+
+def test_tracking_issue_cap_raised_and_names_dropped_title(fresh_db, may, monkeypatch):
+    """Issue #65: the daily filing cap was tuned too low (3) and, when it
+    bit, the warn event didn't say which tracking issue got dropped — the
+    content of the dropped issue was lost. The cap should be 6, and the
+    drop event should name the title."""
+    from harness import pipeline, gh
+    created = []
+    monkeypatch.setattr(gh, "create_issue",
+                        lambda repo, t, b: created.append((t, b)) or 41 + len(created))
+    assert pipeline.TRACKING_ISSUES_PER_DAY == 6
+
+    # fill the cap exactly
+    pipeline._open_tracking_issues(may, [
+        {"title": f"Issue {n}", "body": "b"}
+        for n in range(pipeline.TRACKING_ISSUES_PER_DAY)])
+    assert len(created) == pipeline.TRACKING_ISSUES_PER_DAY
+
+    # one more, over the cap: dropped, and the drop is named
+    pipeline._open_tracking_issues(may, [
+        {"title": "Dropped tracking issue", "body": "b"}])
+    assert len(created) == pipeline.TRACKING_ISSUES_PER_DAY  # still not filed
+
+    events = fresh_db.recent_events(5, "may")
+    assert any("Dropped tracking issue" in e["message"]
+               and "cap (6)" in e["message"]
+               for e in events), [e["message"] for e in events]
+
+
+def test_tracking_issue_cap_keeps_the_first_listed_issue(fresh_db, may,
+                                                         monkeypatch):
+    """Issue #65: the loop walks new_issues in order and breaks on the cap,
+    so when only one slot is left the first-listed issue is the one that
+    survives — that ordering is how the desk protects its most important
+    filing."""
+    from harness import pipeline, gh
+    created = []
+    monkeypatch.setattr(gh, "create_issue",
+                        lambda repo, t, b: created.append((t, b)) or 41 + len(created))
+    pipeline._open_tracking_issues(may, [
+        {"title": f"Filler {n}", "body": "b"}
+        for n in range(pipeline.TRACKING_ISSUES_PER_DAY - 1)])
+    assert len(created) == pipeline.TRACKING_ISSUES_PER_DAY - 1
+
+    pipeline._open_tracking_issues(may, [{"title": "Important", "body": "b"},
+                                         {"title": "Less so", "body": "b"}])
+    assert [t for t, _ in created][-1] == "Important"   # first listed survives
+    assert "Less so" not in [t for t, _ in created]
+    assert any("Less so" in e["message"]
+               for e in fresh_db.recent_events(5, "may"))

@@ -14,7 +14,7 @@ from .agents import AgentStalled
 from .gh import CmdError
 
 MAX_AGENT_TASKS_PER_CYCLE = 5
-TRACKING_ISSUES_PER_DAY = 3   # per desk; a lead filing issues is bounded work
+TRACKING_ISSUES_PER_DAY = 6   # per desk; a lead filing issues is bounded work
 
 
 def within_active_hours(name: str) -> bool:
@@ -1198,14 +1198,14 @@ def _open_tracking_issues(project, new_issues) -> None:
     filed_today = sum(1 for i in items
                       if i["author"] == project["lead_name"]
                       and i["created_at"] >= day_ago)
-    for ni in new_issues[:3]:
-        if filed_today >= TRACKING_ISSUES_PER_DAY:
-            db.log_event(f"{project['lead_name']} wanted to open another "
-                         "tracking issue but the desk's daily cap "
-                         f"({TRACKING_ISSUES_PER_DAY}) is reached", "warn",
-                         project=name)
-            break
+    for ni in new_issues[:TRACKING_ISSUES_PER_DAY]:
         title = (ni.get("title") or "").strip()
+        if filed_today >= TRACKING_ISSUES_PER_DAY:
+            db.log_event(f"{project['lead_name']} wanted to open "
+                         f"'{title[:80]}' but the desk's daily cap "
+                         f"({TRACKING_ISSUES_PER_DAY}) is reached — not filed",
+                         "warn", project=name)
+            break
         body = (ni.get("body") or "").strip()
         if not title or not body or norm(title) in existing:
             continue  # already filed (plan re-run, or a human beat us to it)

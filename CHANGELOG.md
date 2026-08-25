@@ -4,6 +4,26 @@ All notable changes to Harness are recorded here. The format is
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project
 follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.20.3] - 2026-08-25
+
+### Fixed
+
+- **The desk's daily cap on tracking issues is now six, and a dropped issue is
+  named.** A team lead may open tracking issues from its plan, bounded so a
+  planning run cannot flood the repo, but the bound was tuned too low at three
+  a day and the per-call slice hard-coded the same number separately, so the
+  effective headroom stayed at three even once the constant moved. Both now
+  read the one constant, `TRACKING_ISSUES_PER_DAY`, raised to six. When the cap
+  does bite, the warn event said only that the lead "wanted to open another
+  tracking issue" — what it wanted to file was lost, and the line read as
+  noise. The event now quotes the dropped title and says plainly that it was
+  not filed, so you can file it yourself or wait for tomorrow. Ordering is
+  unchanged: the loop walks the plan's issues in order and stops at the cap, so
+  the first-listed issue is the one that survives the last slot (issue #65).
+
+- The operator-facing description of the file-issues policy in Settings still
+  said "capped at three a day"; it now matches the code.
+
 ## [0.20.2] - 2026-08-25
 
 ### Fixed
