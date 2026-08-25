@@ -1021,3 +1021,71 @@ def test_blocker_that_is_dropped_is_not_carried_further(fresh_db, may,
     assert "Spend is drifting" in seen2[0]
     asyncio.run(pipeline.run_standup(force=True))
     assert "Spend is drifting" not in seen2[1]
+
+
+def test_directive_close_item_closes_a_shipped_issue(fresh_db, may,
+                                                     monkeypatch):
+    """The close-out verb: an item whose fix already shipped leaves every
+    queue, and its issue is closed on GitHub with the reason attached, so
+    the next plan does not put an engineer back on finished work."""
+    from harness import pipeline, gh
+    closed = []
+    monkeypatch.setattr(gh, "close_issue",
+                        lambda repo, n, comment="": closed.append((repo, n, comment)))
+    fresh_db.upsert_item("may", "issue", 302, "Already fixed", "alice",
+                         "open", "x")
+    fresh_db.update_item("may", "issue", 302, status="waiting_human",
+                         error="agent reported success but made no changes — "
+                               "needs a human look",
+                         session_id="s-1")
+    done = pipeline._apply_directive_actions(may, [
+        {"action": "close_item", "kind": "issue", "number": 302,
+         "reason": "shipped in v0.38.1, commit 64710b0"},
+        {"action": "close_item", "kind": "issue", "number": 999},  # skipped
+    ])
+    item = fresh_db.get_item("may", "issue", 302)
+    assert item["status"] == "closed" and item["gh_state"] == "closed"
+    assert item["error"] == "" and item["session_id"] == ""
+    assert closed == [("example/may", 302,
+                       "Closed as already shipped: shipped in v0.38.1, "
+                       "commit 64710b0")]
+    assert len(done) == 1 and "closed issue#302" in done[0]
+    # And it is out of sight: no queue holds it and the lead's digest, which
+    # lists every item GitHub still calls open, no longer mentions it.
+    assert not fresh_db.items_by_status("may", "new", "approved", "queued",
+                                        "waiting_human")
+    assert "issue#302" not in pipeline._state_digest(may)
+
+
+def test_close_item_leaves_pull_requests_on_github_alone(fresh_db, may,
+                                                         monkeypatch):
+    """Closing a PR item takes it off our board; closing someone else's pull
+    request is not ours to do."""
+    from harness import pipeline, gh
+    calls = []
+    monkeypatch.setattr(gh, "close_issue",
+                        lambda *a, **k: calls.append(a))
+    fresh_db.upsert_item("may", "pr", 12, "Contributor PR", "bob", "open", "x")
+    assert pipeline.close_item(may, "pr", 12, "merged by hand")
+    item = fresh_db.get_item("may", "pr", 12)
+    assert item["status"] == "closed" and item["gh_state"] == "open"
+    assert calls == []
+
+
+def test_close_item_survives_a_failed_github_close(fresh_db, may, monkeypatch):
+    """GitHub refusing the close must not strand the item mid-air: the board
+    moves on and the operator is told the GitHub side did not take."""
+    from harness import pipeline, gh
+    from harness.gh import CmdError
+
+    def boom(repo, n, comment=""):
+        raise CmdError(["gh", "issue", "close", str(n)], 1, "", "not found")
+
+    monkeypatch.setattr(gh, "close_issue", boom)
+    fresh_db.upsert_item("may", "issue", 40, "t", "alice", "open", "x")
+    assert pipeline.close_item(may, "issue", 40)
+    item = fresh_db.get_item("may", "issue", 40)
+    assert item["status"] == "closed" and item["gh_state"] == "open"
+    assert any("GitHub close failed" in e["message"]
+               for e in fresh_db.recent_events(20, "may"))
+    assert not pipeline.close_item(may, "issue", 41)   # unknown item

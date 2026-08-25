@@ -1665,6 +1665,41 @@ async def run_security_review(project) -> None:
                  f"finding(s), {len(serious)} serious", project=name)
 
 
+# --- closing an item out -----------------------------------------------------
+
+def close_item(project, kind: str, number: int, reason: str = "") -> bool:
+    """Finish an item that is already done: the fix shipped some other way,
+    or the work has landed and only the paperwork is outstanding.
+
+    Closed is not rejected. Rejected means we are not doing the work; closed
+    means it is done. An issue is closed on GitHub too, because an issue
+    left open comes back round the loop — sync keeps it, the lead's state
+    digest still lists it, and the next plan puts an engineer back on
+    finished work. A PR is only closed on our board: closing someone else's
+    PR is not ours to do.
+
+    Returns False for an item we don't know about."""
+    name = project["name"]
+    item = db.get_item(name, kind, number)
+    if not item:
+        return False
+    reason = (reason or "").strip()
+    fields = {"status": "closed", "error": "", "session_id": ""}
+    if kind == "issue" and item["gh_state"] == "open":
+        comment = (f"Closed as already shipped: {reason}" if reason
+                   else "Closed: this work is already done.")
+        try:
+            gh.close_issue(project["repo"], number, comment)
+            fields["gh_state"] = "closed"
+        except CmdError as e:
+            # Local status still moves — the item must leave the queues
+            # either way — but the operator needs to know GitHub didn't take.
+            db.log_event(f"Closed {kind}#{number} on the board but the "
+                         f"GitHub close failed: {e}", "warn", project=name)
+    db.update_item(name, kind, number, **fields)
+    return True
+
+
 # --- operator directives -----------------------------------------------------
 
 def _apply_directive_actions(project, actions: list,
@@ -1697,6 +1732,12 @@ def _apply_directive_actions(project, actions: list,
                     fields.update(error="", session_id="")
                 db.update_item(name, kind, num, **fields)
                 done.append(f"{act} {kind}#{num}")
+            elif act == "close_item":
+                kind, num = a.get("kind"), a.get("number")
+                why = (a.get("reason") or "").strip()
+                if kind and num and close_item(project, kind, num, why):
+                    done.append(f"closed {kind}#{num} as done"
+                                + (f": {why[:80]}" if why else ""))
             elif act in ("hire", "stand_down", "reinstate"):
                 if a.get("name"):
                     _apply_staffing([{"project": name, "action": act,
