@@ -386,7 +386,8 @@ def test_dead_session_resumes_fresh_in_the_same_run(fresh_db, may, monkeypatch, 
     monkeypatch.setattr(gh, "issue_detail",
                         lambda repo_, number: {"number": 30, "title": "t",
                                                "body": "b"})
-    monkeypatch.setattr(repo, "add_worktree", lambda project, branch: tmp_path)
+    monkeypatch.setattr(repo, "add_worktree",
+                        lambda project, branch: (tmp_path, ""))
     monkeypatch.setattr(repo, "wt_has_changes", lambda project, wt: True)
     monkeypatch.setattr(repo, "run_tests",
                         lambda project, cwd=None, setup=True, scratch=None:
@@ -445,7 +446,8 @@ def test_dead_session_retries_once_and_only_for_that_error(fresh_db, may,
     monkeypatch.setattr(gh, "issue_detail",
                         lambda repo_, number: {"number": number, "title": "t",
                                                "body": "b"})
-    monkeypatch.setattr(repo, "add_worktree", lambda project, branch: tmp_path)
+    monkeypatch.setattr(repo, "add_worktree",
+                        lambda project, branch: (tmp_path, ""))
 
     calls = []
 
@@ -1105,7 +1107,8 @@ def test_a_stranded_fix_gets_its_own_warn_event(fresh_db, may, monkeypatch,
     monkeypatch.setattr(gh, "issue_detail",
                         lambda repo_, number: {"number": 64, "title": "t",
                                                "body": "b"})
-    monkeypatch.setattr(repo, "add_worktree", lambda project, branch: tmp_path)
+    monkeypatch.setattr(repo, "add_worktree",
+                        lambda project, branch: (tmp_path, ""))
     monkeypatch.setattr(repo, "wt_has_changes", lambda project, wt: True)
     monkeypatch.setattr(repo, "run_tests",
                         lambda project, cwd=None, setup=True, scratch=None:
@@ -1147,3 +1150,50 @@ def test_a_stranded_fix_gets_its_own_warn_event(fresh_db, may, monkeypatch,
                 in e["message"]]
     assert len(stranded) == 1 and stranded[0]["level"] == "warn"
     assert "only in the worktree on this box" in stranded[0]["message"]
+
+
+def test_salvaged_work_from_a_previous_attempt_is_named_on_the_thread(
+        fresh_db, may, monkeypatch, tmp_path):
+    """A retry cuts the branch from dev again, so add_worktree's note about
+    where the last attempt's work was kept has to reach the thread — that is
+    the only place a human can find the ref. (Issue #63.)"""
+    import asyncio
+    from harness import agents, gh, pipeline, repo
+
+    fresh_db.upsert_item("may", "issue", 63, "retried", "a", "open", "x")
+    fresh_db.update_item("may", "issue", 63, status="approved", plan="do it")
+
+    monkeypatch.setattr(gh, "issue_detail",
+                        lambda repo_, number: {"number": 63, "title": "t",
+                                               "body": "b"})
+    monkeypatch.setattr(
+        repo, "add_worktree",
+        lambda project, branch: (
+            tmp_path, "The previous attempt's commits were preserved on "
+                      "harness/issue-63-attempt-1 (abc12345)."))
+    monkeypatch.setattr(repo, "wt_has_changes", lambda project, wt: True)
+    monkeypatch.setattr(repo, "run_tests",
+                        lambda project, cwd=None, setup=True, scratch=None:
+                        (True, "ok"))
+    monkeypatch.setattr(repo, "wt_diff",
+                        lambda project, wt: ("1 file changed", "diff"))
+    monkeypatch.setattr(repo, "wt_commit_all",
+                        lambda project, wt, message: None)
+    monkeypatch.setattr(repo, "remove_worktree", lambda project, wt: None)
+    monkeypatch.setattr(repo, "push_worktree_to_dev",
+                        lambda project, wt, branch: (True, ""))
+
+    async def fake_fix_issue(project, issue, plan, cwd, resume=None,
+                             persona="Malcolm", repro_path=""):
+        rid = fresh_db.start_run("may", "ic", "issue#63", "fix", "m", persona)
+        fresh_db.finish_run(rid, True, 0.1, 1, "fixed it")
+        return {"ok": True, "error": "", "session_id": "s",
+                "output": {"success": True, "summary": "fixed it",
+                           "docs_updated": False, "notes": "",
+                           "commit_message": "fix: issue #63 (#63)"}}
+
+    monkeypatch.setattr(agents, "fix_issue", fake_fix_issue)
+    asyncio.run(pipeline.fix_item(may, fresh_db.get_item("may", "issue", 63)))
+
+    assert any("harness/issue-63-attempt-1" in r["text"]
+               for r in fresh_db.thread("may", "issue#63"))

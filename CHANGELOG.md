@@ -4,6 +4,28 @@ All notable changes to Harness are recorded here. The format is
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project
 follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.20.2] - 2026-08-25
+
+### Fixed
+
+- **A retried fix no longer throws away what the last attempt wrote.** Every
+  dispatch cuts the fix branch fresh from `origin/dev` — `add_worktree` uses
+  `git worktree add -B` and clears the old worktree with `--force` — so when a
+  fix went back for another go, the previous attempt's commits, and any
+  uncommitted work sitting in its worktree, went under the reset without a
+  word. `add_worktree` now looks before it resets. Uncommitted changes in the
+  outgoing worktree are committed as work-in-progress first; then, if the
+  branch tip holds anything `origin/dev` does not already contain, that tip is
+  kept on a local `harness/issue-N-attempt-<n>` branch. The sentence saying
+  where the work went comes back alongside the worktree and `fix_item` writes
+  it to the item thread, so the retry names its predecessor's branch instead of
+  leaving you to go looking. Work `origin/dev` already has is not given a ref —
+  resetting to it loses nothing — and a tip already sitting on an earlier
+  attempt branch is not copied again. Anything other than a clean zero from the
+  ahead-count, a git error included, counts as work worth keeping: guessing
+  wrong in that direction is what loses commits. A tip that cannot be saved
+  raises rather than let the reset go ahead (issue #63).
+
 ## [0.20.1] - 2026-08-25
 
 ### Fixed

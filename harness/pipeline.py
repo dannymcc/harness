@@ -358,9 +358,13 @@ async def fix_item(project, item, persona: str = "Malcolm") -> None:
     key = f"issue#{item['number']}"
     detail = gh.issue_detail(project["repo"], item["number"])
     branch = f"harness/issue-{item['number']}"
-    wt = repo.add_worktree(project, branch)
+    wt, salvage = repo.add_worktree(project, branch)
     db.update_item(name, "issue", item["number"], status="working",
                    branch=branch)
+    if salvage:
+        # The branch is cut fresh from dev on every dispatch, so a retry has
+        # to say where the last attempt's work went.
+        db.thread_append(name, key, "harness", "event", salvage)
     repro_path = ""
     if item["repro_test"]:
         try:
