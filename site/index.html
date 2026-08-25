@@ -789,8 +789,10 @@
             <h3>The fix is written in isolation</h3>
             <p>Each engineer works in their own git worktree, so fixes run in
               parallel without treading on each other. Landing on <code>dev</code>
-              is serialised: rebase and re-test when it has moved, conflicts held
-              for a human.</p>
+              is serialised: rebase and re-test when it has moved. A fix that
+              cannot land — a conflict, red tests after the rebase — is pushed
+              to its own branch on your remote for a human, never left on the
+              box.</p>
           </div>
         </div>
         <div class="step">

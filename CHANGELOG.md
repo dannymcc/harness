@@ -4,6 +4,27 @@ All notable changes to Harness are recorded here. The format is
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project
 follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.20.1] - 2026-08-25
+
+### Fixed
+
+- **A fix that cannot land on dev is now parked on its own remote branch
+  instead of being thrown away.** A fix only reached your remote by landing on
+  dev. If it could not — the rebase onto a moved dev conflicted, the rebased
+  code went red, the push failed for some other reason, or dev kept moving
+  through all three attempts — the item was set back to `approved` and retried
+  next cycle, and the next dispatch recreated the worktree from `origin/dev`.
+  The commit that had already passed the harness's own test run existed only
+  on the box, and then it didn't. Every give-up path in
+  `repo.push_worktree_to_dev` now force-pushes the commit to
+  `harness/issue-N` on your remote first, and the failure reported against the
+  item names the branch it went to; the same text is written to the item
+  thread, so it survives the truncation on the item's error field. If even
+  that push is refused, a second warn event says so plainly — that is the one
+  case where the work really is only on this box, and it no longer hides
+  inside a truncated error string. A clean land is unchanged: it still goes
+  straight to dev and still removes the worktree (issue #64).
+
 ## [0.20.0] - 2026-08-25
 
 ### Added
