@@ -168,13 +168,46 @@ def wt_diff(project, wt: Path) -> tuple[str, str]:
     return stat, diff
 
 
+# Marker for "the fix could not be parked on its own branch either", so
+# pipeline.py can raise its own warn event for the one case where the work
+# really is only on this box. Keep the two in step.
+SAFETY_PUSH_FAILED = "the safety push failed too"
+
+
+def _park_on_branch(project, wt: Path, branch: str, reason: str,
+                    detail: str = "") -> str:
+    """Push a fix that cannot land on dev to origin/<branch> instead.
+
+    The commit has already passed the deterministic gate, and the next
+    dispatch for the item recreates the worktree from origin/dev, so a
+    commit left only here is a commit about to be destroyed. Forced,
+    because the branch is harness's own scratch for this one item and the
+    attempt being reported is the current one.
+
+    Returns the failure reason with where the work went appended — the
+    caller hands that straight back as its error string.
+    """
+    try:
+        with clone_lock(project):
+            run(["git", "push", "--force", "origin",
+                 f"HEAD:refs/heads/{branch}"], cwd=wt)
+        where = f"pushed to origin/{branch} for a human to pick up"
+    except (CmdError, OSError, subprocess.TimeoutExpired) as e:
+        where = (f"{SAFETY_PUSH_FAILED} ({str(e)[:200]}) — the fix exists "
+                 "only in the worktree on this box")
+    return f"{reason} — {where}" + (f":\n{detail}" if detail else "")
+
+
 def push_worktree_to_dev(project, wt: Path,
                          branch: str) -> tuple[bool, str]:
     """Land a finished worktree branch on dev, serialised via the clone lock.
 
     If dev moved (a parallel engineer landed first), rebase and re-run the
     tests before pushing — the deterministic gate applies to what actually
-    lands, not what was built."""
+    lands, not what was built.
+
+    Every path that gives up parks the commit on origin/<branch> first (see
+    _park_on_branch); the returned error names where it went."""
     dev = project["dev_branch"]
     for _ in range(3):
         run(["git", "fetch", "origin"], cwd=wt)
@@ -185,11 +218,15 @@ def push_worktree_to_dev(project, wt: Path,
                 run(["git", "rebase", f"origin/{dev}"], cwd=wt)
             except CmdError:
                 run(["git", "rebase", "--abort"], cwd=wt, check=False)
-                return False, f"rebase onto moved {dev} conflicted"
+                return False, _park_on_branch(
+                    project, wt, branch,
+                    f"rebase onto moved {dev} conflicted")
             ok, out = run_tests(project, cwd=wt, setup=False)
             if not ok:
-                return False, ("tests failed after rebase onto moved "
-                               f"{dev}:\n" + out[-800:])
+                return False, _park_on_branch(
+                    project, wt, branch,
+                    f"tests failed after rebase onto moved {dev}",
+                    out[-800:])
         try:
             with clone_lock(project):
                 run(["git", "push", "origin", f"HEAD:{dev}"], cwd=wt)
@@ -197,8 +234,10 @@ def push_worktree_to_dev(project, wt: Path,
         except CmdError as e:
             if "rejected" in (e.err or "") or "fetch first" in (e.err or ""):
                 continue  # dev moved again while we were testing; go around
-            return False, f"push failed: {e}"
-    return False, f"could not land on {dev} after 3 attempts"
+            return False, _park_on_branch(project, wt, branch,
+                                          f"push failed: {str(e)[:300]}")
+    return False, _park_on_branch(project, wt, branch,
+                                  f"could not land on {dev} after 3 attempts")
 
 
 def reconcile_dev(project) -> str:

@@ -133,3 +133,89 @@ def test_pr_code_is_tested_in_a_disposable_clone(project, origin):
     # harness's own clone is untouched by any of it
     assert (clone / ".git").is_dir()
     assert not (clone / ".git" / "hooks" / "pre-commit").exists()
+
+
+# --- landing on a moved dev: the failure paths must not strand the fix -----
+
+def test_failed_land_pushes_a_safety_branch_and_says_so(project, origin, tmp_path):
+    """If push_worktree_to_dev can't land the commit on dev (here: the rebase
+    onto a moved dev conflicts), the commit must not be left existing only in
+    the worktree on this box. It has to be pushed to a remote branch (named
+    after the `branch` argument already passed in) before the failure is
+    reported, and the returned error has to name that branch so a human can
+    find the work."""
+    from harness import repo
+
+    branch = "harness/issue-9"
+    wt = tmp_path / "wt"
+    _git("clone", "-q", str(origin), str(wt), cwd=tmp_path)
+    _git("checkout", "-q", "-b", branch, "origin/dev", cwd=wt)
+    (wt / "README.md").write_text("mine\n")
+    _git("add", "-A", cwd=wt)
+    _git("commit", "-qm", "fix: mine", cwd=wt)
+    local_head = subprocess.run(
+        ["git", "rev-parse", "HEAD"], cwd=wt,
+        capture_output=True, text=True).stdout.strip()
+
+    # Someone else lands a conflicting change on dev first, so the rebase
+    # below can't go cleanly.
+    other = tmp_path / "other"
+    _git("clone", "-q", str(origin), str(other), cwd=tmp_path)
+    _git("checkout", "-q", "dev", cwd=other)
+    (other / "README.md").write_text("theirs\n")
+    _git("add", "-A", cwd=other)
+    _git("commit", "-qm", "conflicting change", cwd=other)
+    _git("push", "-q", "origin", "dev", cwd=other)
+
+    ok, err = repo.push_worktree_to_dev(project, wt, branch)
+
+    assert not ok
+    assert "conflicted" in err
+    # The error must name where the work went...
+    assert branch in err
+    # ...because it actually has to be on origin.
+    _git("fetch", "-q", "origin", cwd=wt)
+    remote_head = subprocess.run(
+        ["git", "rev-parse", f"origin/{branch}"], cwd=wt,
+        capture_output=True, text=True).stdout.strip()
+    assert remote_head == local_head
+
+
+def test_a_failed_safety_push_is_reported_as_such(project, origin, tmp_path):
+    """If the fix cannot even be parked on its own branch, the error must say
+    so distinctly — that is the one case where the commit exists nowhere but
+    this box, and it must not read like a tidy hand-off."""
+    from harness import repo
+
+    branch = "harness/issue-9"
+    wt = tmp_path / "wt"
+    _git("clone", "-q", str(origin), str(wt), cwd=tmp_path)
+    _git("checkout", "-q", "-b", branch, "origin/dev", cwd=wt)
+    (wt / "README.md").write_text("mine\n")
+    _git("add", "-A", cwd=wt)
+    _git("commit", "-qm", "fix: mine", cwd=wt)
+
+    other = tmp_path / "other"
+    _git("clone", "-q", str(origin), str(other), cwd=tmp_path)
+    _git("checkout", "-q", "dev", cwd=other)
+    (other / "README.md").write_text("theirs\n")
+    _git("add", "-A", cwd=other)
+    _git("commit", "-qm", "conflicting change", cwd=other)
+    _git("push", "-q", "origin", "dev", cwd=other)
+
+    # Origin now refuses every push (a protected ref, a wedged remote, no
+    # credentials — from here they all look the same).
+    hook = origin / "hooks" / "pre-receive"
+    hook.parent.mkdir(exist_ok=True)
+    hook.write_text("#!/bin/sh\nexit 1\n")
+    hook.chmod(0o755)
+
+    ok, err = repo.push_worktree_to_dev(project, wt, branch)
+
+    assert not ok
+    assert "conflicted" in err
+    assert repo.SAFETY_PUSH_FAILED in err
+    assert "for a human to pick up" not in err
+    assert subprocess.run(["git", "rev-parse", "--verify", "-q",
+                           f"refs/heads/{branch}"], cwd=origin,
+                          capture_output=True).returncode != 0

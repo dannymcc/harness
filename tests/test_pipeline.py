@@ -1089,3 +1089,61 @@ def test_close_item_survives_a_failed_github_close(fresh_db, may, monkeypatch):
     assert any("GitHub close failed" in e["message"]
                for e in fresh_db.recent_events(20, "may"))
     assert not pipeline.close_item(may, "issue", 41)   # unknown item
+
+
+def test_a_stranded_fix_gets_its_own_warn_event(fresh_db, may, monkeypatch,
+                                                tmp_path):
+    """When the land fails, the error goes on the item and into the thread;
+    if the safety push failed too, that gets a warn event of its own rather
+    than being buried in a truncated error. (Issue #64.)"""
+    import asyncio
+    from harness import agents, gh, pipeline, repo
+
+    fresh_db.upsert_item("may", "issue", 64, "stranded", "a", "open", "x")
+    fresh_db.update_item("may", "issue", 64, status="approved", plan="do it")
+
+    monkeypatch.setattr(gh, "issue_detail",
+                        lambda repo_, number: {"number": 64, "title": "t",
+                                               "body": "b"})
+    monkeypatch.setattr(repo, "add_worktree", lambda project, branch: tmp_path)
+    monkeypatch.setattr(repo, "wt_has_changes", lambda project, wt: True)
+    monkeypatch.setattr(repo, "run_tests",
+                        lambda project, cwd=None, setup=True, scratch=None:
+                        (True, "ok"))
+    monkeypatch.setattr(repo, "wt_diff",
+                        lambda project, wt: ("1 file changed", "diff"))
+    monkeypatch.setattr(repo, "wt_commit_all",
+                        lambda project, wt, message: None)
+    removed = []
+    monkeypatch.setattr(repo, "remove_worktree",
+                        lambda project, wt: removed.append(wt))
+    monkeypatch.setattr(
+        repo, "push_worktree_to_dev",
+        lambda project, wt, branch: (
+            False, f"rebase onto moved dev conflicted — "
+                   f"{repo.SAFETY_PUSH_FAILED} (git push -> 1: rejected) — "
+                   "the fix exists only in the worktree on this box"))
+
+    async def fake_fix_issue(project, issue, plan, cwd, resume=None,
+                             persona="Malcolm", repro_path=""):
+        rid = fresh_db.start_run("may", "ic", "issue#64", "fix", "m", persona)
+        fresh_db.finish_run(rid, True, 0.1, 1, "fixed it")
+        return {"ok": True, "error": "", "session_id": "s",
+                "output": {"success": True, "summary": "fixed it",
+                           "docs_updated": False, "notes": "",
+                           "commit_message": "fix: issue #64 (#64)"}}
+
+    monkeypatch.setattr(agents, "fix_issue", fake_fix_issue)
+    asyncio.run(pipeline.fix_item(may, fresh_db.get_item("may", "issue", 64)))
+
+    after = fresh_db.get_item("may", "issue", 64)
+    assert after["status"] == "approved"
+    assert repo.SAFETY_PUSH_FAILED in after["error"]
+    assert removed == []          # the only copy stays where it is
+    assert any("did not land" in r["text"]
+               for r in fresh_db.thread("may", "issue#64"))
+    stranded = [e for e in fresh_db.recent_events(20, "may")
+                if "could not be pushed to origin/harness/issue-64"
+                in e["message"]]
+    assert len(stranded) == 1 and stranded[0]["level"] == "warn"
+    assert "only in the worktree on this box" in stranded[0]["message"]
