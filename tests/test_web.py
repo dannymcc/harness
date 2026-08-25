@@ -569,3 +569,15 @@ def test_merge_and_tag_reaches_the_release_route_not_the_item_route(
     assert finalized == [rid]
     assert fresh_db.get_release(rid)["status"] == "merging"
     assert fresh_db.get_item("may", "release", rid) is None   # no ghost item
+
+
+def test_project_page_shows_why_a_merge_was_refused(client, fresh_db):
+    """Without this the operator sees the page reload with the button still
+    there and concludes the button is broken."""
+    rid = fresh_db.create_release("may", "9.9.9", "notes", [])
+    body = client.get("/p/may").text
+    assert "Merge &amp; tag failed" not in body
+    fresh_db.update_release(rid, error="required check 'test' is failing")
+    body = client.get("/p/may").text
+    assert "Merge &amp; tag failed" in body
+    assert "required check &#39;test&#39; is failing" in body
