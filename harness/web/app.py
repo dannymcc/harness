@@ -361,7 +361,7 @@ POLICY_COPY = {
                    "release; approve — you click before an engineer starts."),
     "file_issues": ("file issues",
                     "Whether team leads may open tracking issues on the "
-                    "repo from their plan, capped at three a day."),
+                    "repo from their plan, capped at six a day."),
     "merge_prs": ("merge community PRs",
                   "Community PRs are validated and tested locally first "
                   "either way; this decides who presses merge."),
