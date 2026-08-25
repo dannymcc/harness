@@ -10,7 +10,8 @@ import pytest
 def drain_state():
     from harness import worker
     saved = dict(worker._state)
-    worker._state.update({"draining": False, "thread": None, "running": False})
+    worker._state.update({"draining": False, "thread": None, "loop": None,
+                          "chores": None, "desks": {}, "busy": set()})
     yield worker
     worker._state.clear()
     worker._state.update(saved)
@@ -57,7 +58,7 @@ def test_a_draining_cycle_parks_the_item_without_failing_it(fresh_db, may,
     assert fresh_db.consecutive_failures("may", "issue#9") == 0
 
 
-def test_worker_loop_exits_once_drained(fresh_db, drain_state, monkeypatch):
+def test_worker_loop_exits_once_drained(fresh_db, may, drain_state, monkeypatch):
     from harness import worker, pipeline, housekeeping
     ran = []
 
@@ -66,7 +67,8 @@ def test_worker_loop_exits_once_drained(fresh_db, drain_state, monkeypatch):
         return False
     monkeypatch.setattr(pipeline, "process_directives", _noop)
     monkeypatch.setattr(pipeline, "process_questions", _noop)
-    monkeypatch.setattr(pipeline, "run_all_cycles", _noop)
+    monkeypatch.setattr(pipeline, "run_cycle", _noop)
+    monkeypatch.setattr(pipeline, "work_ready", lambda p: False)
     monkeypatch.setattr(pipeline, "standup_due", lambda: False)
     monkeypatch.setattr(housekeeping, "due", lambda: False)
     monkeypatch.setattr(worker.config, "POLL_INTERVAL_MINUTES", 60)

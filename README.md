@@ -133,6 +133,14 @@ told to behave.
 - **Desk memory** — agents bank one-line learnings, recalled into future
   prompts and condensed hourly, so judgement stays consistent without
   prompts growing.
+- **Every desk on its own clock** — each repo has its own wake loop, so what
+  you do on one desk never queues behind another. Approve a release while a
+  second desk's engineers are half an hour into a wave and the merge starts
+  on the click, not when that wave ends. A desk still runs one cycle at a
+  time: anything that arrives mid-cycle is served on the next pass rather
+  than as a second wave over the same checkout. The section's shared
+  business — Harry's rulings and directions, housekeeping, the hourly
+  stand-up — stays section-wide, on its own clock alongside the desks.
 - **Resilience** — API rate/usage limits pause all agent work and resume
   automatically when the limit resets. Agent sessions live on the data
   volume, so a fix interrupted by a restart or an upgrade picks up where it

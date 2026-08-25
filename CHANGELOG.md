@@ -4,6 +4,27 @@ All notable changes to Harness are recorded here. The format is
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project
 follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.19.0] - 2026-08-25
+
+### Added
+
+- **Every desk now runs on its own clock, so what you do on one repo no longer
+  waits on another.** The worker woke the whole section at once: one sweep
+  gathered every desk and only came round again when the slowest desk's cycle
+  ended, so approving a release on an idle desk could sit there while another
+  desk's engineers worked through a wave. Each desk now has its own wake loop —
+  its own event, its own interval — inside one long-lived worker loop, with a
+  single loop beside them for the section's shared business: Harry's directives
+  and rulings, housekeeping, the stand-up clock, and starting a loop for a desk
+  newly added or switched on. A click on a desk wakes that desk alone, so the
+  merge starts on the press rather than at the end of someone else's wave;
+  **Run cycle now** and clearing an API-limit pause still wake everything, as
+  before. A desk's loop is its own lock, so two triggers can never put two
+  waves through one worktree pool — anything arriving mid-cycle is served on
+  the next pass instead. Forcing a cycle is now recorded per desk
+  (`force_cycle.{project}`), and a desk that crashes says which desk it was
+  (issue #54).
+
 ## [0.18.2] - 2026-08-25
 
 ### Fixed

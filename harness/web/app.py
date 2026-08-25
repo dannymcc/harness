@@ -486,7 +486,7 @@ def approve(name: str, kind: str, number: int):
         f"{config.OPERATOR} sent {kind}#{number} straight to merge, without "
         "a review — the harness tests it first" if unreviewed
         else f"Operator approved {kind}#{number}", project=name)
-    worker.trigger()
+    worker.trigger(name)
     return RedirectResponse(f"/p/{name}", status_code=303)
 
 
@@ -504,7 +504,7 @@ def retry(name: str, kind: str, number: int):
     # again before the fresh attempt has run.
     db.update_item(name, kind, number, status="new", error="", session_id="",
                    breaker_reset_at=db.now(), breaker_trips=0)
-    worker.trigger()
+    worker.trigger(name)
     return RedirectResponse(f"/p/{name}/{kind}/{number}", status_code=303)
 
 
@@ -535,7 +535,7 @@ def request_release(name: str):
     if p and not db.open_release(name) and pipeline.anything_to_release(p):
         db.set_setting(f"release_requested.{name}", "1")
         db.log_event(f"{config.OPERATOR} asked for a release", project=name)
-        worker.trigger()
+        worker.trigger(name)
     return RedirectResponse(f"/p/{name}", status_code=303)
 
 
@@ -567,7 +567,7 @@ def answer_question(name: str, qid: int, answer: str = Form(...),
         p = db.get_project(name)
         if p:
             pipeline.route_answers(p)
-    worker.trigger()
+    worker.trigger(name)
     if via == "ntfy":  # ntfy http actions want a plain 2xx, not a redirect
         from fastapi.responses import JSONResponse
         return JSONResponse({"ok": True, "answered": qid})
@@ -642,7 +642,7 @@ def tell_from_overview(project: str = Form(...), text: str = Form(...)):
         return done
     if db.get_project(project):
         db.add_direction(project, text)
-        worker.trigger()
+        worker.trigger(project)
     return RedirectResponse("/", status_code=303)
 
 
@@ -653,7 +653,7 @@ def tell_team(name: str, text: str = Form(...), item_key: str = Form("")):
         return done
     if db.get_project(name):
         db.add_direction(name, text, item_key)
-        worker.trigger()
+        worker.trigger(name)
     target = f"/p/{name}/{item_key.replace('#', '/')}" if item_key else f"/p/{name}"
     return RedirectResponse(target, status_code=303)
 
@@ -663,7 +663,7 @@ def request_security_review(name: str):
     if db.get_project(name):
         db.set_setting(f"security_requested.{name}", "1")
         db.log_event("Security review requested", project=name)
-        worker.trigger()
+        worker.trigger(name)
     return RedirectResponse(f"/p/{name}", status_code=303)
 
 
@@ -780,7 +780,7 @@ def keep_steer(run_id: int, steer_id: int):
         db.add_direction(run["project"], steer["text"], run["item_key"],
                          note_thread=False)
         db.resolve_steer(steer_id, "kept")
-        worker.trigger()
+        worker.trigger(run["project"])
     return RedirectResponse(f"/run/{run_id}", status_code=303)
 
 
@@ -809,7 +809,7 @@ def followup_run(run_id: int, text: str = Form(...)):
     run = db.get_run(run_id)
     if run and run["project"] and run["item_key"] and text.strip():
         db.add_direction(run["project"], text, run["item_key"])
-        worker.trigger()
+        worker.trigger(run["project"])
     return RedirectResponse(f"/run/{run_id}", status_code=303)
 
 
@@ -878,7 +878,7 @@ def add_project(
                           test_command=test_command.strip(),
                           setup_command=setup_command.strip())
         db.log_event(f"Project {slug} added ({gh_repo})", project=slug)
-        worker.trigger()
+        worker.trigger(slug)
     return RedirectResponse(f"/p/{slug}" if slug else "/", status_code=303)
 
 
