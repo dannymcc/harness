@@ -4,6 +4,28 @@ All notable changes to Harness are recorded here. The format is
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project
 follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.18.2] - 2026-08-25
+
+### Fixed
+
+- **Answering a question now moves the item it is about, instead of the same
+  question coming back unfixed.** An answer was filed against the question and
+  put on the item's thread, but nothing acted on it: an issue answered "Fix"
+  stayed in `waiting_human`, so the next cycle asked again and the fix never
+  started. An answer about an issue or a PR is now an instruction. A fixed
+  wording table (`db.ANSWER_ACTIONS`) maps "Fix" — and "go ahead", "do it",
+  "merge" — to sign-off, "Skip" to leaving it with you, and "Won't fix" to
+  closing it out; nothing is inferred later, and hovering an answer button
+  says what it will do. Anything else you type is a message rather than a
+  decision, so the item goes back to whoever asked with your answer in front
+  of them, rather than sitting unread. The routing runs on the click and again
+  at the top of every cycle, which also re-enters items stranded by the old
+  behaviour. An answer is a desk event, so the wave runs on the cycle it
+  triggered; while it stands, the same question about the same item cannot be
+  put to you again for a week — the asker is given your answer instead. An
+  item sent back to an agent has its breaker history reset, so old failures
+  cannot hold it before the fresh attempt has run (issue #48).
+
 ## [0.18.1] - 2026-08-25
 
 ### Fixed
