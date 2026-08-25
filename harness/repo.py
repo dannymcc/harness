@@ -118,16 +118,81 @@ def worktrees_dir(project) -> Path:
     return config.DATA_DIR / "worktrees" / project["name"]
 
 
-def add_worktree(project, branch: str) -> Path:
+def _ref_tip(d: Path, ref: str) -> str:
+    """The commit a ref points at, or "" if there is no such ref."""
+    return run(["git", "rev-parse", "--verify", "--quiet", ref],
+               cwd=d, check=False).strip()
+
+
+def _preserve_previous_attempt(project, d: Path, branch: str,
+                               wt: Path) -> str:
+    """Save whatever an earlier attempt left on <branch> before it is reset.
+
+    add_worktree recreates the branch from origin/<dev>, and a fix that fails
+    to land is re-dispatched, so without this any commit the previous attempt
+    made — and any uncommitted work in its worktree — would go silently. Work
+    origin/<dev> already contains is not worth a ref: resetting to it loses
+    nothing.
+
+    Returns a sentence for the item thread naming where the work went, or ""
+    when the previous attempt left nothing that a reset would destroy. Raises
+    rather than let the caller reset a branch whose tip could not be saved.
+    """
+    dev = f"origin/{project['dev_branch']}"
+    note = ""
+    if (wt / ".git").exists() and run(["git", "status", "--porcelain"],
+                                      cwd=wt, check=False).strip():
+        # About to be `worktree remove --force`d: commit it or lose it.
+        try:
+            run(["git", "add", "-A"], cwd=wt)
+            run(["git", "commit", "-m",
+                 f"wip: uncommitted work from an earlier attempt on {branch}"],
+                cwd=wt)
+        except (CmdError, OSError, subprocess.TimeoutExpired) as e:
+            note = ("Uncommitted changes in the previous worktree could not "
+                    f"be committed ({str(e)[:200]}) and went with it. ")
+    tip = _ref_tip(d, f"refs/heads/{branch}")
+    if not tip:
+        return note.strip()
+    # Anything but a clean "0" (including a git error) counts as work worth
+    # keeping: guessing wrong here is what loses commits.
+    extra = run(["git", "rev-list", "--count", tip, f"^{dev}"],
+                cwd=d, check=False).strip()
+    if extra.isdigit() and int(extra) == 0:
+        return note.strip()
+    saved = run(["git", "for-each-ref",
+                 "--format=%(objectname) %(refname:short)",
+                 f"refs/heads/{branch}-attempt-*"], cwd=d, check=False)
+    for line in saved.splitlines():
+        obj, _, name = line.partition(" ")
+        if obj == tip:  # a retry that added nothing; already preserved
+            return (note + f"The previous attempt is still on {name}.").strip()
+    taken = {line.partition(" ")[2] for line in saved.splitlines()}
+    n = 1
+    while f"{branch}-attempt-{n}" in taken:
+        n += 1
+    recovery = f"{branch}-attempt-{n}"
+    run(["git", "branch", recovery, tip], cwd=d)
+    return (note + f"The previous attempt's commits were preserved on "
+                   f"{recovery} ({tip[:8]}) before the branch was reset to "
+                   f"{dev}.").strip()
+
+
+def add_worktree(project, branch: str) -> tuple[Path, str]:
     """Create (or recreate) an isolated worktree for one fix branch.
 
     Holds the clone lock only for the brief git bookkeeping; afterwards the
     worktree is independent and agents can work there without contending
-    for the main checkout."""
+    for the main checkout.
+
+    Returns (worktree, note): the note is a sentence about work an earlier
+    attempt left behind and where it was saved, empty when there was none.
+    The caller puts it on the item thread — see _preserve_previous_attempt."""
     with clone_lock(project):
         d = ensure_clone(project)
         run(["git", "fetch", "origin", "--prune"], cwd=d)
         wt = worktrees_dir(project) / branch.replace("/", "-")
+        note = _preserve_previous_attempt(project, d, branch, wt)
         if wt.exists():
             run(["git", "worktree", "remove", "--force", str(wt)], cwd=d,
                 check=False)
@@ -137,7 +202,7 @@ def add_worktree(project, branch: str) -> Path:
         wt.parent.mkdir(parents=True, exist_ok=True)
         run(["git", "worktree", "add", "-B", branch, str(wt),
              f"origin/{project['dev_branch']}"], cwd=d)
-        return wt
+        return wt, note
 
 
 def remove_worktree(project, wt: Path) -> None:

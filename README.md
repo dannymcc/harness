@@ -46,8 +46,10 @@ told to behave.
   if dev moved). If it cannot land — the rebase conflicts, the rebased code
   goes red, or dev keeps moving — the commit is pushed to `harness/issue-N`
   on your remote and the item says where it went, so work that already
-  passed the tests is never left only on the harness box. Everything else
-  gets a drafted reply and waits for you.
+  passed the tests is never left only on the harness box. A retry starts
+  from a fresh dev again, but anything the last attempt left behind is kept
+  first, on a local `harness/issue-N-attempt-<n>` branch named on the item
+  thread. Everything else gets a drafted reply and waits for you.
 - **Pull requests** — merged onto dev locally, tested, then reviewed for
   value and quality. A PR's tests are the contributor's code, so they run in
   a throwaway clone with their own virtualenv and no credentials in the
