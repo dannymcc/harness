@@ -7,9 +7,10 @@ Everything except global settings is scoped to a project (one project = one
 managed repository = one harness).
 """
 import json
+import re
 import sqlite3
 from contextlib import contextmanager
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 from . import config
 
@@ -145,6 +146,7 @@ MIGRATIONS = [
     "ALTER TABLE items ADD COLUMN breaker_reset_at TEXT NOT NULL DEFAULT ''",
     "ALTER TABLE items ADD COLUMN breaker_trips INTEGER NOT NULL DEFAULT 0",
     "ALTER TABLE releases ADD COLUMN error TEXT NOT NULL DEFAULT ''",
+    "ALTER TABLE questions ADD COLUMN routed_at TEXT NOT NULL DEFAULT ''",
 ]
 
 
@@ -621,6 +623,61 @@ DIRECTION_EVENT_PREFIX = "Operator direction: "
 ASK_EVENT_INFIX = " has asked Harry: "
 ESCALATED_EVENT_INFIX = " has escalated to the operator: "
 
+# An answered question stays answered. Re-filing the same question about the
+# same item inside this window is refused: the earlier answer is already on
+# the item's thread, which every agent prompt carries, so the asker gets the
+# decision instead of the operator getting the question again. A week covers
+# an item's working life and still lets a genuinely new circumstance ask
+# afresh later.
+ANSWER_DEDUP_DAYS = 7
+
+# What an answer tells the harness to do with the item it is about. Small,
+# literal, exact-match on the normalised text: an answer moves an item only
+# when it says so in as many words, so the option buttons agents offer
+# ("Fix", "Skip", "Won't fix") carry their meaning and nothing has to be
+# inferred later. A bare "yes" is deliberately absent — it answers the
+# question, not the item's fate. Anything unmatched is a message to the
+# agent that asked, and pipeline.route_answers sends the item back to them.
+ANSWER_ACTIONS = {
+    # get on with it — the operator saying "fix" is the same act as pressing
+    # approve, whatever the fix_issues policy says
+    "fix": "proceed", "fix it": "proceed", "fix this": "proceed",
+    "yes fix": "proceed", "yes fix it": "proceed", "go ahead": "proceed",
+    "proceed": "proceed", "do it": "proceed", "approve": "proceed",
+    "approved": "proceed", "get on with it": "proceed", "merge": "proceed",
+    "merge it": "proceed", "ship it": "proceed",
+    # leave it where it is, still the operator's
+    "skip": "hold", "skip it": "hold", "skip for now": "hold",
+    "not now": "hold", "later": "hold", "leave it": "hold", "hold": "hold",
+    "hold it": "hold", "wait": "hold", "park it": "hold", "no": "hold",
+    # done with — off the board
+    "dont fix": "reject", "do not fix": "reject", "wont fix": "reject",
+    "wontfix": "reject", "reject": "reject", "reject it": "reject",
+    "close": "reject", "close it": "reject", "not a bug": "reject",
+    "decline": "reject",
+}
+
+_PUNCT = re.compile(r"[^a-z0-9 ]+")
+
+
+def _normalise(text: str) -> str:
+    """Lowercased, apostrophe- and punctuation-free, single-spaced.
+
+    Used both for matching an answer against ANSWER_ACTIONS and for deciding
+    whether a question is the same question as one already answered."""
+    text = (text or "").lower().replace("'", "").replace("’", "")
+    return " ".join(_PUNCT.sub(" ", text).split())
+
+
+def answer_action(answer: str) -> str:
+    """'proceed' | 'hold' | 'reject', or '' when the wording doesn't say."""
+    return ANSWER_ACTIONS.get(_normalise(answer), "")
+
+
+def _days_ago(days: int) -> str:
+    return (datetime.now(timezone.utc)
+            - timedelta(days=days)).strftime("%Y-%m-%dT%H:%M:%SZ")
+
 
 def ask_question(project: str, asked_by: str, item_key: str,
                  question: str, options: list[str] | None = None) -> int | None:
@@ -629,7 +686,11 @@ def ask_question(project: str, asked_by: str, item_key: str,
     Harry cannot rule on his own question, so anything he asks is filed as
     escalated: it is the operator's by definition. Filing it 'open' would
     leave it in nobody's hands — `harry_inbox()` excludes his own rows, so
-    it would never be ruled on and never reach the operator either."""
+    it would never be ruled on and never reach the operator either.
+
+    A question already answered for this project and item within
+    ANSWER_DEDUP_DAYS counts as a duplicate too: asking again over a live
+    answer is how an operator ends up being asked the same thing forever."""
     question = question.strip()
     if not question:
         return None
@@ -642,13 +703,27 @@ def ask_question(project: str, asked_by: str, item_key: str,
             (project, question)).fetchone()
         if dup:
             return None
-        cur = c.execute(
-            "INSERT INTO questions (project, asked_by, item_key, question, "
-            "options, status, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
-            (project, asked_by, item_key, question,
-             opts if opts != "[]" else "",
-             "escalated" if own else "open", now()))
-        qid = cur.lastrowid
+        answered = c.execute(
+            "SELECT question FROM questions WHERE project = ? AND item_key = ? "
+            "AND status = 'answered' AND COALESCE(answered_at, '') >= ?",
+            (project, item_key, _days_ago(ANSWER_DEDUP_DAYS))).fetchall()
+        settled = any(_normalise(r["question"]) == _normalise(question)
+                      for r in answered)
+        qid = None
+        if not settled:
+            cur = c.execute(
+                "INSERT INTO questions (project, asked_by, item_key, question, "
+                "options, status, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
+                (project, asked_by, item_key, question,
+                 opts if opts != "[]" else "",
+                 "escalated" if own else "open", now()))
+            qid = cur.lastrowid
+    if settled:
+        about = f" about {item_key}" if item_key else ""
+        log_event(f"{asked_by} asked something already answered{about} — not "
+                  f"put to anyone again; the answer stands: {question[:100]}",
+                  project=project)
+        return None
     infix = ESCALATED_EVENT_INFIX if own else ASK_EVENT_INFIX
     log_event(f"{asked_by}{infix}{question[:120]}", project=project)
     return qid
@@ -663,6 +738,40 @@ def answer_question(qid: int, answer: str, by: str = "operator") -> None:
     if q and q["item_key"] and q["project"]:
         thread_append(q["project"], q["item_key"], by, "ruling",
                       f"Q ({q['asked_by']}): {q['question']}\nA: {answer}")
+
+
+def unrouted_answers(project: str):
+    """Answered questions about an item whose answer has not been acted on.
+
+    `routed_at` is stamped once an answer has moved (or been weighed and
+    deliberately not moved) its item, so an answer acts exactly once. Rows
+    written before that column existed read as unrouted, which is how items
+    stranded by the old behaviour — answered, but never picked up — get
+    re-entered on the first cycle after this lands."""
+    with conn() as c:
+        return c.execute(
+            "SELECT * FROM questions WHERE project = ? AND status = 'answered' "
+            "AND item_key != '' AND COALESCE(routed_at, '') = '' ORDER BY id",
+            (project,)).fetchall()
+
+
+def mark_question_routed(qid: int) -> None:
+    with conn() as c:
+        c.execute("UPDATE questions SET routed_at = ? WHERE id = ?",
+                  (now(), qid))
+
+
+def answers_since(project: str, since: str = ""):
+    """The operator's answers landed since `since` ('' means all of them).
+
+    Harry's rulings are excluded: he answers his people constantly and his
+    answer reaches them through the question record. An answer from the
+    operator is news to the desk."""
+    with conn() as c:
+        return c.execute(
+            "SELECT * FROM questions WHERE project = ? AND status = 'answered' "
+            "AND answered_by != ? AND COALESCE(answered_at, '') > ? "
+            "ORDER BY id", (project, config.CTO_NAME, since)).fetchall()
 
 
 def escalate_question(qid: int) -> None:

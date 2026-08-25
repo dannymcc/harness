@@ -80,6 +80,19 @@ told to behave.
   filed for you straight away rather than sitting in his inbox. You can
   also issue standing directions, desk-wide or per-item, and Harry turns
   them into actions straight away.
+- **Your answer moves the item** — answering a question about an issue or a
+  PR is an instruction, not a note. Answer **Fix** (or "go ahead", "do it",
+  "merge") and it is signed off there and then and an engineer picks it up
+  on the next cycle, whatever `fix issues` is set to — saying so is the same
+  act as pressing approve. **Skip** leaves it waiting on you with your reason
+  on the thread; **Won't fix** closes it out. Anything else you type is a
+  message rather than a decision, so the item goes back to whoever asked,
+  with your answer in front of them — it never sits there unread. The
+  wordings that carry a decision are a fixed list in the code
+  (`db.ANSWER_ACTIONS`), so nothing is inferred later, and hovering an
+  answer button tells you what it will do. While an answer stands, the same
+  question about the same item cannot be put to you again for a week: the
+  asker is given your answer instead.
 - **Slash commands** — the same box takes commands as well as prose. Plain
   text goes to Harry to judge; a leading `/` is carried out then and there
   by the same code the buttons run, behind the same policy gates. `/approve

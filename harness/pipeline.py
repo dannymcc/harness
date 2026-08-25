@@ -156,6 +156,85 @@ def apply_breaker_ruling(q, ruling: str, answer: str, by: str = "Harry") -> None
                     click_path=f"/p/{name}/{kind}/{num}")
 
 
+# --- answers that move items --------------------------------------------------
+# Where an answer puts the item it is about. The operator answering "fix" is
+# the same act as pressing approve, so it is the sign-off whatever the
+# fix_issues policy says; "skip" leaves the item with them; "won't fix"
+# closes it out. The wording-to-action mapping is db.ANSWER_ACTIONS — a fixed
+# table, so no agent ever has to work out at fix time what the operator meant.
+ANSWER_ROUTE = {"proceed": "approved", "hold": "waiting_human",
+                "reject": "rejected"}
+# Statuses an answer may move an item out of. Anything else — new (triage
+# looks at it anyway), held (that is the breaker's own ruling flow),
+# working, approved, queued, released — is already in hand, and the answer
+# reaches it through the item's thread.
+ROUTABLE_STATUSES = ("waiting_human", "triaged", "blocked")
+
+
+def _back_to_asker(item) -> str:
+    """Where an answer that doesn't say what to do sends the item.
+
+    It still has to go somewhere: back to whoever asked, with the answer in
+    front of them. An item an engineer had already started resumes with them
+    (it was signed off once to get there); anything else goes back through
+    triage or review, which is where an unread answer gets read."""
+    return "approved" if (item["session_id"] or item["branch"]) else "new"
+
+
+def route_answers(project) -> list[str]:
+    """Act on answers that have not been picked up yet; returns what moved.
+
+    Answering is an instruction about the item, not a note on it. Nothing
+    here runs an agent or touches GitHub, so both the web handler (on the
+    click, so the operator sees the item move) and every cycle (for
+    anything left over, including items stranded before this existed) call
+    it."""
+    name = project["name"]
+    moved = []
+    for q in db.unrouted_answers(name):
+        # Stamped before it is acted on, so an answer acts once and once
+        # only: a decision the operator later reverses by hand must not be
+        # undone again by the same old answer on the next cycle.
+        db.mark_question_routed(q["id"])
+        if is_breaker_question(q):
+            continue  # apply_breaker_ruling has its own, richer vocabulary
+        kind, _, num = q["item_key"].partition("#")
+        if kind not in ("issue", "pr") or not num.isdigit():
+            continue
+        # Harry's rulings reach his people through the question record and
+        # the thread; only the operator's answer is a sign-off. Rows from
+        # before answered_by existed are the operator's — that is all there
+        # was then.
+        if (q["answered_by"] or "operator") not in ("operator", config.OPERATOR):
+            continue
+        item = db.get_item(name, kind, int(num))
+        if not item or item["gh_state"] != "open" \
+                or item["status"] not in ROUTABLE_STATUSES:
+            continue
+        action = db.answer_action(q["answer"])
+        status = ANSWER_ROUTE.get(action) or _back_to_asker(item)
+        fields = {"status": status}
+        if status in ("approved", "new"):
+            # Going back to an agent, so the reason it stopped goes with it,
+            # failure history and all: without the breaker reset the old
+            # failures hold the item again before the fresh attempt has run,
+            # which is exactly what the decision being ignored looks like.
+            # On a hold or a reject the error stays — it is the record of
+            # why the item stopped.
+            fields.update(error="", breaker_reset_at=db.now(),
+                          breaker_trips=0)
+        db.update_item(name, kind, item["number"], **fields)
+        why = action or ("wording says nothing either way — back to the "
+                         "agent that asked")
+        db.thread_append(name, q["item_key"], "harness", "event",
+                         f"{config.OPERATOR}'s answer acted on ({why}): "
+                         f"{item['status']} → {status}.")
+        db.log_event(f"{config.OPERATOR}'s answer moved {q['item_key']} from "
+                     f"{item['status']} to {status}", project=name)
+        moved.append(f"{q['item_key']} -> {status}")
+    return moved
+
+
 PERSONA_MEMORY_KEY = {"Ruth": "analyst", "Malcolm": "engineering",
                       "Colin": "ops", "Zaf": "security"}
 
@@ -810,6 +889,12 @@ def desk_events(project) -> list[str]:
     reasons = []
     if db.get_setting(f"directives.{name}", "").strip():
         reasons.append("directive from Harry")
+    if db.answers_since(name, since):
+        # The operator has decided something since the last plan. Whatever it
+        # was, the desk shouldn't wait for a poll to notice: this is also
+        # what makes work_ready() bring the worker straight back after an
+        # answer, so the wave runs on the cycle the answer triggered.
+        reasons.append("the operator has answered a question")
     fix_policy = db.policy(name, "fix_issues")
     triaged = [i for i in db.items_by_status(name, "triaged")
                if i["kind"] == "issue" and i["gh_state"] == "open"]
@@ -912,6 +997,11 @@ async def run_cycle(project, force: bool = False) -> None:
 
     try:
         _reconcile_branches(project)
+
+        # An answer the operator has given is an instruction: act on it
+        # before any work is chosen, so the item it is about is in the right
+        # queue for this very cycle rather than the next one.
+        route_answers(project)
 
         # Release first: a due release must never be starved by a long
         # sweep (or a restart mid-sweep).
