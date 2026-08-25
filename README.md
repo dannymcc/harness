@@ -57,16 +57,20 @@ told to behave.
 - **Batched releases** — fixes and merges queue on dev. At a threshold (N
   changes or age), Colin drafts the release: version bump, CHANGELOG,
   README check, credited notes, then a dev → main PR. You approve; it
-  merges, tags, and publishes the GitHub Release. One fix never means one
-  release. **Release now** — on the project page, or on any card on the
-  overview — cuts one without waiting for the threshold, including when the
-  only changes on dev landed outside the harness. It shows only when there
-  is something to cut, and only until a release is proposed, so it is never
-  a dead press; the version bump and the tests happen either way. Set
-  `auto release` to `auto` on the repos you want running hands-off and the
-  drafted release merges, tags and publishes itself; the tests still have to
-  pass first. It is set per repo — the overview marks the repos that are on
-  it, and the project page repeats it with the thresholds that set one off.
+  merges, tags, and publishes the GitHub Release. If GitHub refuses the
+  merge — branch protection, a failing required check, a token without the
+  scope — the release comes back as proposed with the reason on the project
+  page, so the button is live again and you can see what to fix. One fix
+  never means one release. **Release now** — on the project page, or on any
+  card on the overview — cuts one without waiting for the threshold,
+  including when the only changes on dev landed outside the harness. It shows
+  only when there is something to cut, and only until a release is proposed,
+  so it is never a dead press; the version bump and the tests happen either
+  way. Set `auto release` to `auto` on the repos you want running hands-off
+  and the drafted release merges, tags and publishes itself; the tests still
+  have to pass first. It is set per repo — the overview marks the repos that
+  are on it, and the project page repeats it with the thresholds that set one
+  off.
 - **Operator-in-the-loop** — any agent can ask a question when a decision
   isn't theirs. It goes to Harry, who rules within minutes on anything in
   the section's remit (engineering judgement, priorities, process); only
