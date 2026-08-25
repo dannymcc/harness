@@ -581,3 +581,27 @@ def test_project_page_shows_why_a_merge_was_refused(client, fresh_db):
     body = client.get("/p/may").text
     assert "Merge &amp; tag failed" in body
     assert "required check &#39;test&#39; is failing" in body
+
+
+def test_close_button_closes_the_item_and_the_issue(client, fresh_db,
+                                                    monkeypatch):
+    """Close as done is the terminal press for finished work — reject is for
+    work we are not doing. It closes the issue on GitHub as well, so the
+    item does not come back round the loop."""
+    from harness import gh
+    closed = []
+    monkeypatch.setattr(gh, "close_issue",
+                        lambda repo, n, comment="": closed.append((n, comment)))
+    fresh_db.upsert_item("may", "issue", 8, "Already shipped", "alice",
+                         "open", "x")
+    fresh_db.update_item("may", "issue", 8, status="waiting_human")
+    assert "Close as done" in client.get("/p/may/issue/8").text
+    r = client.post("/p/may/issue/8/close",
+                    data={"reason": "shipped in v0.38.1"},
+                    follow_redirects=False)
+    assert r.status_code == 303
+    item = fresh_db.get_item("may", "issue", 8)
+    assert item["status"] == "closed" and item["gh_state"] == "closed"
+    assert closed == [(8, "Closed as already shipped: shipped in v0.38.1")]
+    # Nothing left to press: a closed item offers no close button.
+    assert "Close as done" not in client.get("/p/may/issue/8").text

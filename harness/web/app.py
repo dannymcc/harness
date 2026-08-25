@@ -497,6 +497,20 @@ def reject(name: str, kind: str, number: int):
     return RedirectResponse(f"/p/{name}", status_code=303)
 
 
+@app.post("/p/{name}/{kind}/{number}/close")
+def close_item(name: str, kind: str, number: int, reason: str = Form("")):
+    """Close an item that is already done — as opposed to rejecting it,
+    which says we are not doing the work. An issue is closed on GitHub too,
+    so a finished item stops coming back round the loop."""
+    p = db.get_project(name)
+    if p and kind in ("issue", "pr") and \
+            pipeline.close_item(p, kind, number, reason):
+        db.log_event(f"{config.OPERATOR} closed {kind}#{number} as done"
+                     + (f": {reason.strip()[:80]}" if reason.strip() else ""),
+                     project=name)
+    return RedirectResponse(f"/p/{name}/{kind}/{number}", status_code=303)
+
+
 @app.post("/p/{name}/{kind}/{number}/retry")
 def retry(name: str, kind: str, number: int):
     # Starting over is the operator's say-so, so the item's failure history

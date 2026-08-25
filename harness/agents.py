@@ -1096,6 +1096,7 @@ DIRECTIVE_SCHEMA = {
                     "action": {"type": "string",
                                "enum": ["approve_item", "reject_item",
                                         "hold_item", "retry_item",
+                                        "close_item",
                                         "hire", "stand_down", "reinstate",
                                         "security_review", "propose_release",
                                         "set_policy", "tell_desk",
@@ -1108,6 +1109,8 @@ DIRECTIVE_SCHEMA = {
                             "description": "Policy key for set_policy."},
                     "value": {"type": "string"},
                     "question_id": {"type": "integer"},
+                    "reason": {"type": "string",
+                               "description": "Why the item is done, for close_item (e.g. 'shipped in v1.2.0, commit abc1234')."},
                     "text": {"type": "string",
                              "description": "For tell_desk, answer_question, or create_issue (the issue body)."},
                     "title": {"type": "string",
@@ -1132,7 +1135,12 @@ Current desk state:
 {state_digest}
 
 Available actions: approve_item / reject_item / hold_item / retry_item
-(kind+number); hire / stand_down / reinstate (name); security_review;
+(kind+number); close_item (kind+number, plus a reason — for work that is
+already done: the fix shipped in a release or landed some other way. Closed
+is not rejected: rejected means we are not doing it, closed means it is
+finished. An issue is closed on GitHub with the reason attached, so give a
+reason that names the release or commit); hire / stand_down / reinstate
+(name); security_review;
 propose_release (batches whatever is queued now); set_policy (key+value —
 keys: fix_issues, merge_prs, merge_dependabot, post_comments, cut_release,
 release_min_changes, release_max_age_days, active_hours; values auto/approve

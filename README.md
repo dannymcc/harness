@@ -93,6 +93,14 @@ told to behave.
   answer button tells you what it will do. While an answer stands, the same
   question about the same item cannot be put to you again for a week: the
   asker is given your answer instead.
+- **Close as done** — work that has already landed some other way needs a
+  way out. **Close as done**, on the item page, takes it off the board and
+  closes the issue on GitHub with the reason attached; it is not the same
+  press as **Reject**, which says we are not doing the work. Telling Harry
+  to close something out ("close #302, it shipped in v0.38.1") does the
+  same thing, without waiting for a release to sweep it up. A pull request
+  closed this way leaves our board only — closing someone else's PR isn't
+  ours to do.
 - **Slash commands** — the same box takes commands as well as prose. Plain
   text goes to Harry to judge; a leading `/` is carried out then and there
   by the same code the buttons run, behind the same policy gates. `/approve

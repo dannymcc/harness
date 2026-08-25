@@ -4,6 +4,30 @@ All notable changes to Harness are recorded here. The format is
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project
 follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.20.0] - 2026-08-25
+
+### Added
+
+- **The section can now close out an item that is already done, instead of
+  looping it past you forever.** Work that landed some other way — shipped in
+  an earlier release, fixed by hand, superseded — had no way off the board:
+  the only terminal presses were **Reject**, which says we are not doing the
+  work, and a release sweep. So a finished issue stayed open on GitHub, came
+  back through `sync()`, sat in the lead's state digest, and the next plan put
+  an engineer back on work that was already done. There is now a close-out
+  verb: `pipeline.close_item(project, kind, number, reason)` marks the item
+  `closed`, clears its error and session, and — for an issue still open on
+  GitHub — closes the issue with a short comment naming the reason, recording
+  `gh_state='closed'` locally so it stops reappearing. If the `gh` call is
+  refused the board still moves and a warn event says GitHub didn't take. A
+  pull request is closed on our board only; closing someone else's PR isn't
+  ours to do. You can reach it two ways: a **Close as done** button on the
+  item page, next to **Reject** and labelled with the difference, or by
+  telling Harry ("close #302, it shipped in v0.38.1") — `close_item` is in his
+  directive vocabulary, with the close-is-not-reject distinction spelled out
+  in the prompt, so every directive action remains something the GUI could
+  already do (issue #60).
+
 ## [0.19.0] - 2026-08-25
 
 ### Added

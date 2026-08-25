@@ -109,6 +109,10 @@ own clone and runs the suite first, and will not land a red one.</p>
   <form method="post" action="/p/{{ p.name }}/{{ item.kind }}/{{ item.number }}/reject">
     <button class="danger">Reject</button></form>
   {% endif %}
+  {% if item.status not in ('released', 'closed', 'rejected') %}
+  <form method="post" action="/p/{{ p.name }}/{{ item.kind }}/{{ item.number }}/close">
+    <button title="Already done{% if item.kind == 'issue' %} — this closes the issue on GitHub too{% else %} — the pull request itself is left alone{% endif %}. Reject is for work we are not doing.">Close as done</button></form>
+  {% endif %}
   <form method="post" action="/p/{{ p.name }}/{{ item.kind }}/{{ item.number }}/retry">
     <button>Re-run from scratch</button></form>
 </div>
