@@ -673,6 +673,10 @@ def finalize_release(project, release) -> None:
                    cwd=d)
             gh.run(["git", "push", "origin", f"v{version}"], cwd=d)
     except CmdError as e:
+        # Back to proposed with the reason attached: left at 'merging' the
+        # card shows "reload for the result" forever, with no button and no
+        # cause, until a restart sweeps it up.
+        db.update_release(release["id"], status="proposed", error=str(e)[:2000])
         db.log_event(f"Release v{version} failed: {e}", "error", project=name)
         return
     try:
@@ -681,7 +685,8 @@ def finalize_release(project, release) -> None:
     except CmdError as e:
         db.log_event(f"Tag pushed but GitHub release publish failed: {e}",
                      "warn", project=name)
-    db.update_release(release["id"], status="released", released_at=db.now())
+    db.update_release(release["id"], status="released", released_at=db.now(),
+                      error="")
     for key in json.loads(release["items_json"]):
         kind, number = key.split("#")
         item = db.get_item(name, kind, int(number))

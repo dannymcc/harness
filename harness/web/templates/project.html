@@ -102,6 +102,9 @@
     <p class="hint">Merging and tagging — this takes about a minute. Reload
     for the result.</p>
   {% else %}
+  {% if release.error %}
+  <div class="banner warn">Merge &amp; tag failed: {{ release.error }}</div>
+  {% endif %}
   {% if release_auto %}<p class="hint">auto release is on for this project —
   Colin merges and tags without waiting for you. Abandon it now if you would
   rather it didn't.</p>{% endif %}

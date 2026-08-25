@@ -307,6 +307,44 @@ def test_auto_cut_release_marks_merging_before_finalising(fresh_db, may,
     assert fresh_db.get_release(drafted["rid"])["status"] == "proposed"
 
 
+def test_refused_merge_puts_the_reason_on_the_release(fresh_db, may,
+                                                      monkeypatch):
+    """A refused merge (branch protection, red CI, token scope) used to leave
+    the release stuck at 'merging' with the cause only in the event log. It
+    must come back to 'proposed' carrying the reason, and a later attempt
+    that succeeds must clear it."""
+    from harness import gh, notify, pipeline, repo
+
+    class _NoLock:
+        def __enter__(self): return None
+        def __exit__(self, *a): return False
+
+    monkeypatch.setattr(repo, "clone_lock", lambda project: _NoLock())
+    monkeypatch.setattr(notify, "send", lambda *a, **k: None)
+
+    def _refuse(*a, **k):
+        raise gh.CmdError(["gh", "pr", "merge", "12"], 1, "",
+                          "required check 'test' is failing")
+
+    monkeypatch.setattr(gh, "merge_pr", _refuse)
+    rid = fresh_db.create_release("may", "3.0.0", "notes", [])
+    fresh_db.update_release(rid, pr_number=12, status="merging")
+    pipeline.finalize_release(may, fresh_db.get_release(rid))
+
+    rel = fresh_db.get_release(rid)
+    assert rel["status"] == "proposed"          # clickable again, not stuck
+    assert "required check 'test' is failing" in rel["error"]
+
+    monkeypatch.setattr(gh, "merge_pr", lambda *a, **k: None)
+    monkeypatch.setattr(gh, "publish_release", lambda *a, **k: None)
+    monkeypatch.setattr(gh, "run", lambda *a, **k: "")
+    monkeypatch.setattr(repo, "clean_checkout", lambda project, branch: "/tmp")
+    pipeline.finalize_release(may, fresh_db.get_release(rid))
+
+    rel = fresh_db.get_release(rid)
+    assert rel["status"] == "released" and rel["error"] == ""
+
+
 def test_restart_recovery(fresh_db, may):
     from harness import worker
     rid = fresh_db.start_run("may", "ic", "issue#5", "fix", "m", "Malcolm")

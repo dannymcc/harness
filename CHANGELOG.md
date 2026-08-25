@@ -4,6 +4,22 @@ All notable changes to Harness are recorded here. The format is
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project
 follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.18.1] - 2026-08-25
+
+### Fixed
+
+- **A refused merge now tells you why, instead of the Merge & tag button
+  appearing to do nothing.** When GitHub declined the dev → main merge —
+  branch protection, a required check still red, a token without the scope —
+  the release was left at `merging` for good: the card showed "this takes
+  about a minute, reload for the result" with no button and no cause, and the
+  only trace of the refusal was one line in the event log, until a restart
+  swept the release up. The failure now puts the release back to `proposed`
+  with GitHub's own message stored against it, which the project page shows
+  as a warn banner beside the button; a later attempt that succeeds clears
+  it. So the press is repeatable, the reason is on the page, and nothing has
+  to be restarted to get the release moving again (issue #52).
+
 ## [0.18.0] - 2026-08-24
 
 ### Added

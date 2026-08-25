@@ -144,6 +144,7 @@ MIGRATIONS = [
     "ALTER TABLE steers ADD COLUMN resolution TEXT NOT NULL DEFAULT ''",
     "ALTER TABLE items ADD COLUMN breaker_reset_at TEXT NOT NULL DEFAULT ''",
     "ALTER TABLE items ADD COLUMN breaker_trips INTEGER NOT NULL DEFAULT 0",
+    "ALTER TABLE releases ADD COLUMN error TEXT NOT NULL DEFAULT ''",
 ]
 
 
