@@ -40,7 +40,7 @@
       {% for opt in q.options_list %}
       <form method="post" action="/p/{{ p.name }}/question/{{ q.id }}/answer" class="answer-form option-form">
         <input type="hidden" name="answer" value="{{ opt }}">
-        <button class="primary">{{ opt }}</button>
+        <button class="primary" title="{{ q.option_hints[opt] }}">{{ opt }}</button>
       </form>
       {% endfor %}
     </div>
@@ -76,7 +76,7 @@
         {% for opt in q.options_list %}
         <form method="post" action="/p/{{ p.name }}/question/{{ q.id }}/answer" class="answer-form option-form">
           <input type="hidden" name="answer" value="{{ opt }}">
-          <button>{{ opt }}</button>
+          <button title="{{ q.option_hints[opt] }}">{{ opt }}</button>
         </form>
         {% endfor %}
       </div>

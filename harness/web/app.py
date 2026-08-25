@@ -209,13 +209,23 @@ def _member_status(display, runs, match):
             "run_id": last["id"]}
 
 
+ANSWER_HINTS = {
+    "proceed": "puts it back in the flow — an engineer picks it up",
+    "hold": "leaves it waiting on you, with your reason on the thread",
+    "reject": "closes it out",
+}
+
+
 def _enrich_questions(qs):
     """Attach the referenced item's title/link so the operator can see what a
-    question is actually about."""
+    question is actually about, and what each option button will do to it."""
     out = []
     for q in qs:
         d = dict(q)
         d["options_list"] = db.question_options(q)
+        d["option_hints"] = {
+            o: ANSWER_HINTS.get(db.answer_action(o), "") if q["item_key"] else ""
+            for o in d["options_list"]}
         d["item_title"], d["item_url"] = "", ""
         if q["item_key"] and "#" in q["item_key"] and q["project"]:
             kind, _, num = q["item_key"].partition("#")
@@ -551,6 +561,12 @@ def answer_question(name: str, qid: int, answer: str = Form(...),
         # move the item — the option buttons are the same vocabulary he uses.
         pipeline.apply_breaker_ruling(q, answer.strip(), answer.strip(),
                                       by=config.OPERATOR)
+    else:
+        # Every other answer about an item moves it now, on the click,
+        # rather than landing on the thread and waiting to be noticed.
+        p = db.get_project(name)
+        if p:
+            pipeline.route_answers(p)
     worker.trigger()
     if via == "ntfy":  # ntfy http actions want a plain 2xx, not a redirect
         from fastapi.responses import JSONResponse
