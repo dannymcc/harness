@@ -930,8 +930,10 @@ def _loop_lock(name: str) -> asyncio.Lock:
     Desks run concurrently and several of them (plus the attendants inside
     engineer waves) call process_directives/process_questions; without a
     lock two callers can both pick up the same pending row and have Harry
-    action it twice. The worker starts a fresh loop every wake, so the
-    locks live on the loop, not the module."""
+    action it twice. The worker runs one long-lived loop for the whole
+    section, so hanging the locks off it keeps every desk's wake loop and
+    every attendant under the same lock, while tests that call in with
+    `asyncio.run` still get a set of their own."""
     loop = asyncio.get_running_loop()
     locks = getattr(loop, "_harness_locks", None)
     if locks is None:
@@ -1131,35 +1133,6 @@ def work_ready(project) -> bool:
            if i["gh_state"] == "open"):
         return True
     return bool(desk_events(project))
-
-
-async def run_all_cycles(force: bool = False) -> bool:
-    """Run every desk once. Returns True if any desk has work ready to go on."""
-    projects = db.all_projects(enabled_only=True)
-
-    async def desk(p):
-        db.touch_heartbeat()
-        try:
-            await run_cycle(p, force=force)
-        except AgentStalled:
-            # The pause (API limits) or drain is global state that
-            # run_agent checks, so the other desks stop starting new work
-            # by themselves — no need to cancel them here.
-            pass
-        except Exception as e:
-            db.log_event(f"Cycle failed: {type(e).__name__}: {e}", "error",
-                         project=p["name"])
-
-    # Every desk runs its cycle concurrently: a release on one desk is
-    # never queued behind another desk's triage. Desks share nothing but
-    # the DB (WAL) and Harry, and his rulings are serialized by _loop_lock.
-    await process_directives()
-    await asyncio.gather(*(desk(p) for p in projects))
-    # Harry's cross-project review now happens in the hourly stand-up
-    # (run_standup) rather than every sweep — cheaper and more predictable.
-    if db.paused_until():
-        return False
-    return any(work_ready(p) for p in projects)
 
 
 def _reconcile_branches(project) -> None:
