@@ -77,6 +77,16 @@ def test_a_normal_run_still_passes_and_reports_output(project):
 
 # --- the throwaway PR checkout ----------------------------------------------
 
+@pytest.fixture(autouse=True)
+def _git_identity(monkeypatch):
+    """Fresh clones made below commit without a repo-local identity; CI
+    runners have no global one, so supply it through the environment."""
+    monkeypatch.setenv("GIT_AUTHOR_NAME", "T")
+    monkeypatch.setenv("GIT_AUTHOR_EMAIL", "t@example.com")
+    monkeypatch.setenv("GIT_COMMITTER_NAME", "T")
+    monkeypatch.setenv("GIT_COMMITTER_EMAIL", "t@example.com")
+
+
 def _git(*args, cwd):
     subprocess.run(["git", *args], cwd=cwd, check=True, capture_output=True)
 
