@@ -4,6 +4,27 @@ All notable changes to Harness are recorded here. The format is
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project
 follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.23.1] - 2026-08-26
+
+### Fixed
+
+- **Housekeeping no longer prunes a worktree an item is still going to
+  resume into** (#96). The hourly sweep deleted any directory under
+  `data/worktrees/<project>/` left idle past `WORKTREE_KEEP_DAYS`, on mtime
+  alone. An item held for an operator or Harry answer sits idle for exactly
+  as long as the answer takes, so after three days its worktree went
+  silently and the next resume started the engineer from a clean checkout —
+  the same loss as #82 by another route. The sweep now skips any worktree
+  whose directory name matches the branch of an item not in a terminal
+  state, and the terminal set is the one constant the item trimmer already
+  used. Skips are counted rather than silent: the hourly summary says how
+  many stale worktrees it kept. Throwaway PR-run checkouts are pruned as
+  before.
+
+- The README's note that deleting `data/worktrees` is always safe now says
+  what it costs: an item working in one loses its edits and the next attempt
+  starts from `origin/dev`.
+
 ## [0.23.0] - 2026-08-26
 
 ### Changed

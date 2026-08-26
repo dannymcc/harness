@@ -93,11 +93,17 @@ def _prune_reports(c) -> int:
     return n
 
 
+# Statuses an item never comes back from: nothing will be resumed, so the
+# working state behind it (diffs, session ids, worktrees) is fair game.
+TERMINAL_STATUSES = ("released", "closed", "rejected")
+
+
 def _trim_finished_items(c) -> int:
+    qs = ",".join("?" * len(TERMINAL_STATUSES))
     cur = c.execute(
         "UPDATE items SET diff = '', session_id = '' "
-        "WHERE status IN ('released', 'closed', 'rejected') "
-        "AND (diff != '' OR session_id != '')")
+        f"WHERE status IN ({qs}) "
+        "AND (diff != '' OR session_id != '')", TERMINAL_STATUSES)
     return cur.rowcount
 
 
@@ -133,17 +139,42 @@ def _close_orphaned_runs(c) -> int:
 WORKTREE_KEEP_DAYS = 3
 
 
-def _prune_worktrees() -> int:
+def _live_branch_dirs(project: str) -> set[str]:
+    """Worktree directory names an item may still be resumed into.
+
+    An item that is not in a terminal state can be picked up again at any
+    moment, and one held for an operator or Harry answer sits idle for
+    exactly as long as the answer takes — so its worktree's mtime says
+    nothing about whether the work is wanted. Keyed off item status rather
+    than repo._worktree_is_live: the sweep then needs no clone lock and no
+    git call per directory, and whether a surviving tree has the right
+    branch on HEAD is the resume path's business, not housekeeping's.
+    """
+    qs = ",".join("?" * len(TERMINAL_STATUSES))
+    with db.conn() as c:
+        rows = c.execute(
+            "SELECT branch FROM items WHERE project = ? AND branch != '' "
+            f"AND status NOT IN ({qs})",
+            (project, *TERMINAL_STATUSES)).fetchall()
+    return {r["branch"].replace("/", "-") for r in rows}
+
+
+def _prune_worktrees() -> tuple[int, int]:
+    """Returns (removed, kept): kept counts stale worktrees still spoken for."""
     import shutil, subprocess
-    n = 0
+    n = kept = 0
     cutoff = time.time() - WORKTREE_KEEP_DAYS * 86400
     for p in db.all_projects():
         base = config.DATA_DIR / "worktrees" / p["name"]
         if not base.exists():
             continue
+        live = _live_branch_dirs(p["name"])
         for wt in base.iterdir():
             try:
                 if wt.is_dir() and wt.stat().st_mtime < cutoff:
+                    if wt.name in live:
+                        kept += 1
+                        continue
                     shutil.rmtree(wt, ignore_errors=True)
                     n += 1
             except OSError:
@@ -152,7 +183,7 @@ def _prune_worktrees() -> int:
         if (clone / ".git").exists():
             subprocess.run(["git", "worktree", "prune"], cwd=clone,
                            capture_output=True)
-    return n
+    return n, kept
 
 
 PR_RUN_KEEP_HOURS = 12
@@ -189,7 +220,7 @@ def prune() -> str:
         it = _trim_finished_items(c)
         orph = _close_orphaned_runs(c)
     logs = _prune_files(config.LOG_DIR, LOG_KEEP_DAYS)
-    wts = _prune_worktrees()
+    wts, wts_kept = _prune_worktrees()
     prs = _prune_pr_runs()
     sessions = _prune_sdk_sessions()
     parts = []
@@ -200,6 +231,7 @@ def prune() -> str:
     if orph: parts.append(f"{orph} orphaned runs closed")
     if logs: parts.append(f"{logs} old logs removed")
     if wts: parts.append(f"{wts} stale worktrees removed")
+    if wts_kept: parts.append(f"{wts_kept} stale worktrees kept (in play)")
     if prs: parts.append(f"{prs} stale PR runs removed")
     if sessions: parts.append(f"{sessions} stale sessions removed")
     return ", ".join(parts)

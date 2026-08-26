@@ -299,7 +299,8 @@ python run.py            # GUI + worker on :8300
 Run the tests with `python -m pytest -q`. State lives in `data/` (SQLite,
 clones, worktrees, per-run transcripts). Deleting `data/repos`,
 `data/worktrees`, `data/pr-runs` or `data/sandbox` is always safe — they're
-rebuilt.
+rebuilt; deleting a worktree an item is still working in only costs that
+item its edits, and the next attempt starts from `origin/dev`.
 
 `data/claude-home` holds the Agent SDK's own session transcripts: in the
 container `~/.claude` is symlinked there at boot, so a fix cut off by a
@@ -313,7 +314,10 @@ branch from `dev` again: the engineer comes back to its own edits. Only a
 fresh attempt (or a resume whose worktree has been deleted) resets the tree
 to `origin/dev`, and then the last attempt's work is parked on
 `harness/issue-N-attempt-M` and named both on the item thread and in the
-engineer's own prompt.
+engineer's own prompt. Housekeeping's three-day sweep of idle worktrees
+leaves alone any worktree whose item is still in play, so an item held for
+days waiting on an answer still comes back to its own edits; the hourly
+summary says how many it kept.
 
 Harness can maintain itself — add this repo as a harness with version file
 `harness/config.py`, version pattern `VERSION\s*=\s*"(?P<version>[^"]+)"`,
