@@ -4,6 +4,33 @@ All notable changes to Harness are recorded here. The format is
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project
 follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.22.1] - 2026-08-26
+
+### Fixed
+
+- **The reports table is indexed and no longer grows without bound** (#78).
+  Every persona memory note, lead summary, stand-up line and desk-notes
+  rewrite inserts a row into `reports`, nothing ever removed one, and the
+  table had no index. `latest_report` — seven call sites across the project
+  and dashboard pages — therefore walked the rowid index backwards over
+  every other scope's rows until it found a match, so a rarely written scope
+  paid for everything every desk had written since. There is now a
+  `reports_scope` index on `(scope, project, id)`, in the schema and as a
+  migration so existing databases pick it up, and the lookup seeks straight
+  to the row it wants. Hourly housekeeping keeps the newest five rows per
+  (scope, project) and says how many it removed; nothing reads further back
+  than the newest row, so five leaves some history to look at while bounding
+  the table.
+
+### Added
+
+- `HARNESS_DB_SYNCHRONOUS`, honoured beside the `journal_mode` pragma when a
+  connection is opened. Unset is exactly the behaviour that shipped before —
+  SQLite's `FULL`, an fsync per commit — and that is what a real harness
+  should keep. The test suite sets `OFF` against its throwaway per-test
+  databases, where an fsync per commit protects nothing and cost about 100ms
+  a write: the suite went from 576 seconds to 47.
+
 ## [0.22.0] - 2026-08-26
 
 ### Changed

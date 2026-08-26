@@ -235,7 +235,9 @@ page arrives already in the right palette — no flash on load.
 Environment (see `.env.example`): `HARNESS_MODEL` (default `claude-opus-5`),
 `HARNESS_ADMIN_MODEL` (cheap model for housekeeping), `HARNESS_TRIAGE_MODEL`
 (mid-tier model for triage and PR review, default `claude-sonnet-5`), poll interval, per-run
-budget cap, timezone, ntfy settings.
+budget cap, timezone, ntfy settings. `HARNESS_DB_SYNCHRONOUS` sets SQLite's
+durability pragma and is best left unset — that is SQLite's `FULL`, an fsync
+per commit, which is what state you cannot rebuild deserves.
 
 Per-repo policies, editable live in Settings:
 
