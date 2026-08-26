@@ -4,6 +4,25 @@ All notable changes to Harness are recorded here. The format is
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project
 follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.21.3] - 2026-08-26
+
+### Fixed
+
+- **The database schema and migrations now run once per process, not once
+  per connection.** Every call to `db.conn()` replayed the whole `CREATE
+  TABLE` script and then attempted all ten migrations in turn, relying on
+  each one failing with "duplicate column name" to know it had already been
+  applied. That is a lot of wasted work on a hot path — the desk opens a
+  connection for nearly every read — and it made the errors indistinguishable
+  from real ones. The schema pass and the migration walk are now guarded by
+  a set of database paths this process has already prepared, so they happen
+  once for a given database and are skipped thereafter. The guard is keyed on
+  the path rather than a bare flag, so a test suite that points at a fresh
+  database per test still gets it migrated; the `journal_mode=WAL` pragma
+  stays per-connection, where it belongs; and the path is only recorded after
+  a clean pass, so a genuine failure is retried on the next connection rather
+  than silently skipped for the life of the process.
+
 ## [0.21.2] - 2026-08-26
 
 ### Fixed
