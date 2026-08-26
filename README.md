@@ -299,7 +299,8 @@ python run.py            # GUI + worker on :8300
 Run the tests with `python -m pytest -q`. State lives in `data/` (SQLite,
 clones, worktrees, per-run transcripts). Deleting `data/repos`,
 `data/worktrees`, `data/pr-runs` or `data/sandbox` is always safe — they're
-rebuilt.
+rebuilt; deleting a worktree an item is still working in only costs that
+item its edits, and the next attempt starts from `origin/dev`.
 
 `data/claude-home` holds the Agent SDK's own session transcripts: in the
 container `~/.claude` is symlinked there at boot, so a fix cut off by a
