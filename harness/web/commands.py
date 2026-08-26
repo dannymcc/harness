@@ -54,9 +54,12 @@ CHEATSHEET = "\n".join(
     + [f"  {usage:<30}{what}" for usage, what in HELP]
     + ["", "Anything without a leading / goes to Harry as a direction."])
 
-# What a policy will take from a command. The gates take the words the
-# settings page offers; the counters take a number. Keys in neither map
-# (active_hours) are free text, as they are on the settings page.
+# What a policy will take. This is the one list: the settings page builds
+# each gate's dropdown from it, so the form and the command cannot disagree
+# over what a policy accepts. The counters take a number. Keys in neither
+# map (active_hours) are free text, here and on the settings page.
+# `tests/test_web.py` holds the keys to `config.POLICY_DEFAULTS` and to the
+# settings copy in `app.POLICY_COPY`.
 POLICY_CHOICES = {
     "file_issues": ("auto", "off"),
     "fix_issues": ("auto", "lead", "approve"),

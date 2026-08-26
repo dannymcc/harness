@@ -4,6 +4,31 @@ All notable changes to Harness are recorded here. The format is
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project
 follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.23.0] - 2026-08-26
+
+### Changed
+
+- **The settings form builds each policy's dropdown from the same list the
+  `/policy` command accepts** (#94). The policy keys, the values they take
+  and the settings copy are written down in three modules, and the settings
+  template held a fourth copy — it picked its widget by inspecting the
+  policy's current value and hardcoded the option list per key. Nothing
+  caught drift between them: a policy with no entry in `POLICY_COPY`
+  rendered as a bare key, and a gate whose values were not
+  auto/lead/approve rendered as a free-text box, and neither failed
+  anything. The template now reads `commands.POLICY_CHOICES`, so the form
+  and the command cannot come to disagree about what a gate accepts, and
+  `tests/test_web.py` holds the sources together: copy covers every key in
+  `POLICY_DEFAULTS`, the choice keys and the numeric keys are all real keys
+  and never both, and every default is a value its own choices accept. No
+  change to what any policy offers today — the gain is that adding one is
+  now a single edit, and drift fails the suite instead of quietly reaching
+  the page.
+
+- The README's per-repo policy table lists the daily budget cap and spells
+  out the `HH-HH` form of active hours. Both were in the settings page and
+  the code but missing from the table.
+
 ## [0.22.8] - 2026-08-26
 
 ### Changed
