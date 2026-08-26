@@ -4,6 +4,23 @@ All notable changes to Harness are recorded here. The format is
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project
 follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.22.5] - 2026-08-26
+
+### Fixed
+
+- **A run that achieved nothing now counts towards the circuit breaker**
+  (#84). A session that came back with structured output was recorded as a
+  healthy run, whatever it had actually done — so the two ways an engineer
+  can return clean and empty-handed, declining the work and reporting
+  success without touching the worktree, both reset the trailing failure
+  count to zero. An item could repeat either indefinitely and the breaker's
+  durable memory would never move. Such a run is now written back to the run
+  log as the failure it was, so two in a row hold the item exactly as two
+  ordinary failures would, and the run list shows it plainly. The change is
+  deliberately narrow: only the run's outcome and summary change, its
+  timings are left alone, so orphaned-run skipping and the breaker's reset
+  window behave as before.
+
 ## [0.22.4] - 2026-08-26
 
 ### Fixed
