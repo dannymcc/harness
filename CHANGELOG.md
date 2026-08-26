@@ -4,6 +4,23 @@ All notable changes to Harness are recorded here. The format is
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project
 follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.22.2] - 2026-08-26
+
+### Fixed
+
+- **Harry's ruling-pass count is kept on the question, not in the process**
+  (#80). A question Harry leaves undecided gets one more pass and then goes
+  to the operator, but the count of those passes lived in a module-level
+  dict, so every restart — and this desk restarts itself on release — set it
+  back to zero. A question nobody ruled on could cycle indefinitely, paying
+  for a ruling run each pass without ever reaching the operator; worse for a
+  held item, whose park and breaker handling only fires on the escalation
+  that never came. The count is now a `ruling_passes` column on `questions`,
+  in the schema and as a migration, so existing databases pick it up reading
+  zero — the most an upgrade costs a question already pending is one extra
+  pass. A question closed elsewhere leaves nothing behind, since the count
+  goes with its own row.
+
 ## [0.22.1] - 2026-08-26
 
 ### Fixed
