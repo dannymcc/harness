@@ -112,6 +112,31 @@ def hold_for_ruling(project, item, asked_by: str, reason: str,
 HOLD_OPTIONS = {"issue": ["Fix", "Skip", "Won't fix"],
                 "pr": ["Merge", "Skip", "Won't fix"]}
 
+# The two hold reasons that mean the run before the hold left nothing to
+# build on. hold_for_ruling writes the reason into the item's error, so the
+# error is where fresh_session_on_approve reads them back — keep the wording
+# at the hold sites (fix_item) and these constants the same string.
+NO_CHANGE_REASON = "reported success but changed nothing"
+DECLINED_REASON = "declined the work"
+NO_WORK_REASONS = (NO_CHANGE_REASON, DECLINED_REASON)
+
+
+def fresh_session_on_approve(item) -> bool:
+    """Whether sending this item back to an engineer should start over
+    rather than resume its saved session.
+
+    Resuming is right for the ordinary case: tests failed, the engineer has
+    the failure in front of it and its own work still to hand. It is wrong
+    after a run that produced nothing usable — a session that already
+    believes the work is done resumes, changes nothing again, and is held
+    again, which is a loop no amount of approving gets out of. So every
+    path that re-approves such an item clears the session id, as retry
+    always has."""
+    if not item:
+        return False
+    error = (item["error"] or "") if "error" in item.keys() else ""
+    return any(r in error for r in NO_WORK_REASONS)
+
 
 def hold_item(project, item, asked_by: str, reason: str, context: str) -> str:
     """hold_for_ruling with the vocabulary route_answers acts on: Fix (or
@@ -340,6 +365,10 @@ def route_answers(project) -> list[str]:
             fields.update(error="", breaker_reset_at=db.now())
             if not harrys:
                 fields["breaker_trips"] = 0
+            if fresh_session_on_approve(item):
+                # Nothing came of the last run, so this is a fresh attempt,
+                # not a resume — the same call the retry button makes.
+                fields["session_id"] = ""
         elif harrys and status == "waiting_human":
             fields["error"] = (f"parked by Harry: {q['answer'][:160]}"
                                if action == "hold" else
@@ -579,7 +608,7 @@ async def fix_item(project, item, persona: str = "Malcolm") -> None:
                          f"{msg[:120]} — held for a ruling", "warn",
                          project=name)
             hold_item(project, db.get_item(name, "issue", item["number"]),
-                      persona, f"{persona} declined the work",
+                      persona, f"{persona} {DECLINED_REASON}",
                       f"{persona}: {msg[:600]}")
         else:
             # Mechanical failure (crash, timeout, transport): retry next
@@ -597,7 +626,7 @@ async def fix_item(project, item, persona: str = "Malcolm") -> None:
 
     if not repo.wt_has_changes(project, wt):
         hold_item(project, db.get_item(name, "issue", item["number"]), persona,
-                  f"{persona} reported success but changed nothing",
+                  f"{persona} {NO_CHANGE_REASON}",
                   f"{persona}: {out['summary'][:600]}")
         return
 
@@ -2077,7 +2106,8 @@ def _apply_directive_actions(project, actions: list,
         try:
             if act in ("approve_item", "reject_item", "hold_item", "retry_item"):
                 kind, num = a.get("kind"), a.get("number")
-                if not (kind and num and db.get_item(name, kind, num)):
+                row = db.get_item(name, kind, num) if kind and num else None
+                if not row:
                     continue
                 status = {"approve_item": "approved", "reject_item": "rejected",
                           "hold_item": "waiting_human",
@@ -2089,6 +2119,11 @@ def _apply_directive_actions(project, actions: list,
                         fields["breaker_trips"] = 0
                 if act == "retry_item":
                     fields.update(error="", session_id="")
+                elif act == "approve_item" and fresh_session_on_approve(row):
+                    # Same rule as the approve button: an item held because
+                    # its run left nothing behind starts over rather than
+                    # resuming a session that thinks it is finished.
+                    fields["session_id"] = ""
                 db.update_item(name, kind, num, **fields)
                 done.append(f"{act} {kind}#{num}")
             elif act == "close_item":

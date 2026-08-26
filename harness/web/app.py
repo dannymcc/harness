@@ -503,8 +503,15 @@ def approve(name: str, kind: str, number: int):
         return RedirectResponse(f"/p/{name}", status_code=303)
     item = db.get_item(name, kind, number)
     unreviewed = bool(item and kind == "pr" and item["status"] == "new")
+    fields = {}
+    if pipeline.fresh_session_on_approve(item):
+        # The last run produced nothing to build on, so approving it is a
+        # fresh attempt rather than a resume — otherwise the session that
+        # already believes the work is done picks up where it left off and
+        # the item comes straight back.
+        fields["session_id"] = ""
     db.update_item(name, kind, number, status="approved", error="",
-                   breaker_reset_at=db.now(), breaker_trips=0)
+                   breaker_reset_at=db.now(), breaker_trips=0, **fields)
     db.log_event(
         f"{config.OPERATOR} sent {kind}#{number} straight to merge, without "
         "a review — the harness tests it first" if unreviewed

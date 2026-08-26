@@ -434,6 +434,80 @@ def test_landing_forgives_the_trips(fresh_db, may, monkeypatch, tmp_path):
     assert item["status"] == "queued" and item["breaker_trips"] == 0
 
 
+def _re_approve(route, fresh_db, may, client, number):
+    """Send a held issue back to its engineer, by whichever of the two
+    routes: the operator's Approve button or Harry's "Fix" ruling."""
+    from harness import pipeline
+    if route == "button":
+        assert client.post(f"/p/may/issue/{number}/approve",
+                           follow_redirects=False).status_code == 303
+    else:
+        q = _held_question(fresh_db, f"issue#{number}")
+        fresh_db.answer_question(q["id"], "Fix", by="Harry")
+        assert pipeline.route_answers(may) == [f"issue#{number} -> approved"]
+    assert fresh_db.get_item("may", "issue", number)["status"] == "approved"
+
+
+def test_re_approving_a_no_change_hold_is_a_fresh_attempt(
+        fresh_db, may, monkeypatch, tmp_path, client):
+    """A run that changed nothing leaves a session that believes the work is
+    done; resuming it changes nothing again and the item is held again. So
+    both routes back to the engineer clear the session id — and they behave
+    the same way, since the operator's button and Harry's ruling are the
+    same act on the same item."""
+    from harness import pipeline
+    monkeypatch.setattr(pipeline.notify, "send", lambda *a, **k: None)
+    for number, route in ((55, "button"), (56, "ruling")):
+        fresh_db.upsert_item("may", "issue", number, "nothing", "a", "open", "x")
+        fresh_db.update_item("may", "issue", number, status="approved", plan="p")
+        seen = _fake_engineer(monkeypatch, tmp_path, number, changes=False)
+        asyncio.run(pipeline.fix_item(may, fresh_db.get_item("may", "issue", number)))
+        held = fresh_db.get_item("may", "issue", number)
+        assert held["status"] == "held" and held["session_id"] == "sess-1"
+        _re_approve(route, fresh_db, may, client, number)
+        assert fresh_db.get_item("may", "issue", number)["session_id"] == ""
+        # so the next dispatch starts over rather than resuming
+        asyncio.run(pipeline.fix_item(may, fresh_db.get_item("may", "issue", number)))
+        assert seen == [None, None]
+
+
+def test_re_approving_a_decline_is_a_fresh_attempt_too(
+        fresh_db, may, monkeypatch, tmp_path, client):
+    """A refusal leaves nothing on disk either, so overruling it starts the
+    engineer over rather than resuming the session that refused."""
+    from harness import pipeline
+    monkeypatch.setattr(pipeline.notify, "send", lambda *a, **k: None)
+    fresh_db.upsert_item("may", "issue", 59, "risky", "a", "open", "x")
+    fresh_db.update_item("may", "issue", 59, status="approved", plan="p")
+    _fake_engineer(monkeypatch, tmp_path, 59, success=False)
+    asyncio.run(pipeline.fix_item(may, fresh_db.get_item("may", "issue", 59)))
+    assert fresh_db.get_item("may", "issue", 59)["status"] == "held"
+    _re_approve("button", fresh_db, may, client, 59)
+    assert fresh_db.get_item("may", "issue", 59)["session_id"] == ""
+
+
+def test_re_approving_after_a_red_test_run_still_resumes(
+        fresh_db, may, monkeypatch, tmp_path, client):
+    """The ordinary case is untouched: the engineer has the failing output
+    in front of it and its own work still to hand, so it picks up where it
+    left off."""
+    from harness import pipeline
+    monkeypatch.setattr(pipeline.notify, "send", lambda *a, **k: None)
+    for number, route in ((57, "button"), (58, "ruling")):
+        fresh_db.upsert_item("may", "issue", number, "red", "a", "open", "x")
+        fresh_db.update_item("may", "issue", number, status="approved", plan="p")
+        seen = _fake_engineer(monkeypatch, tmp_path, number, tests_pass=False)
+        for _ in range(2):  # two red runs: the second holds it for a ruling
+            asyncio.run(pipeline.fix_item(may,
+                                          fresh_db.get_item("may", "issue", number)))
+        held = fresh_db.get_item("may", "issue", number)
+        assert held["status"] == "held" and "tests failed" in held["error"]
+        _re_approve(route, fresh_db, may, client, number)
+        assert fresh_db.get_item("may", "issue", number)["session_id"] == "sess-1"
+        asyncio.run(pipeline.fix_item(may, fresh_db.get_item("may", "issue", number)))
+        assert seen == [None, "sess-1", "sess-1"]
+
+
 def test_the_same_hold_question_already_ruled_on_goes_to_the_operator(
         fresh_db, may, monkeypatch):
     """Word-for-word the same question Harry answered this week is not put
