@@ -100,16 +100,17 @@ told to behave.
   PR is an instruction, not a note. Answer **Fix** (or "go ahead", "do it",
   "merge") and it is signed off there and then and an engineer picks it up
   on the next cycle, whatever `fix issues` is set to — saying so is the same
-  act as pressing approve. Either way, an item held because its last run
+  act as pressing approve. Whichever way it is sent back — the answer, the
+  button, or a standing direction — an item held because its last run
   changed nothing or the engineer declined starts a fresh attempt rather
   than resuming that session: there is nothing there to build on, and a
   session that already believes the work is done would only stop again.
   A run held for failing tests still resumes — the engineer has the failure
   in front of it and its own work to hand. **Skip** leaves it waiting on
-  you with your reason on the thread; **Won't fix** closes it out. Anything else you type is a
-  message rather than a decision, so the item goes back to whoever asked,
-  with your answer in front of them — it never sits there unread. The
-  wordings that carry a decision are a fixed list in the code
+  you with your reason on the thread; **Won't fix** closes it out. Anything
+  else you type is a message rather than a decision, so the item goes back
+  to whoever asked, with your answer in front of them — it never sits there
+  unread. The wordings that carry a decision are a fixed list in the code
   (`db.ANSWER_ACTIONS`), so nothing is inferred later, and hovering an
   answer button tells you what it will do. While an answer stands, the same
   question about the same item cannot be put to you again for a week: the

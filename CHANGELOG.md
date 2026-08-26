@@ -4,6 +4,24 @@ All notable changes to Harness are recorded here. The format is
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project
 follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.22.4] - 2026-08-26
+
+### Fixed
+
+- **Approving an item that was held because nothing came of it starts a
+  fresh attempt** (#83). An item is held when the engineer reports success
+  without changing a file, or declines the work outright. Approving it sent
+  it back with its saved session id intact, so the engineer resumed a
+  transcript in which the job was already finished, changed nothing again,
+  and was held again — a loop that no amount of approving got out of, each
+  pass costing a run and a ruling. Approving such an item now clears the
+  session id, which is what the retry button has always done, and the rule
+  is applied at all three places an item can be sent back: the approve
+  button, answering **Fix** or **Merge** on the question, and a standing
+  direction Harry turns into an approval. A hold for failing tests still
+  resumes, unchanged — there the engineer has the failure in front of it
+  and its own work to hand, which is exactly what resuming is for.
+
 ## [0.22.3] - 2026-08-26
 
 ### Fixed
