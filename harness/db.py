@@ -155,27 +155,37 @@ MIGRATIONS = [
     "CREATE INDEX IF NOT EXISTS reports_scope ON reports(scope, project, id)",
 ]
 
-# DB paths this process has already created the schema on and walked the
-# migration list for. Keyed on the path, not a bare flag, so the tests'
-# per-test DB (conftest monkeypatches config.DB_PATH) is still migrated.
+# DB paths this process has already prepared: data directory made, journal
+# mode set, schema created and the migration list walked. Keyed on the path,
+# not a bare flag, so the tests' per-test DB (conftest monkeypatches
+# config.DB_PATH) is still migrated.
 _migrated_paths: set[str] = set()
 
 
 @contextmanager
 def conn():
-    config.DATA_DIR.mkdir(parents=True, exist_ok=True)
+    key = str(config.DB_PATH)
+    first = key not in _migrated_paths
+    if first:
+        config.DATA_DIR.mkdir(parents=True, exist_ok=True)
     c = sqlite3.connect(config.DB_PATH, timeout=30)
     c.row_factory = sqlite3.Row
-    # Desk cycles run concurrently; WAL lets readers proceed under a writer
-    # instead of stacking "database is locked" retries on the 30s timeout.
-    # Per-connection, so it stays outside the once-per-path guard below.
-    c.execute("PRAGMA journal_mode=WAL")
     # Durability is left at SQLite's default unless the environment says
-    # otherwise; see config.DB_SYNCHRONOUS. Per-connection, like the above.
+    # otherwise; see config.DB_SYNCHRONOUS. Genuinely a property of the
+    # connection, so it is set on every one, outside the guard below — and
+    # set first, so the journal-mode switch below is itself made at the
+    # configured durability rather than at SQLite's default FULL. That
+    # ordering is most of the win in #85: the switch fsyncs, and the suite
+    # gives every test its own database to convert.
     if config.DB_SYNCHRONOUS:
         c.execute(f"PRAGMA synchronous={config.DB_SYNCHRONOUS}")
-    key = str(config.DB_PATH)
-    if key not in _migrated_paths:
+    if first:
+        # Desk cycles run concurrently; WAL lets readers proceed under a
+        # writer instead of stacking "database is locked" retries on the 30s
+        # timeout. Journal mode is a persistent property of the database
+        # file rather than of the connection, so re-issuing it on a path
+        # this process has already set touches the header for nothing.
+        c.execute("PRAGMA journal_mode=WAL")
         c.executescript(SCHEMA)
         for mig in MIGRATIONS:
             try:
