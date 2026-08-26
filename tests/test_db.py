@@ -8,6 +8,8 @@ class _CountingConnection(sqlite3.Connection):
 
     schema_runs = 0
     migration_runs = 0
+    wal_runs = 0
+    synchronous_runs = 0
 
     def executescript(self, sql):
         type(self).schema_runs += 1
@@ -17,6 +19,10 @@ class _CountingConnection(sqlite3.Connection):
         from harness import db
         if sql in db.MIGRATIONS:  # not every migration is an ALTER TABLE
             type(self).migration_runs += 1
+        if sql == "PRAGMA journal_mode=WAL":
+            type(self).wal_runs += 1
+        if sql.startswith("PRAGMA synchronous="):
+            type(self).synchronous_runs += 1
         return super().execute(sql, *args, **kwargs)
 
 
@@ -42,6 +48,40 @@ def test_conn_runs_schema_and_migrations_once_per_db_path(fresh_db,
     assert _CountingConnection.migration_runs == len(fresh_db.MIGRATIONS), (
         f"migrations ran {_CountingConnection.migration_runs} times over 5 "
         f"conn() calls; expected one pass of {len(fresh_db.MIGRATIONS)}"
+    )
+
+
+def test_conn_skips_wal_pragma_reissue_after_first_call(fresh_db,
+                                                        monkeypatch):
+    """PRAGMA journal_mode=WAL is a persistent property of the database file
+    once set — re-issuing it on every conn() call touches the DB header and
+    can force a checkpoint, for no benefit after the first call against a
+    given path (issue #85). Only the first conn() against a given DB path
+    should pay that cost, mirroring the once-per-path schema/migration guard
+    from #73. PRAGMA synchronous is genuinely per-connection, so it must
+    still be issued on every connection."""
+    real_connect = sqlite3.connect
+    monkeypatch.setattr(sqlite3, "connect", lambda *a, **kw: real_connect(
+        *a, factory=_CountingConnection, **kw))
+    _CountingConnection.wal_runs = 0
+    _CountingConnection.synchronous_runs = 0
+
+    for _ in range(5):
+        with fresh_db.conn() as c:
+            c.execute("SELECT 1")
+
+    assert _CountingConnection.wal_runs == 1, (
+        f"PRAGMA journal_mode=WAL ran {_CountingConnection.wal_runs} times "
+        "over 5 conn() calls against the same DB path; expected 1"
+    )
+    # ...and the journal mode really is WAL on a later connection, which is
+    # the whole reason the re-issue is safe to skip.
+    with fresh_db.conn() as c:
+        assert c.execute("PRAGMA journal_mode").fetchone()[0] == "wal"
+    assert _CountingConnection.synchronous_runs == 6, (
+        "config.DB_SYNCHRONOUS must be honoured on every connection, not "
+        f"once per path; it ran {_CountingConnection.synchronous_runs} times "
+        "over 6 conn() calls"
     )
 
 
