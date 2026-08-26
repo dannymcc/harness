@@ -4,6 +4,22 @@ All notable changes to Harness are recorded here. The format is
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project
 follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.22.8] - 2026-08-26
+
+### Changed
+
+- **Each database is prepared once per path, not once per connection** (#85).
+  `db.conn()` is the single entry point for every read and write, and it
+  re-did its whole setup on each call — a data-directory `mkdir`, a fresh
+  connection and `PRAGMA journal_mode=WAL` — even though journal mode is a
+  persistent property of the database file. Both now sit inside the same
+  once-per-path guard as the schema and migration work. `PRAGMA synchronous`
+  is genuinely per-connection and is still set on every one, but now before
+  the journal-mode switch rather than after, so that switch's fsync happens
+  at the configured durability instead of SQLite's default. No schema,
+  migration or query-result change; the test suite runs in about a third of
+  the time.
+
 ## [0.22.7] - 2026-08-26
 
 ### Fixed
