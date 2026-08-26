@@ -74,6 +74,16 @@ REPOS_DIR = DATA_DIR / "repos"        # harness's own clones, one per project
 DB_PATH = DATA_DIR / "harness.db"
 LOG_DIR = DATA_DIR / "logs"           # per-run agent transcripts
 
+# SQLite durability. Unset means SQLite's own default (FULL): every commit is
+# fsynced, which costs ~100ms per write here and is what a real harness wants
+# for state it cannot rebuild. The test suite sets OFF against its throwaway
+# per-test databases, where a power cut losing the last commit is no loss at
+# all. Anything but SQLite's four levels falls back to unset — the value is
+# interpolated into a PRAGMA, which takes no parameters.
+DB_SYNCHRONOUS = os.environ.get("HARNESS_DB_SYNCHRONOUS", "").strip().upper()
+if DB_SYNCHRONOUS not in ("", "OFF", "NORMAL", "FULL", "EXTRA"):
+    DB_SYNCHRONOUS = ""
+
 # --- Claude -----------------------------------------------------------------
 # The Agent SDK inherits credentials from the environment
 # (ANTHROPIC_API_KEY or CLAUDE_CODE_OAUTH_TOKEN via `claude setup-token`).

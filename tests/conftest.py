@@ -7,6 +7,11 @@ import pytest
 
 _tmp = tempfile.mkdtemp(prefix="harness-tests-")
 os.environ["HARNESS_DATA_DIR"] = _tmp
+# Every test writes to a throwaway database, so there is nothing to protect
+# with an fsync per commit — and at ~100ms each they dominate the suite's
+# runtime. Set before harness.config is first imported, since it reads the
+# environment at import time.
+os.environ["HARNESS_DB_SYNCHRONOUS"] = "OFF"
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
