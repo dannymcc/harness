@@ -14,6 +14,7 @@ def test_version_in_footer(client):
 def test_question_buttons_and_ntfy_answer(client, fresh_db):
     fresh_db.ask_question("may", "Ruth", "", "Pick one", options=["A", "B"])
     q = fresh_db.open_questions("may")[0]
+    fresh_db.escalate_question(q["id"])   # buttons are for what reaches you
     assert "option-form" in client.get("/p/may").text
     r = client.post(f"/p/may/question/{q['id']}/answer?via=ntfy",
                     data={"answer": "A"})
@@ -208,11 +209,35 @@ def test_only_escalations_get_primary_buttons(client, fresh_db):
     fresh_db.escalate_question(adam["id"])
     html = client.get("/p/may").text
     assert "Needs your decision (1)" in html and "With Harry (1)" in html
-    # the operator's own question is answerable at a tap; Harry's is tucked away
+    # the operator's own question is answerable at a tap; Harry's is tucked
+    # away, read-only: no answer form and no option buttons for it
     assert html.index("Dannys call") < html.index("Harrys call")
-    assert "Answer it yourself instead" in html
+    assert "Answer it yourself instead" not in html
+    assert f"/question/{adam['id']}/answer" in html
+    ruth = [q for q in fresh_db.harry_inbox("may")][0]
+    assert f"/question/{ruth['id']}/answer" not in html
     html = client.get("/").text
-    assert "Needs your decision (1)" in html
+    assert "Needs your decision (1)" in html and "With Harry (1)" in html
+    assert f"/question/{ruth['id']}/answer" not in html
+
+
+def test_held_items_sit_with_harry_not_in_your_decision_list(client, fresh_db):
+    """A held item is Harry's to rule on: it is listed under With Harry,
+    not under Awaiting your decision — but its page still offers approve,
+    so the operator can move it by hand."""
+    fresh_db.upsert_item("may", "issue", 4, "Held one", "a", "open", "x")
+    fresh_db.update_item("may", "issue", 4, status="held",
+                         error="Malcolm declined the work — with Harry")
+    fresh_db.upsert_item("may", "issue", 5, "Yours", "a", "open", "x")
+    fresh_db.update_item("may", "issue", 5, status="waiting_human")
+    html = client.get("/p/may").text
+    assert "Awaiting your decision (1)" in html
+    assert "With Harry (1)" in html
+    assert html.index("Held one") > html.index("With Harry (1)")
+    assert "Fix it" in client.get("/p/may/issue/4").text
+    r = client.post("/p/may/issue/4/approve", follow_redirects=False)
+    assert r.status_code == 303
+    assert fresh_db.get_item("may", "issue", 4)["status"] == "approved"
 
 
 def _queue_item(fresh_db, number=1):

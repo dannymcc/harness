@@ -727,14 +727,17 @@ def test_standup_question_is_the_operators_not_harrys_own_inbox(
             "desks": [], "blockers": [], "decisions": [],
             "staffing": [], "directives": [],
             "question_for_human": "Do we keep paying for the flaky runner?",
+            "outside_remit_reason": "spend beyond the ordinary",
             "question_options": ["Keep", "Drop"]}}
 
     monkeypatch.setattr(agents, "standup", fake_standup)
     asyncio.run(pipeline.run_standup(force=True))
     assert fresh_db.harry_inbox() == []          # never his own to rule on
     esc = fresh_db.escalated_questions()
-    assert [q["question"] for q in esc] == ["Do we keep paying for the "
-                                            "flaky runner?"]
+    assert len(esc) == 1
+    assert esc[0]["question"].startswith("Do we keep paying for the flaky "
+                                         "runner?")
+    assert "Why this is yours: spend beyond the ordinary" in esc[0]["question"]
     assert esc[0]["asked_by"] == "Harry"
     assert fresh_db.question_options(esc[0]) == ["Keep", "Drop"]
     # and the activity log reads as an escalation, not a self-dialogue
