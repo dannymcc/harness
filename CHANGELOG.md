@@ -4,6 +4,79 @@ All notable changes to Harness are recorded here. The format is
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project
 follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Changed
+
+- **What the section cannot do as it stands now goes to Harry, not the
+  operator.** A triage verdict of not fixable, an engineer declining the
+  work, a run that reported success and changed nothing, a second red test
+  run, and a review that is not an auto-merge all used to land the item in
+  `waiting_human` — the operator's queue — with nobody in the section having
+  ruled on it. Each now holds the item (`held`, the status the circuit
+  breaker already used) with a question to Harry on the item's record,
+  carrying the verdict, the decline reason or the failing output, and the
+  options the harness acts on: **Fix** (or **Merge**, for a PR) / **Skip** /
+  **Won't fix**. Harry's ruling moves the item there and then — back into
+  the flow, parked, or closed out — through the same routing table the
+  operator's answers already use. A held item is not work: nothing
+  re-dispatches it and nothing wakes the worker for it until the ruling
+  lands. The breaker's semantics apply throughout: one ruling per item, and
+  an item that comes back held after Harry has ruled goes to the operator
+  instead of round again. That is also the cap on the refusal loop — an
+  engineer declining the same item is Harry's call the first time and the
+  operator's the second, and never re-approved by the harness in between.
+  The operator's own approve, reject and answer buttons still work on a
+  held item, and their say-so forgives the trip count as before.
+
+- Two things stay the operator's by design. Ruth's triage schema gains a
+  `needs_operator` flag, off by default and reserved for a decision that is
+  the maintainer's — product direction, a breaking change, something
+  outside the codebase — which still parks the item for them directly; her
+  prompt no longer says to "leave it for the maintainer" otherwise. And a
+  policy of `fix_issues: approve` or `merge_prs: approve` means the start is
+  the operator's click by their own setting, so Harry's "fix" or "merge" on
+  such an item lands it on their desk as a recommendation rather than
+  starting the work over their gate.
+
+- **Harry's stand-up question is filed once, on the thing it is about.** It
+  was filed with no project and no item, so the dedupe never matched, the
+  operator's answer routed nowhere, and the same question came back
+  rephrased every hour — ten times in two days on one desk. The question
+  now names its desk and item from the text (the desk Harry mentions, the
+  issue and PR numbers he gives; one item key goes on the record and the
+  rest are listed in the text), so the answer moves the item. It is deduped
+  by that item — or by the desk, for a question naming no item — for a day
+  regardless of wording: one already in front of the operator means nothing
+  is filed, and one they have answered within the day is not asked again;
+  an event records their ruling instead and the next stand-up digest
+  carries it back to Harry as binding. The stand-up and rulings schemas
+  gain a required `outside_remit_reason` ("why this is the operator's, not
+  yours") that is attached to the question as *Why this is yours*; a
+  stand-up question without one is dropped with an event, on the principle
+  that a call Harry can make is a directive he did not issue. Both prompts
+  now say so in as many words.
+
+- The stand-up digest no longer describes `waiting_human` items as "waiting
+  on operator" for Harry to name as blockers: they read as the operator's
+  call and not his blocker (or as parked by his own ruling, where that is
+  what happened), and the prompt's "work waiting on the operator for days"
+  blocker is replaced by "an item held for a ruling you have not given".
+  The digest also lists the operator's answers to Harry's own questions
+  from the last day.
+
+- The overview and project pages put only escalated questions in the
+  operator's action list. Harry's inbox stays visible, folded away with a
+  count and read-only — no answer buttons, since answering over his head was
+  exactly what put un-escalated questions in front of the operator. The
+  project page lists held items under **With Harry** rather than under
+  **Awaiting your decision**; their item pages keep the approve button.
+
+- The IC schemas' `question_for_human` no longer says "needing the
+  operator's decision": it is a decision from Harry, who escalates to the
+  operator only what is genuinely theirs. Harry's own schemas keep the
+  operator wording.
+
 ## [0.21.3] - 2026-08-26
 
 ### Fixed

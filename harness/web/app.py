@@ -153,7 +153,8 @@ def overview(request: Request):
         })
     return render(request, "overview.html",
                   cards=cards,
-                  questions=_enrich_questions(db.open_questions()),
+                  questions=_enrich_questions(db.escalated_questions()),
+                  harry_inbox=_enrich_questions(db.harry_inbox()),
                   staff=_staff_board(),
                   cto_report=db.latest_report("cto"),
                   events=db.recent_events(20) if tab == "activity" else [],
@@ -332,6 +333,8 @@ def project_page(request: Request, name: str):
         roster=_agent_roster(p, runs),
         waiting=[i for i in items if i["status"] == "waiting_human"
                  and i["gh_state"] == "open"],
+        with_harry=[i for i in items if i["status"] == "held"
+                    and i["gh_state"] == "open"],
         release=db.open_release(name),
         releases=db.project_releases(name),
         release_pending=db.get_setting(f"release_requested.{name}") == "1",
@@ -344,7 +347,8 @@ def project_page(request: Request, name: str):
         security_report=db.latest_report("security", name),
         security_pending=db.get_setting(f"security_requested.{name}") == "1",
         directions=db.recent_directions(name),
-        questions=_enrich_questions(db.open_questions(name)),
+        questions=_enrich_questions(db.escalated_questions(name)),
+        harry_inbox=_enrich_questions(db.harry_inbox(name)),
         policies=db.all_policies(name),
         runs=runs[:15],
         events=db.recent_events(30, name),
