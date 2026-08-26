@@ -122,6 +122,11 @@ def _prune_files(root: Path, days: int) -> int:
     return n
 
 
+# Shorter than pipeline.STUCK_WORKING_HOURS (6) on purpose: the run is
+# closed first, so the dashboard stops claiming an agent is still working,
+# while the item stays `working` a while longer as headroom in case the
+# session is merely slow. pipeline._unstick_working requeues the item once
+# it has not moved for six hours.
 ORPHAN_RUN_HOURS = 3
 
 
@@ -130,10 +135,9 @@ def _close_orphaned_runs(c) -> int:
     cutoff = (datetime.now(timezone.utc) - timedelta(hours=ORPHAN_RUN_HOURS)) \
         .strftime("%Y-%m-%dT%H:%M:%SZ")
     return c.execute(
-        "UPDATE runs SET ok = 0, finished_at = ?, "
-        "summary = 'orphaned (no result recorded)' "
+        "UPDATE runs SET ok = 0, finished_at = ?, summary = ? "
         "WHERE finished_at IS NULL AND started_at < ?",
-        (db.now(), cutoff)).rowcount
+        (db.now(), db.HOUSEKEEPING_ORPHAN_SUMMARY, cutoff)).rowcount
 
 
 WORKTREE_KEEP_DAYS = 3

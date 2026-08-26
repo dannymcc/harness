@@ -737,3 +737,20 @@ def test_close_button_closes_the_item_and_the_issue(client, fresh_db,
     assert closed == [(8, "Closed as already shipped: shipped in v0.38.1")]
     # Nothing left to press: a closed item offers no close button.
     assert "Close as done" not in client.get("/p/may/issue/8").text
+
+
+def test_housekeeping_orphan_is_not_mislabelled_as_a_restart(client, fresh_db):
+    """worker.recover_after_restart and housekeeping._close_orphaned_runs both
+    write summaries starting with "orphaned", but only the former is a
+    restart - the latter is a run that sat >3h with no result while the
+    process stayed up, which could be a genuinely hung agent. The dashboard
+    must not tell the operator it was "interrupted by a restart, requeued":
+    that's not what happened and hides a possibly-stuck agent. (Issue #97)"""
+    from harness.web.app import _member_status
+    rid = fresh_db.start_run("may", "ic", "issue#1", "fix", "m", "Malcolm")
+    fresh_db.finish_run(rid, False, 0.1, 1, "orphaned (no result recorded)")
+    runs = fresh_db.recent_runs(10, "may")
+    m = _member_status("Malcolm", runs, lambda r: r["agent"] == "Malcolm")
+    assert "restart" not in m["detail"].lower(), (
+        "housekeeping's 3h in-process orphan must not be reported as a "
+        f"restart interruption: got detail={m['detail']!r}")
