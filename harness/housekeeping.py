@@ -19,6 +19,7 @@ from .agents import AgentStalled
 
 EVENT_KEEP = 300          # newest events kept verbatim
 RUN_KEEP = 200            # newest run rows kept; older fold into aggregates
+REPORT_KEEP = 5           # newest report rows kept per (scope, project)
 LOG_KEEP_DAYS = 14        # per-run transcript files
 SESSION_KEEP_DAYS = 7     # Agent SDK session files (~/.claude/projects)
 NOTES_MIN_NEW_EVENTS = 15 # don't wake Tariq for less than this
@@ -67,6 +68,29 @@ def _prune_runs(c) -> int:
                   (key, str(total)))
     c.execute("DELETE FROM runs WHERE id <= ?", (row["id"],))
     return sum(r["n"] for r in old)
+
+
+def _prune_reports(c) -> int:
+    """Bound the reports table per (scope, project).
+
+    Every persona memory note, lead summary, stand-up line and desk-notes
+    rewrite inserts a fresh row, and readers only ever ask for the newest one
+    per scope. A handful of older rows is enough to look back on; the rest is
+    dead weight that `latest_report` pays for on every page load.
+    """
+    n = 0
+    scopes = c.execute("SELECT DISTINCT scope, project FROM reports").fetchall()
+    for s in scopes:
+        row = c.execute(
+            "SELECT id FROM reports WHERE scope = ? AND project = ? "
+            "ORDER BY id DESC LIMIT 1 OFFSET ?",
+            (s["scope"], s["project"], REPORT_KEEP)).fetchone()
+        if not row:
+            continue
+        n += c.execute(
+            "DELETE FROM reports WHERE scope = ? AND project = ? AND id <= ?",
+            (s["scope"], s["project"], row["id"])).rowcount
+    return n
 
 
 def _trim_finished_items(c) -> int:
@@ -161,6 +185,7 @@ def prune() -> str:
     with db.conn() as c:
         ev = _prune_events(c)
         rn = _prune_runs(c)
+        rp = _prune_reports(c)
         it = _trim_finished_items(c)
         orph = _close_orphaned_runs(c)
     logs = _prune_files(config.LOG_DIR, LOG_KEEP_DAYS)
@@ -170,6 +195,7 @@ def prune() -> str:
     parts = []
     if ev: parts.append(f"{ev} events folded")
     if rn: parts.append(f"{rn} runs archived")
+    if rp: parts.append(f"{rp} old reports removed")
     if it: parts.append(f"{it} finished items trimmed")
     if orph: parts.append(f"{orph} orphaned runs closed")
     if logs: parts.append(f"{logs} old logs removed")

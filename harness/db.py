@@ -89,6 +89,9 @@ CREATE TABLE IF NOT EXISTS reports (
     content TEXT NOT NULL,            -- markdown
     created_at TEXT NOT NULL
 );
+-- latest_report() wants the newest row for one (scope, project); without
+-- this it walks the rowid index backwards over every other scope's rows.
+CREATE INDEX IF NOT EXISTS reports_scope ON reports(scope, project, id);
 CREATE TABLE IF NOT EXISTS events (
     id INTEGER PRIMARY KEY,
     project TEXT NOT NULL DEFAULT '',
@@ -147,6 +150,7 @@ MIGRATIONS = [
     "ALTER TABLE items ADD COLUMN breaker_trips INTEGER NOT NULL DEFAULT 0",
     "ALTER TABLE releases ADD COLUMN error TEXT NOT NULL DEFAULT ''",
     "ALTER TABLE questions ADD COLUMN routed_at TEXT NOT NULL DEFAULT ''",
+    "CREATE INDEX IF NOT EXISTS reports_scope ON reports(scope, project, id)",
 ]
 
 # DB paths this process has already created the schema on and walked the
@@ -164,6 +168,10 @@ def conn():
     # instead of stacking "database is locked" retries on the 30s timeout.
     # Per-connection, so it stays outside the once-per-path guard below.
     c.execute("PRAGMA journal_mode=WAL")
+    # Durability is left at SQLite's default unless the environment says
+    # otherwise; see config.DB_SYNCHRONOUS. Per-connection, like the above.
+    if config.DB_SYNCHRONOUS:
+        c.execute(f"PRAGMA synchronous={config.DB_SYNCHRONOUS}")
     key = str(config.DB_PATH)
     if key not in _migrated_paths:
         c.executescript(SCHEMA)

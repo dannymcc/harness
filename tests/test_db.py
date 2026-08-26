@@ -14,7 +14,8 @@ class _CountingConnection(sqlite3.Connection):
         return super().executescript(sql)
 
     def execute(self, sql, *args, **kwargs):
-        if sql.lstrip().upper().startswith("ALTER TABLE"):
+        from harness import db
+        if sql in db.MIGRATIONS:  # not every migration is an ALTER TABLE
             type(self).migration_runs += 1
         return super().execute(sql, *args, **kwargs)
 
@@ -118,6 +119,83 @@ def test_persona_memory_append_and_cap(fresh_db, may):
     for i in range(500):
         fresh_db.append_memory("may", "analyst", f"note {i} padding padding")
     assert len(fresh_db.persona_memory("may", "analyst")) <= fresh_db.MEMORY_HARD_CAP
+
+
+def test_prune_bounds_reports_per_scope_and_project(fresh_db, may):
+    """The reports table only ever grows (issue #78): housekeeping.prune()
+    must keep it bounded per (scope, project) rather than letting every
+    memory note / lead summary / stand-up / security report accumulate
+    forever, or latest_report's backwards scan degrades as the section
+    runs."""
+    from harness import housekeeping
+
+    for i in range(20):
+        fresh_db.save_report("security", "may", f"report {i}")
+
+    housekeeping.prune()
+
+    with fresh_db.conn() as c:
+        rows = c.execute(
+            "SELECT content FROM reports WHERE scope = ? AND project = ? "
+            "ORDER BY id",
+            ("security", "may"),
+        ).fetchall()
+
+    assert len(rows) < 20, (
+        "prune() should bound reports per (scope, project); "
+        f"found {len(rows)} rows still present after inserting 20"
+    )
+    assert rows[-1]["content"] == "report 19"
+    assert rows[0]["content"] != "report 0", "oldest rows should be pruned first"
+    assert fresh_db.latest_report("security", "may")["content"] == "report 19"
+
+
+def test_persona_memory_survives_prune(fresh_db, may):
+    """Pruning must not eat live memory: after prune() runs, persona_memory
+    still returns the accumulated notes and still respects MEMORY_HARD_CAP."""
+    from harness import housekeeping
+
+    fresh_db.append_memory("may", "analyst", "remember this")
+    for i in range(500):
+        fresh_db.append_memory("may", "analyst", f"note {i} padding padding")
+
+    housekeeping.prune()
+
+    mem = fresh_db.persona_memory("may", "analyst")
+    assert mem, "memory should survive pruning"
+    assert len(mem) <= fresh_db.MEMORY_HARD_CAP
+
+
+def test_db_synchronous_is_off_for_tests_and_default_otherwise(fresh_db,
+                                                               monkeypatch):
+    """conftest turns fsync-per-commit off for the suite's throwaway
+    databases — ~100ms a write, and the bulk of the suite's runtime. With
+    the environment unset, db.conn() must leave durability exactly as it
+    was: SQLite's own FULL. The value is interpolated into a PRAGMA, so it
+    is only ever one of a fixed set."""
+    from harness import config
+
+    assert config.DB_SYNCHRONOUS == "OFF"  # set by tests/conftest.py
+    assert config.DB_SYNCHRONOUS in ("", "OFF", "NORMAL", "FULL", "EXTRA")
+
+    monkeypatch.setattr(config, "DB_SYNCHRONOUS", "")
+    with fresh_db.conn() as c:
+        assert c.execute("PRAGMA synchronous").fetchone()[0] == 2, "not FULL"
+
+
+def test_reports_lookup_is_indexed(fresh_db):
+    """latest_report() must seek, not walk the rowid index backwards over
+    every other scope's rows — on a new DB and, via MIGRATIONS, on one
+    created before the index existed."""
+    with fresh_db.conn() as c:
+        plan = " ".join(r["detail"] for r in c.execute(
+            "EXPLAIN QUERY PLAN SELECT * FROM reports WHERE scope = ? "
+            "AND project = ? ORDER BY id DESC LIMIT 1", ("security", "may")))
+    assert "reports_scope" in plan, f"latest_report is unindexed: {plan}"
+    assert any("reports_scope" in m for m in fresh_db.MIGRATIONS), (
+        "the index must also be a migration, or existing databases never "
+        "get it"
+    )
 
 
 def test_stream_unions_events_questions_and_thread(fresh_db, may):
