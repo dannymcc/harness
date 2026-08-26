@@ -308,6 +308,10 @@ footer {
 }
 .agent-chip.failed { border-color: color-mix(in srgb, var(--err) 60%, var(--border)); }
 .agent-chip.failed b::before { background: var(--err); }
+/* Swept up by housekeeping: no result for hours, cause unknown. Worth a
+   look, but not the flat red of a run that failed and said why. */
+.agent-chip.orphaned { border-color: color-mix(in srgb, var(--warn) 60%, var(--border)); }
+.agent-chip.orphaned b::before { background: var(--warn); }
 .agent-chip.benched { opacity: .55; }
 .agent-chip.benched b::before { background: transparent; border: 1px solid var(--dim); }
 @keyframes onduty { 50% { opacity: .3; } }

@@ -1259,6 +1259,11 @@ def live_runs(project: str, agent: str = ""):
 
 
 ORPHANED_SUMMARY = "orphaned by restart"
+# housekeeping._close_orphaned_runs writes this on a run that has sat
+# unfinished for hours while the process stayed up. Deliberately a
+# different string from ORPHANED_SUMMARY: the two are treated differently
+# by consecutive_failures below, and by the dashboard.
+HOUSEKEEPING_ORPHAN_SUMMARY = "orphaned (no result recorded)"
 
 
 def consecutive_failures(project: str, item_key: str) -> int:
@@ -1268,6 +1273,14 @@ def consecutive_failures(project: str, item_key: str) -> int:
     killed under the agent, which says nothing about the item. Counting
     them meant two deploys in a row tripped the circuit breaker on
     whatever happened to be in flight.
+
+    Runs swept up by housekeeping (HOUSEKEEPING_ORPHAN_SUMMARY) are *not*
+    skipped, and that asymmetry is deliberate. A restart orphan is proof
+    the process died; a run that produced nothing for three hours while
+    the process stayed up is ambiguous — it may well be an agent hanging
+    on this particular item, which is exactly what the breaker exists to
+    catch. Exempting it would let a hang loop for ever (hang, sweep,
+    requeue, hang) without ever paging the operator.
 
     Failures from before the item's last deliberate approval are also
     ignored: an operator (or Harry) re-approving a held item is saying

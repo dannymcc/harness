@@ -12,7 +12,7 @@ from fastapi.responses import PlainTextResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 
-from .. import config, db, gh, pipeline, repo, worker
+from .. import config, db, gh, housekeeping, pipeline, repo, worker
 from . import commands
 
 BASE = Path(__file__).parent
@@ -199,11 +199,19 @@ def _member_status(display, runs, match):
         return {"name": display, "state": "ok",
                 "detail": f"{what} · {last['started_at']}",
                 "run_id": last["id"]}
-    if (last["summary"] or "").startswith("orphaned"):
+    if last["summary"] == db.ORPHANED_SUMMARY:
         # A restart interrupted this run; the item was requeued
         # automatically. Not a real failure — don't dress it as one.
         return {"name": display, "state": "restarted",
                 "detail": f"{what} — interrupted by a restart, requeued",
+                "run_id": last["id"]}
+    if last["summary"] == db.HOUSEKEEPING_ORPHAN_SUMMARY:
+        # Housekeeping swept this one up: no result after hours, with the
+        # process still up. It might be a hung agent, so say what happened
+        # rather than blaming a restart that never occurred.
+        return {"name": display, "state": "orphaned",
+                "detail": f"{what} — no result recorded after "
+                          f"{housekeeping.ORPHAN_RUN_HOURS}h",
                 "run_id": last["id"]}
     return {"name": display, "state": "failed",
             "detail": f"{what} — {(last['summary'] or 'no reason recorded')[:90]}",
