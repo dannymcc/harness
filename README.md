@@ -61,7 +61,8 @@ told to behave.
   it onto dev in its own clone and runs the suite before landing it, and
   still refuses drafts.
 - **Batched releases** — fixes and merges queue on dev. At a threshold (N
-  changes or age), Colin drafts the release: version bump, CHANGELOG,
+  changes or age), or on a set cadence if you would rather release on a
+  clock, Colin drafts the release: version bump, CHANGELOG,
   README check, credited notes, then a dev → main PR. You approve; it
   merges, tags, and publishes the GitHub Release. If GitHub refuses the
   merge — branch protection, a failing required check, a token without the
@@ -75,8 +76,15 @@ told to behave.
   way. Set `auto release` to `auto` on the repos you want running hands-off
   and the drafted release merges, tags and publishes itself; the tests still
   have to pass first. It is set per repo — the overview marks the repos that
-  are on it, and the project page repeats it with the thresholds that set one
-  off.
+  are on it, and the project page repeats it with whatever sets one off.
+  `release schedule` picks which trigger that is: `changes` (the default) is
+  the two thresholds, whichever comes first; `daily`, `weekly` or `monthly`
+  is a calendar cadence instead — at most one release a window, timed from
+  the last release and carrying everything queued since it, with the two
+  thresholds ignored. A window with nothing in it passes quietly, and a
+  window missed because the desk was off gives one catch-up release rather
+  than a run of back-dated ones. **Release now** and Harry's own release
+  proposal ignore the cadence and cut immediately either way.
 - **Operator-in-the-loop** — any agent can ask a question when a decision
   isn't theirs. It goes to Harry, who rules within minutes on anything in
   the section's remit (engineering judgement, priorities, process); only
@@ -239,7 +247,8 @@ Per-repo policies, editable live in Settings:
 | merge dependabot PRs | approve |
 | post comments/reviews publicly | approve |
 | auto release | approve — it prepares the release and waits for your click (`auto` — it drafts, tests, merges to main and tags without asking) |
-| release batch size / max age | 3 changes / 7 days |
+| release schedule | changes (also: `daily`, `weekly`, `monthly` — one release a window, timed from the last release, thresholds ignored) |
+| release batch size / max age | 3 changes / 7 days (on the `changes` schedule) |
 | active hours | always |
 
 Repo expectations (all configurable per harness): a dev branch flowing to a

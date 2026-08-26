@@ -7,10 +7,17 @@
 
 {% macro policy(key, value) %}
   {% set copy = policy_copy.get(key) %}
+  {% set moot = on_a_clock and key in count_keys %}
   <div>
     <form method="post" action="/p/{{ p.name }}/policy/{{ key }}" class="policy-row">
       <label>{{ copy[0] if copy else key.replace('_', ' ') }}</label>
-      {% if key == 'file_issues' %}
+      {% if key == 'release_schedule' %}
+        <select name="value" onchange="this.form.submit()">
+          {% for choice in schedule_choices %}
+          <option value="{{ choice }}" {% if value == choice %}selected{% endif %}>{{ choice }}</option>
+          {% endfor %}
+        </select>
+      {% elif key == 'file_issues' %}
         <select name="value" onchange="this.form.submit()">
           <option value="auto" {% if value == 'auto' %}selected{% endif %}>auto</option>
           <option value="off" {% if value == 'off' %}selected{% endif %}>off</option>
@@ -22,11 +29,12 @@
           <option value="approve" {% if value == 'approve' %}selected{% endif %}>approve</option>
         </select>
       {% else %}
-        <input name="value" value="{{ value }}" size="4">
-        <button>set</button>
+        <input name="value" value="{{ value }}" size="4" {% if moot %}disabled{% endif %}>
+        <button {% if moot %}disabled{% endif %}>set</button>
       {% endif %}
     </form>
-    {% if copy %}<p class="policy-hint">{{ copy[1] }}</p>{% endif %}
+    {% if moot %}<p class="policy-hint">Does not apply on a {{ policies.release_schedule }} schedule.</p>
+    {% elif copy %}<p class="policy-hint">{{ copy[1] }}</p>{% endif %}
   </div>
 {% endmacro %}
 
@@ -45,8 +53,11 @@
     <h3>Auto release</h3>
     <p class="hint">The release goes out as a
     {{ p.dev_branch }} → {{ p.main_branch }} PR that Colin merges and tags —
-    on auto without asking you, on approve on your click. The two numbers
-    below decide when an auto release fires.</p>
+    on auto without asking you, on approve on your click. The release
+    schedule decides when one fires: on changes it is the two numbers below,
+    whichever comes first; on daily, weekly or monthly it is one release a
+    window at most, timed from the last release, and the two numbers are
+    ignored.</p>
     <div class="policies">
     {% for key in release_keys %}
       {{ policy(key, policies[key]) }}

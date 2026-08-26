@@ -258,12 +258,10 @@
     <p class="hint">{{ queued_count }} change{{ '' if queued_count == 1 else 's' }}
     queued.
     {% if release_auto %}This project auto-releases once
-      {{ policies.release_min_changes }} changes are queued or the oldest is
-      {{ policies.release_max_age_days }} days old{% if can_release %} — or
+      {{ release_trigger }}{% if can_release %} — or
       press the button{% endif %}.
-      Once drafted it merges and tags itself.{% else %}Releases batch at
-      {{ policies.release_min_changes }}
-      changes or {{ policies.release_max_age_days }} days{% if can_release %}
+      Once drafted it merges and tags itself.{% else %}A release goes out once
+      {{ release_trigger }}{% if can_release %}
       — or press the button{% endif %}. You approve the merge.{% endif %}</p>
     {% if can_release %}
       {% if not p.enabled %}<p class="hint">This harness is disabled — the

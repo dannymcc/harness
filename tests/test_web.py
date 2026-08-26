@@ -277,6 +277,31 @@ def test_settings_explains_auto_release(client, fresh_db):
     assert "cut release" not in html  # the raw key is never shown as a label
 
 
+def test_settings_greys_out_the_counts_on_a_time_schedule(client, fresh_db):
+    """Pick weekly and the count/age boxes stop pretending to matter."""
+    html = client.get("/p/may/settings").text
+    assert "release schedule" in html
+    assert 'value="changes" selected' in html and 'value="weekly"' in html
+    assert "Does not apply" not in html
+
+    fresh_db.set_policy("may", "release_schedule", "weekly")
+    html = client.get("/p/may/settings").text
+    assert 'value="weekly" selected' in html
+    assert html.count("Does not apply on a weekly schedule.") == 2
+    assert "disabled" in html
+
+
+def test_project_page_names_the_live_release_trigger(client, fresh_db):
+    _queue_item(fresh_db)
+    html = client.get("/p/may").text
+    assert "3 changes are queued or the oldest is 7 days old" in html
+
+    fresh_db.set_policy("may", "release_schedule", "weekly")
+    html = client.get("/p/may").text
+    assert "a week has passed since the last release" in html
+    assert "7 days old" not in html
+
+
 def _release_mode(client, project):
     """The mode the cut_release row on a settings page is showing."""
     html = client.get(f"/p/{project}/settings").text

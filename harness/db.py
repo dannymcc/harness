@@ -559,6 +559,21 @@ def open_release(project: str):
         ).fetchone()
 
 
+def last_release(project: str):
+    """The most recently released release, or None if there has never been one.
+
+    Only rows that actually went out count: a proposed or abandoned release
+    is not a cut, so it never anchors a scheduled release window.
+    """
+    with conn() as c:
+        return c.execute(
+            "SELECT * FROM releases WHERE project = ? AND status = 'released' "
+            "AND released_at IS NOT NULL AND released_at != '' "
+            "ORDER BY released_at DESC LIMIT 1",
+            (project,),
+        ).fetchone()
+
+
 def project_releases(project: str):
     with conn() as c:
         return c.execute(

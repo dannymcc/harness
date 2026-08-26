@@ -64,6 +64,7 @@ POLICY_CHOICES = {
     "merge_dependabot": ("auto", "approve"),
     "post_comments": ("auto", "approve"),
     "cut_release": ("auto", "approve"),
+    "release_schedule": ("changes", "daily", "weekly", "monthly"),
 }
 NUMERIC_POLICIES = ("release_min_changes", "release_max_age_days",
                     "daily_budget_usd")

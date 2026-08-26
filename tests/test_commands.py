@@ -69,6 +69,15 @@ def test_bad_policy_and_budget_are_refused_not_stored(client, fresh_db):
     r = client.post("/tell", data={"project": "may", "text": "/budget june 10"})
     assert r.status_code == 400 and "No desk called 'june'" in r.text
 
+    r = client.post("/tell", data={"project": "may",
+                                   "text": "/policy may release_schedule yearly"})
+    assert r.status_code == 400 and "changes or daily" in r.text
+    assert fresh_db.policy("may", "release_schedule") == "changes"
+
+    client.post("/tell", data={"project": "may",
+                               "text": "/policy may release_schedule Weekly"})
+    assert fresh_db.policy("may", "release_schedule") == "weekly"
+
 
 def test_tell_steers_the_named_agent(client, fresh_db):
     fresh_db.upsert_item("may", "issue", 11, "Footer", "alice", "open", "x")

@@ -12,7 +12,7 @@ from pathlib import Path
 # The single source of truth for the number: the release process bumps this
 # line (version file `harness/config.py`, pattern `VERSION\s*=\s*"..."`) and
 # tags the commit. Don't edit it by hand.
-VERSION = "0.20.3"
+VERSION = "0.21.0"
 
 _SHA_RE = re.compile(r"^[0-9a-f]{7,40}$")
 _STAMP_FILE = Path(__file__).resolve().parent / "_build_sha"
@@ -181,6 +181,10 @@ POLICY_DEFAULTS = {
     "post_comments": "approve",
     # Cut a release (dev -> main PR, merge, tag).
     "cut_release": "approve",
+    # What sets a release off. "changes" — the two thresholds below, whichever
+    # comes first. "daily"/"weekly"/"monthly" — one release a window at most,
+    # timed from the last release, with the thresholds ignored.
+    "release_schedule": "changes",
     # Releases are batched: propose when this many changes are queued...
     "release_min_changes": "3",
     # ...or when the oldest queued change is this old (days), whichever first.
