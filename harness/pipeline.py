@@ -1438,6 +1438,11 @@ def _open_tracking_issues(project, new_issues) -> None:
 
 # --- Harry's inbox -------------------------------------------------------------
 
+# Ruling passes a question may sit through undecided before it is the
+# operator's. Counted on the questions row (db.bump_ruling_passes).
+UNDECIDED_PASSES = 2
+
+
 async def process_questions(project_name: str | None = None) -> None:
     async with _loop_lock("questions"):
         return await _process_questions_locked(project_name)
@@ -1478,25 +1483,22 @@ async def _process_questions_locked(project_name: str | None = None) -> None:
     # Anything Harry left undecided (or a ruling run that failed) gets one
     # more pass; after that it goes to the operator rather than costing a
     # ruling run every few minutes.
+    # The count is kept on the question row, not in this process: the harness
+    # restarts on every release, and a counter that went with it would let a
+    # question cycle for ever without ever reaching the operator.
     for q in inbox:
         if db.question(q["id"])["status"] != "open":
-            _undecided.pop(q["id"], None)
             continue
-        _undecided[q["id"]] = _undecided.get(q["id"], 0) + 1
-        if _undecided[q["id"]] >= 2:
+        if db.bump_ruling_passes(q["id"]) >= UNDECIDED_PASSES:
             if is_breaker_question(q):
                 # The item cannot sit held with nobody ruling on it.
                 apply_breaker_ruling(q, "escalate", "no ruling after two passes")
             else:
                 park_held_item(q, "no ruling after two passes")
             db.escalate_question(q["id"])
-            _undecided.pop(q["id"], None)
             db.log_event(f"Harry left {q['asked_by']}'s question undecided "
                          f"twice — escalated to {config.OPERATOR}", "warn",
                          project=q["project"])
-
-
-_undecided: dict[int, int] = {}  # question id -> ruling passes left open
 
 
 # --- hourly stand-up ---------------------------------------------------------
