@@ -4,6 +4,18 @@ All notable changes to Harness are recorded here. The format is
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project
 follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.22.6] - 2026-08-26
+
+### Fixed
+
+- **The test suite no longer pages the operator.** The suite drives the hold,
+  circuit-breaker and release paths with made-up items, and inside the
+  container the real ntfy topic is in the environment — so every time one of
+  harness-app's own engineers ran the suite, "Held: issue#40 (may) — circuit
+  breaker" landed on the operator's phone. `tests/conftest.py` now scrubs the
+  notification and token variables before `harness.config` is imported, and
+  an autouse fixture blanks `NTFY_TOPIC` besides.
+
 ## [0.22.5] - 2026-08-26
 
 ### Fixed

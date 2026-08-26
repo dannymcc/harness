@@ -12,8 +12,24 @@ os.environ["HARNESS_DATA_DIR"] = _tmp
 # runtime. Set before harness.config is first imported, since it reads the
 # environment at import time.
 os.environ["HARNESS_DB_SYNCHRONOUS"] = "OFF"
+# The suite exercises the paths that page the operator (holds, breaker
+# trips, releases) with made-up items. Inside the harness container the
+# real ntfy topic is in the environment, and harness-app's own engineers
+# run this suite there — so unset it before config reads it, or every test
+# run sends "Held: issue#40 (may)" to the operator's phone.
+for _k in ("HARNESS_NTFY_TOPIC", "HARNESS_PUBLIC_URL", "HARNESS_GITHUB_TOKEN",
+           "GITHUB_TOKEN", "GH_TOKEN"):
+    os.environ.pop(_k, None)
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+
+
+@pytest.fixture(autouse=True)
+def _no_outward_notifications(monkeypatch):
+    """Belt and braces for the environment scrub above: nothing a test does
+    may reach a real ntfy topic, whatever config was imported with."""
+    from harness import config
+    monkeypatch.setattr(config, "NTFY_TOPIC", "")
 
 
 @pytest.fixture()
