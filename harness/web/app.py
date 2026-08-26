@@ -425,7 +425,7 @@ def project_settings(request: Request, name: str):
                   policy_copy=POLICY_COPY,
                   release_keys=RELEASE_POLICY_KEYS,
                   count_keys=COUNT_POLICY_KEYS,
-                  schedule_choices=commands.POLICY_CHOICES["release_schedule"],
+                  policy_choices=commands.POLICY_CHOICES,
                   on_a_clock=pipeline.release_window_days(name) is not None,
                   staff=db.staff_get(name))
 

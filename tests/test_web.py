@@ -316,6 +316,88 @@ def test_settings_greys_out_the_counts_on_a_time_schedule(client, fresh_db):
     assert "disabled" in html
 
 
+def _policy_form(html, key):
+    """The one policy's form on a rendered settings page."""
+    return html.split(f'/policy/{key}"', 1)[1].split("</form>", 1)[0]
+
+
+def _offered(html, key):
+    """What the settings page will let the operator pick for a policy."""
+    form = _policy_form(html, key)
+    return [chunk.split('"', 1)[0] for chunk in form.split('option value="')[1:]]
+
+
+# The policies that are neither a set of words nor a number: free text on the
+# settings page and from a command alike. Spelled out so that a new policy
+# has to be classified deliberately rather than fall through to a text box.
+FREE_TEXT_POLICIES = {"active_hours"}
+
+
+def test_policy_metadata_agrees_everywhere_it_is_written_down():
+    """The keys, the values they take and the settings copy live in three
+    modules. Nothing catches drift between them at run time — a policy with
+    no copy renders as a bare key, and one with no choices as a text box —
+    so hold them together here."""
+    from harness import config
+    from harness.web import app, commands
+
+    keys = set(config.POLICY_DEFAULTS)
+    assert set(app.POLICY_COPY) == keys
+    assert set(commands.POLICY_CHOICES) <= keys
+    assert set(commands.NUMERIC_POLICIES) <= keys
+    assert set(app.RELEASE_POLICY_KEYS) <= keys
+    assert set(app.COUNT_POLICY_KEYS) <= set(app.RELEASE_POLICY_KEYS)
+
+    # every key is one of the three kinds, and only one of them
+    kinds = [set(commands.POLICY_CHOICES), set(commands.NUMERIC_POLICIES),
+             FREE_TEXT_POLICIES]
+    assert set().union(*kinds) == keys
+    assert sum(len(k) for k in kinds) == len(keys)
+
+    # and the default is something the operator could pick again
+    for key, choices in commands.POLICY_CHOICES.items():
+        assert config.POLICY_DEFAULTS[key] in choices, key
+    for key in commands.NUMERIC_POLICIES:
+        float(config.POLICY_DEFAULTS[key])
+
+
+def test_settings_offers_exactly_what_a_command_would_take(client, fresh_db):
+    """The form is built from POLICY_CHOICES, so the page and /policy cannot
+    come to disagree about what a gate accepts."""
+    from harness.web import commands
+
+    html = client.get("/p/may/settings").text
+    for key, choices in commands.POLICY_CHOICES.items():
+        assert _offered(html, key) == list(choices), key
+
+    # the shape of that, spelled out: only fix_issues has a lead mode, and
+    # the free-text policies are still boxes rather than dropdowns
+    assert _offered(html, "fix_issues") == ["auto", "lead", "approve"]
+    assert _offered(html, "merge_prs") == ["auto", "approve"]
+    assert _offered(html, "active_hours") == []
+    assert 'value="always"' in _policy_form(html, "active_hours")
+
+
+def test_a_new_enum_policy_needs_no_template_change(client, fresh_db,
+                                                    monkeypatch):
+    """Adding a gate to POLICY_DEFAULTS, POLICY_CHOICES and POLICY_COPY is
+    the whole job — the settings page renders it from those alone."""
+    from harness import config
+    from harness.web import app, commands
+
+    monkeypatch.setitem(config.POLICY_DEFAULTS, "water_plants", "sometimes")
+    monkeypatch.setitem(commands.POLICY_CHOICES, "water_plants",
+                        ("never", "sometimes", "always"))
+    monkeypatch.setitem(app.POLICY_COPY, "water_plants",
+                        ("water the plants", "How often Colin waters them."))
+
+    html = client.get("/p/may/settings").text
+    assert "water the plants" in html
+    assert "How often Colin waters them." in html
+    assert _offered(html, "water_plants") == ["never", "sometimes", "always"]
+    assert 'value="sometimes" selected' in _policy_form(html, "water_plants")
+
+
 def test_project_page_names_the_live_release_trigger(client, fresh_db):
     _queue_item(fresh_db)
     html = client.get("/p/may").text
