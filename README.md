@@ -242,7 +242,7 @@ Per-repo policies, editable live in Settings:
 | Policy | Default |
 |---|---|
 | fix issues (and land on dev) | auto (also: `lead` — the team lead's plan is the sign-off) |
-| leads open tracking issues from their plan | auto (capped at 6/day per desk; `off` to disable) |
+| leads open tracking issues from their plan | auto (at most 6 of a desk's own filings open and unworked at once; `off` to disable) |
 | merge community PRs | approve |
 | merge dependabot PRs | approve |
 | post comments/reviews publicly | approve |

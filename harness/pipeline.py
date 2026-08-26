@@ -14,7 +14,10 @@ from .agents import AgentStalled
 from .gh import CmdError
 
 MAX_AGENT_TASKS_PER_CYCLE = 5
-TRACKING_ISSUES_PER_DAY = 6   # per desk; a lead filing issues is bounded work
+# Per desk: how many lead-filed tracking issues may sit open and unworked
+# (status new or triaged) at once. A backlog ceiling, not a daily rate —
+# worked-through filings free their slot however fast they were opened.
+OPEN_TRACKING_ISSUES_CAP = 6
 
 
 def within_active_hours(name: str) -> bool:
@@ -1240,7 +1243,9 @@ def _reconcile_branches(project) -> None:
 def _open_tracking_issues(project, new_issues) -> None:
     """The lead filed tracking issues from their plan: create them for real
     so the work enters triage. Deterministic, policy-free — opening an issue
-    on your own repo is the lowest-stakes outward action there is."""
+    on your own repo is the lowest-stakes outward action there is. The only
+    bound is the desk's open, unworked backlog of lead-filed issues: filings
+    that have been triaged, fixed or closed cost nothing."""
     name = project["name"]
     if not new_issues:
         return
@@ -1256,17 +1261,18 @@ def _open_tracking_issues(project, new_issues) -> None:
 
     items = db.project_items(name)
     existing = {norm(i["title"]) for i in items if i["gh_state"] == "open"}
-    day_ago = (datetime.now(timezone.utc) - __import__("datetime").timedelta(days=1)
-               ).strftime("%Y-%m-%dT%H:%M:%SZ")
-    filed_today = sum(1 for i in items
-                      if i["author"] == project["lead_name"]
-                      and i["created_at"] >= day_ago)
-    for ni in new_issues[:TRACKING_ISSUES_PER_DAY]:
+    open_lead_items = sum(1 for i in items
+                          if i["author"] == project["lead_name"]
+                          and i["gh_state"] == "open"
+                          and i["status"] in ("new", "triaged"))
+    for ni in new_issues[:OPEN_TRACKING_ISSUES_CAP]:
         title = (ni.get("title") or "").strip()
-        if filed_today >= TRACKING_ISSUES_PER_DAY:
+        if open_lead_items >= OPEN_TRACKING_ISSUES_CAP:
             db.log_event(f"{project['lead_name']} wanted to open "
-                         f"'{title[:80]}' but the desk's daily cap "
-                         f"({TRACKING_ISSUES_PER_DAY}) is reached — not filed",
+                         f"'{title[:80]}' but their backlog of open, "
+                         "unworked tracking issues is at its "
+                         f"cap ({OPEN_TRACKING_ISSUES_CAP}) — not filed "
+                         "until some of that queue is worked through",
                          "warn", project=name)
             break
         body = (ni.get("body") or "").strip()
@@ -1281,7 +1287,7 @@ def _open_tracking_issues(project, new_issues) -> None:
         db.upsert_item(name, "issue", num, title, project["lead_name"],
                        "open", db.now())
         existing.add(norm(title))
-        filed_today += 1
+        open_lead_items += 1
         db.log_event(f"{project['lead_name']} opened issue #{num}: "
                      f"{title[:80]}", project=name)
 

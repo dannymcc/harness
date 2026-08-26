@@ -171,7 +171,8 @@ POLICY_DEFAULTS = {
     # "approve" – the operator clicks approve before an engineer starts
     "fix_issues": "auto",
     # Team leads may open tracking issues on the repo from their plan
-    # (capped per day). "off" disables it.
+    # (capped by how many of theirs are already open and unworked).
+    # "off" disables it.
     "file_issues": "auto",
     # Merge community PRs (always validated + tested locally first).
     "merge_prs": "approve",

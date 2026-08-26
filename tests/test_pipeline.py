@@ -813,11 +813,11 @@ def test_lead_opens_tracking_issues(fresh_db, may, monkeypatch):
     pipeline._open_tracking_issues(may, [
         {"title": "Cover policy-gates with tests!", "body": "again"}])
     assert len(created) == 1
-    # the daily cap holds, and the policy can switch it off entirely
-    cap = pipeline.TRACKING_ISSUES_PER_DAY
+    # the backlog cap holds, and the policy can switch it off entirely
+    cap = pipeline.OPEN_TRACKING_ISSUES_CAP
     pipeline._open_tracking_issues(may, [
         {"title": f"Issue {n}", "body": "b"} for n in range(cap)])
-    assert len(created) == cap   # 1 + (cap - 1) more = the daily cap
+    assert len(created) == cap   # 1 + (cap - 1) more = the cap
     fresh_db.set_policy("may", "file_issues", "off")
     pipeline._open_tracking_issues(may, [{"title": "Nope", "body": "b"}])
     assert len(created) == cap
@@ -1306,7 +1306,7 @@ def test_salvaged_work_from_a_previous_attempt_is_named_on_the_thread(
 
 
 def test_tracking_issue_cap_raised_and_names_dropped_title(fresh_db, may, monkeypatch):
-    """Issue #65: the daily filing cap was tuned too low (3) and, when it
+    """Issue #65: the filing cap was tuned too low (3) and, when it
     bit, the warn event didn't say which tracking issue got dropped — the
     content of the dropped issue was lost. The cap should be 6, and the
     drop event should name the title."""
@@ -1314,18 +1314,18 @@ def test_tracking_issue_cap_raised_and_names_dropped_title(fresh_db, may, monkey
     created = []
     monkeypatch.setattr(gh, "create_issue",
                         lambda repo, t, b: created.append((t, b)) or 41 + len(created))
-    assert pipeline.TRACKING_ISSUES_PER_DAY == 6
+    assert pipeline.OPEN_TRACKING_ISSUES_CAP == 6
 
     # fill the cap exactly
     pipeline._open_tracking_issues(may, [
         {"title": f"Issue {n}", "body": "b"}
-        for n in range(pipeline.TRACKING_ISSUES_PER_DAY)])
-    assert len(created) == pipeline.TRACKING_ISSUES_PER_DAY
+        for n in range(pipeline.OPEN_TRACKING_ISSUES_CAP)])
+    assert len(created) == pipeline.OPEN_TRACKING_ISSUES_CAP
 
     # one more, over the cap: dropped, and the drop is named
     pipeline._open_tracking_issues(may, [
         {"title": "Dropped tracking issue", "body": "b"}])
-    assert len(created) == pipeline.TRACKING_ISSUES_PER_DAY  # still not filed
+    assert len(created) == pipeline.OPEN_TRACKING_ISSUES_CAP  # still not filed
 
     events = fresh_db.recent_events(5, "may")
     assert any("Dropped tracking issue" in e["message"]
@@ -1345,8 +1345,8 @@ def test_tracking_issue_cap_keeps_the_first_listed_issue(fresh_db, may,
                         lambda repo, t, b: created.append((t, b)) or 41 + len(created))
     pipeline._open_tracking_issues(may, [
         {"title": f"Filler {n}", "body": "b"}
-        for n in range(pipeline.TRACKING_ISSUES_PER_DAY - 1)])
-    assert len(created) == pipeline.TRACKING_ISSUES_PER_DAY - 1
+        for n in range(pipeline.OPEN_TRACKING_ISSUES_CAP - 1)])
+    assert len(created) == pipeline.OPEN_TRACKING_ISSUES_CAP - 1
 
     pipeline._open_tracking_issues(may, [{"title": "Important", "body": "b"},
                                          {"title": "Less so", "body": "b"}])
@@ -1354,3 +1354,41 @@ def test_tracking_issue_cap_keeps_the_first_listed_issue(fresh_db, may,
     assert "Less so" not in [t for t, _ in created]
     assert any("Less so" in e["message"]
                for e in fresh_db.recent_events(5, "may"))
+
+
+def test_closed_lead_items_do_not_count_toward_filing_cap(fresh_db, may,
+                                                           monkeypatch):
+    """Issue #72: the filing cap must measure the lead's open, unworked
+    backlog, not raw filing volume within a 24-hour window. A lead-filed
+    item that is already closed (triaged, fixed, merged) must not burn a
+    cap slot just because it happened to be created recently; a lead-filed
+    item still sitting unworked in new/triaged must."""
+    from harness import pipeline, gh
+    created = []
+    monkeypatch.setattr(gh, "create_issue",
+                        lambda repo, t, b: created.append((t, b)) or 41 + len(created))
+
+    cap = 6
+    # The lead filed `cap` issues moments ago, and every one of them has
+    # already been triaged, fixed and closed — finished work, not backlog.
+    for n in range(cap):
+        fresh_db.upsert_item("may", "issue", 100 + n, f"Closed {n}",
+                             may["lead_name"], "open", fresh_db.now())
+        fresh_db.update_item("may", "issue", 100 + n, status="fixed",
+                             gh_state="closed")
+
+    # None of that finished work should count against the cap: a fresh
+    # filing must still go through.
+    pipeline._open_tracking_issues(may, [{"title": "New work", "body": "b"}])
+    assert len(created) == 1
+
+    # By contrast, a genuine backlog of open, unworked lead-filed items
+    # still exhausts the cap.
+    for n in range(cap - 1):
+        fresh_db.upsert_item("may", "issue", 200 + n, f"Open {n}",
+                             may["lead_name"], "open", fresh_db.now())
+    pipeline._open_tracking_issues(may, [
+        {"title": "Should be dropped", "body": "b"}])
+    assert len(created) == 1   # still just the one filed above
+    events = fresh_db.recent_events(5, "may")
+    assert any("Should be dropped" in e["message"] for e in events)

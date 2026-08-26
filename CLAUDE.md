@@ -13,7 +13,8 @@
   gate — never inside an agent session. Two deliberate, bounded exceptions:
   `repo.reconcile_dev` fast-forwards a stale dev to main (a pointer move,
   never a content decision, never forced), and leads' tracking issues go
-  through `file_issues` (auto/off) plus a daily cap.
+  through `file_issues` (auto/off) plus a cap on how many lead-filed issues
+  may sit open and unworked at once.
 - Questions from agents go to Harry first (`pipeline.process_questions`);
   only what he escalates reaches the operator. Don't add UI that puts
   un-escalated questions in front of the operator as if they were theirs.
