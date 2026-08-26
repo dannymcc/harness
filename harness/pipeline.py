@@ -657,6 +657,69 @@ def anything_to_release(project, queued=None) -> bool:
     return bool(queued) or repo.dev_ahead_count(project) > 0
 
 
+# Time-based release cadences: policy value -> the length of one window in
+# days. Anything not in here (the default, "changes") uses the two thresholds.
+RELEASE_WINDOW_DAYS = {"daily": 1.0, "weekly": 7.0, "monthly": 30.0}
+
+
+def release_window_days(project_name: str) -> float | None:
+    """The window in days when this project releases on a clock, else None.
+
+    Anything unrecognised reads as the default trigger rather than as no
+    trigger at all: a typed-in policy value must never stop releases dead.
+    """
+    return RELEASE_WINDOW_DAYS.get(_release_schedule(project_name))
+
+
+def _release_schedule(project_name: str) -> str:
+    return (db.policy(project_name, "release_schedule") or "").strip().lower()
+
+
+def release_trigger_phrase(project_name: str) -> str:
+    """Plain English for what sets this project's next release off.
+
+    One sentence fragment that reads after "once ...", so the project page and
+    the desk digest describe the live trigger and only the live trigger.
+    """
+    schedule = _release_schedule(project_name)
+    if schedule in RELEASE_WINDOW_DAYS:
+        window = {"daily": "a day", "weekly": "a week",
+                  "monthly": "a month"}[schedule]
+        return f"{window} has passed since the last release"
+    return (f"{db.policy(project_name, 'release_min_changes')} changes are "
+            "queued or the oldest is "
+            f"{db.policy(project_name, 'release_max_age_days')} days old")
+
+
+def _age_days(ts: str) -> float:
+    """How many days ago a stored UTC timestamp was."""
+    return (datetime.now(timezone.utc)
+            - datetime.strptime(ts, "%Y-%m-%dT%H:%M:%SZ")
+            .replace(tzinfo=timezone.utc)).total_seconds() / 86400
+
+
+def _scheduled_release_due(project, queued, window_days: float) -> list | None:
+    """The clock-shaped trigger: at most one release per window.
+
+    The window is anchored to the last release that actually went out, not to
+    the oldest queued item, so the cut point does not drift with when work
+    happened to land. A project that has never released is due as soon as it
+    has anything to release.
+
+    A window nothing landed in passes silently — no release, no warning. A
+    window that was missed (desk offline, outside active hours, tests red)
+    gives exactly one catch-up release on the next eligible cycle: the anchor
+    only moves when a release is cut, so however many windows went by, what
+    comes out is one release carrying everything since the last one.
+    """
+    last = db.last_release(project["name"])
+    if last and _age_days(last["released_at"]) < window_days:
+        return None
+    if not anything_to_release(project, queued):
+        return None
+    return queued
+
+
 def _release_due(project) -> list | None:
     """Queued items when it is time to cut, otherwise None.
 
@@ -678,6 +741,9 @@ def _release_due(project) -> list | None:
                      f"{project['main_branch']} and nothing is queued — "
                      "nothing to release", "warn", project=name)
         return None
+    window_days = release_window_days(name)
+    if window_days is not None:
+        return _scheduled_release_due(project, queued, window_days)
     if not queued:
         return None
     min_changes = int(db.policy(name, "release_min_changes"))
@@ -685,10 +751,7 @@ def _release_due(project) -> list | None:
     if len(queued) >= min_changes:
         return queued
     oldest = min(q["queued_at"] or db.now() for q in queued)
-    age_days = (datetime.now(timezone.utc)
-                - datetime.strptime(oldest, "%Y-%m-%dT%H:%M:%SZ")
-                .replace(tzinfo=timezone.utc)).total_seconds() / 86400
-    return queued if age_days >= max_age_days else None
+    return queued if _age_days(oldest) >= max_age_days else None
 
 
 async def propose_release(project, queued) -> None:
@@ -836,8 +899,8 @@ def _state_digest(project) -> str:
                   for q in answered]
     queued = db.items_by_status(name, "queued")
     lines.append(f"\nQueued for next release: {len(queued)} change(s). "
-                 f"Release policy: >={db.policy(name, 'release_min_changes')} "
-                 f"changes or oldest >{db.policy(name, 'release_max_age_days')} days.")
+                 f"Release policy: a release goes out once "
+                 f"{release_trigger_phrase(name)}.")
     return "\n".join(lines) or "No open items."
 
 

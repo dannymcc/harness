@@ -258,6 +258,111 @@ def test_operator_release_with_nothing_queued(fresh_db, may, monkeypatch):
     assert "nothing to release" in fresh_db.recent_events(5, "may")[0]["message"]
 
 
+def _days_ago(n):
+    from datetime import datetime, timedelta, timezone
+    return (datetime.now(timezone.utc)
+            - timedelta(days=n)).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+
+def _released(fresh_db, project, version, days_ago):
+    """A release that actually went out, that many days ago."""
+    rid = fresh_db.create_release(project, version, "notes", [])
+    fresh_db.update_release(rid, status="released",
+                            released_at=_days_ago(days_ago))
+    return rid
+
+
+def _queue(fresh_db, project, numbers):
+    for n in numbers:
+        fresh_db.upsert_item(project, "issue", n, "t", "a", "open", "x")
+        fresh_db.update_item(project, "issue", n, status="queued",
+                             queued_at=fresh_db.now())
+
+
+def test_release_schedule_defaults_to_the_thresholds(fresh_db, may):
+    """The upgrade must not move a single live project onto a clock."""
+    from harness import config, pipeline
+    assert config.POLICY_DEFAULTS["release_schedule"] == "changes"
+    assert fresh_db.policy("may", "release_schedule") == "changes"
+    assert pipeline.release_window_days("may") is None
+    _queue(fresh_db, "may", (1, 2, 3))
+    assert len(pipeline._release_due(may)) == 3   # count trigger, as before
+
+
+def test_weekly_release_schedule_ignores_count_and_anchors_to_last_release(
+        fresh_db, may):
+    """On a weekly cadence the count and age thresholds do not apply: the
+    only question is how long it is since the last release went out."""
+    from harness import pipeline
+    fresh_db.set_policy("may", "release_schedule", "weekly")
+    rid = _released(fresh_db, "may", "1.0.0", days_ago=2)
+    _queue(fresh_db, "may", (1, 2, 3, 4, 5))   # well over release_min_changes
+    assert pipeline._release_due(may) is None   # day 2: not yet
+
+    fresh_db.update_release(rid, released_at=_days_ago(8))
+    assert len(pipeline._release_due(may)) == 5  # day 8: the whole week's work
+
+
+def test_weekly_release_schedule_skips_empty_windows_silently(fresh_db, may,
+                                                              monkeypatch):
+    """A window with nothing in it is not a release and not a warning."""
+    from harness import pipeline, repo
+    monkeypatch.setattr(repo, "dev_ahead_count", lambda project: 0)
+    fresh_db.set_policy("may", "release_schedule", "weekly")
+    _released(fresh_db, "may", "1.0.0", days_ago=30)
+    assert pipeline._release_due(may) is None
+    assert not [e for e in fresh_db.recent_events(20, "may")
+                if e["level"] == "warn"]
+
+
+def test_first_release_on_a_schedule_waits_for_something_to_release(
+        fresh_db, may, monkeypatch):
+    """No release yet: due on the first cycle that has anything to cut."""
+    from harness import pipeline, repo
+    monkeypatch.setattr(repo, "dev_ahead_count", lambda project: 0)
+    fresh_db.set_policy("may", "release_schedule", "monthly")
+    assert pipeline._release_due(may) is None
+    _queue(fresh_db, "may", (1,))
+    assert len(pipeline._release_due(may)) == 1
+
+
+def test_missed_release_window_gives_one_catch_up_release(fresh_db, may,
+                                                          monkeypatch):
+    """Four weeks off the air is one catch-up release, not four."""
+    from harness import pipeline, repo
+    monkeypatch.setattr(repo, "dev_ahead_count", lambda project: 0)
+    fresh_db.set_policy("may", "release_schedule", "weekly")
+    _released(fresh_db, "may", "1.0.0", days_ago=30)
+    _queue(fresh_db, "may", (1, 2))
+    assert len(pipeline._release_due(may)) == 2
+    # ...and that release goes out, taking the queue with it
+    _released(fresh_db, "may", "1.1.0", days_ago=0)
+    for n in (1, 2):
+        fresh_db.update_item("may", "issue", n, status="released")
+    assert pipeline._release_due(may) is None    # no back-dated burst
+
+
+def test_operator_release_now_overrides_the_schedule(fresh_db, may):
+    """Release now and Harry's propose_release cut whatever the cadence."""
+    from harness import pipeline
+    fresh_db.set_policy("may", "release_schedule", "monthly")
+    _released(fresh_db, "may", "1.0.0", days_ago=1)
+    _queue(fresh_db, "may", (1,))
+    assert pipeline._release_due(may) is None
+    fresh_db.set_setting("release_requested.may", "1")
+    assert len(pipeline._release_due(may)) == 1
+
+
+def test_digest_describes_the_live_release_trigger(fresh_db, may):
+    from harness import pipeline
+    digest = pipeline._state_digest(may)
+    assert "3 changes are queued or the oldest is 7 days old" in digest
+    fresh_db.set_policy("may", "release_schedule", "weekly")
+    digest = pipeline._state_digest(may)
+    assert "a week has passed since the last release" in digest
+    assert "3 changes" not in digest
+
+
 def test_no_release_proposed_while_one_is_open(fresh_db, may):
     from harness import pipeline
     fresh_db.upsert_item("may", "issue", 1, "t", "a", "open", "x")

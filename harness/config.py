@@ -181,6 +181,10 @@ POLICY_DEFAULTS = {
     "post_comments": "approve",
     # Cut a release (dev -> main PR, merge, tag).
     "cut_release": "approve",
+    # What sets a release off. "changes" — the two thresholds below, whichever
+    # comes first. "daily"/"weekly"/"monthly" — one release a window at most,
+    # timed from the last release, with the thresholds ignored.
+    "release_schedule": "changes",
     # Releases are batched: propose when this many changes are queued...
     "release_min_changes": "3",
     # ...or when the oldest queued change is this old (days), whichever first.

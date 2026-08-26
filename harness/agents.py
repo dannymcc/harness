@@ -1143,7 +1143,8 @@ reason that names the release or commit); hire / stand_down / reinstate
 (name); security_review;
 propose_release (batches whatever is queued now); set_policy (key+value —
 keys: fix_issues, merge_prs, merge_dependabot, post_comments, cut_release,
-release_min_changes, release_max_age_days, active_hours; values auto/approve
+release_schedule (changes/daily/weekly/monthly), release_min_changes,
+release_max_age_days, active_hours; values auto/approve
 — fix_issues also takes lead, meaning the team lead's plan is the sign-off —
 or numbers/hours as appropriate); tell_desk (text — an instruction the team
 lead must action in their next plan, for anything needing real engineering

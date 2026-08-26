@@ -336,6 +336,7 @@ def project_page(request: Request, name: str):
         releases=db.project_releases(name),
         release_pending=db.get_setting(f"release_requested.{name}") == "1",
         release_auto=db.policy(name, "cut_release") == "auto",
+        release_trigger=pipeline.release_trigger_phrase(name),
         queued_count=sum(1 for i in items if i["status"] == "queued"),
         can_release=pipeline.anything_to_release(p),
         lead_report=db.latest_report("lead", name),
@@ -376,6 +377,16 @@ POLICY_COPY = {
                     "merges to the main branch and tags it without asking. "
                     "approve — it prepares the release and waits for your "
                     "click. Nothing ships on a failing suite either way."),
+    "release_schedule": ("release schedule",
+                         "What sets a release off. changes — the two "
+                         "settings below, whichever comes first. daily, "
+                         "weekly or monthly — one release a window at most, "
+                         "timed from the last release and carrying "
+                         "everything queued since it, with the two settings "
+                         "below ignored. A window with nothing in it is "
+                         "skipped quietly; a window missed because the desk "
+                         "was off gives one catch-up release, not a run of "
+                         "them."),
     "release_min_changes": ("release after this many changes",
                             "How many queued changes it takes to start a "
                             "release."),
@@ -390,9 +401,13 @@ POLICY_COPY = {
                          "spent this much in the last 24 hours."),
 }
 
-# The three policies that decide an auto release, shown together.
-RELEASE_POLICY_KEYS = ("cut_release", "release_min_changes",
-                       "release_max_age_days")
+# The policies that decide an auto release, shown together.
+RELEASE_POLICY_KEYS = ("cut_release", "release_schedule",
+                       "release_min_changes", "release_max_age_days")
+
+# The two that only apply on the "changes" schedule; the form greys them out
+# and says so when a time schedule is picked.
+COUNT_POLICY_KEYS = ("release_min_changes", "release_max_age_days")
 
 
 @app.get("/p/{name}/settings")
@@ -404,6 +419,9 @@ def project_settings(request: Request, name: str):
                   policies=db.all_policies(name),
                   policy_copy=POLICY_COPY,
                   release_keys=RELEASE_POLICY_KEYS,
+                  count_keys=COUNT_POLICY_KEYS,
+                  schedule_choices=commands.POLICY_CHOICES["release_schedule"],
+                  on_a_clock=pipeline.release_window_days(name) is not None,
                   staff=db.staff_get(name))
 
 
