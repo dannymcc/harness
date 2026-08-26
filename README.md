@@ -263,7 +263,8 @@ Per-repo policies, editable live in Settings:
 | auto release | approve — it prepares the release and waits for your click (`auto` — it drafts, tests, merges to main and tags without asking) |
 | release schedule | changes (also: `daily`, `weekly`, `monthly` — one release a window, timed from the last release, thresholds ignored) |
 | release batch size / max age | 3 changes / 7 days (on the `changes` schedule) |
-| active hours | always |
+| active hours | always (or `HH-HH` local; anything you trigger yourself ignores it) |
+| daily budget (USD) | 30 — the desk stops starting agent work once it has spent this much in the last 24 hours |
 
 Repo expectations (all configurable per harness): a dev branch flowing to a
 main branch by PR, a version string in a file, and a test command. The
