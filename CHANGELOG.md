@@ -4,6 +4,16 @@ All notable changes to Harness are recorded here. The format is
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project
 follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.21.1] - 2026-08-26
+
+### Fixed
+
+- **The test suite passes on a machine with no global git identity.** The
+  two safety-branch tests commit inside fresh clones, which have no
+  repo-local `user.name` or `user.email`; on the CI runner that failed with
+  exit 128 and had blocked every image build since 0.20.3. The tests now set
+  their author and committer through the environment.
+
 ## [0.21.0] - 2026-08-26
 
 ### Added
