@@ -441,7 +441,11 @@ async def run_agent(*, project_name: str, role: str, item_key: str, task: str,
 
     summary = str(output.get("summary", ""))[:300]
     db.finish_run(run_id, True, cost, turns, summary, str(log_path))
-    return {"ok": True, "output": output, "session_id": session_id, "error": ""}
+    # The run id goes back with the result: a session that returns structured
+    # output has completed, but only the caller can tell whether it achieved
+    # anything, and it needs this row to say so (db.mark_no_effect).
+    return {"ok": True, "output": output, "session_id": session_id,
+            "error": "", "run_id": run_id}
 
 
 # --- IC schemas & prompts ----------------------------------------------------

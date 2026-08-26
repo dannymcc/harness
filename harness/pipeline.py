@@ -121,6 +121,20 @@ DECLINED_REASON = "declined the work"
 NO_WORK_REASONS = (NO_CHANGE_REASON, DECLINED_REASON)
 
 
+def _record_no_effect(res: dict, summary: str) -> None:
+    """Write a run that produced nothing usable back to the runs table as a
+    failure, at the one point the caller knows it produced nothing.
+
+    The runs table is the circuit breaker's durable memory, and the two ways
+    a run can come back clean but empty-handed — a decline, and a success
+    that left the worktree untouched — were both landing there as healthy
+    runs, wiping the trailing failure count. Recorded here, once, rather
+    than inferred later from the thread."""
+    run_id = res.get("run_id")
+    if run_id:
+        db.mark_no_effect(run_id, summary)
+
+
 def fresh_session_on_approve(item) -> bool:
     """Whether sending this item back to an engineer should start over
     rather than resume its saved session.
@@ -607,6 +621,7 @@ async def fix_item(project, item, persona: str = "Malcolm") -> None:
             db.log_event(f"{persona} declined issue #{item['number']}: "
                          f"{msg[:120]} — held for a ruling", "warn",
                          project=name)
+            _record_no_effect(res, f"{persona} {DECLINED_REASON}: {msg}")
             hold_item(project, db.get_item(name, "issue", item["number"]),
                       persona, f"{persona} {DECLINED_REASON}",
                       f"{persona}: {msg[:600]}")
@@ -625,6 +640,8 @@ async def fix_item(project, item, persona: str = "Malcolm") -> None:
                      out["summary"] + (f"\nNotes: {out['notes']}" if out.get("notes") else ""))
 
     if not repo.wt_has_changes(project, wt):
+        _record_no_effect(res, f"{persona} {NO_CHANGE_REASON}: "
+                               f"{out['summary']}")
         hold_item(project, db.get_item(name, "issue", item["number"]), persona,
                   f"{persona} {NO_CHANGE_REASON}",
                   f"{persona}: {out['summary'][:600]}")
