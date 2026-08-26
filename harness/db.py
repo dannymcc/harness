@@ -513,6 +513,30 @@ def finish_run(run_id: int, ok: bool, cost_usd: float, turns: int,
                   "them on the run page", "warn", project=project)
 
 
+def mark_no_effect(run_id: int, summary: str) -> None:
+    """Record a finished run as failed after the fact, once the caller has
+    seen that it achieved nothing.
+
+    A session that returns structured output has completed cleanly, so
+    `finish_run` records ok=1 — but "the agent came back" and "the item
+    moved" are different things. An engineer that declines the work, or
+    reports success while leaving the worktree untouched, has produced
+    nothing the item can use, and `consecutive_failures` (which reads only
+    runs.ok) would otherwise count that as a healthy run and forget every
+    failure before it.
+
+    Deliberately narrow: only ok and summary change. started_at and
+    finished_at are left exactly as `finish_run` wrote them, so the
+    orphaned-run skipping and the `breaker_reset_at` window in
+    `consecutive_failures` behave as before.
+    """
+    with conn() as c:
+        c.execute(
+            "UPDATE runs SET ok = 0, summary = ? "
+            "WHERE id = ? AND finished_at IS NOT NULL",
+            (summary[:300], run_id))
+
+
 def recent_runs(limit: int = 30, project: str | None = None):
     with conn() as c:
         if project is None:

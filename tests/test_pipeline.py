@@ -476,6 +476,110 @@ def test_fix_failures_retry_then_breaker(fresh_db, may):
     assert fresh_db.get_item("may", "issue", 20)["status"] == "held"
 
 
+def _no_effect_fix(fresh_db, number, output):
+    """A fake fix_issue that behaves as run_agent does on a clean round trip:
+    it opens a run, finishes it ok=1 with the agent's own summary, and hands
+    the run id back with the result."""
+    async def fake_fix_issue(project, issue, plan, cwd, resume=None,
+                             persona="Malcolm", repro_path="",
+                             worktree_note=""):
+        rid = fresh_db.start_run("may", "ic", f"issue#{number}", "fix", "m",
+                                 persona)
+        fresh_db.finish_run(rid, True, 0.1, 1, output["summary"])
+        return {"ok": True, "error": "", "session_id": "sess",
+                "output": output, "run_id": rid}
+    return fake_fix_issue
+
+
+def test_no_change_success_counts_towards_consecutive_failures(
+        fresh_db, may, monkeypatch, tmp_path):
+    """An engineer who reports success but leaves the worktree untouched has
+    achieved nothing — consecutive_failures (the breaker's durable memory)
+    must see that, and two such runs in a row must trip the breaker exactly
+    as two ordinary failures would. (Issue #84.)"""
+    import asyncio
+    from harness import agents, gh, pipeline, repo
+
+    monkeypatch.setattr(gh, "issue_detail",
+                        lambda repo_, number: {"number": 40, "title": "t",
+                                               "body": "b"})
+    monkeypatch.setattr(repo, "add_worktree",
+                        lambda project, branch, resuming=False: (tmp_path, ""))
+    monkeypatch.setattr(repo, "wt_has_changes", lambda project, wt: False)
+    monkeypatch.setattr(agents, "fix_issue", _no_effect_fix(
+        fresh_db, 40,
+        {"success": True, "summary": "looked at it, nothing needed changing",
+         "docs_updated": False, "notes": "", "commit_message": ""}))
+
+    fresh_db.upsert_item("may", "issue", 40, "quiet", "a", "open", "x")
+    fresh_db.update_item("may", "issue", 40, status="approved", plan="do it")
+    item = fresh_db.get_item("may", "issue", 40)
+
+    asyncio.run(pipeline.fix_item(may, item))
+    # One no-change "success" is one entry in the item's failure history —
+    # not the healthy round trip the runs table would otherwise show.
+    assert fresh_db.consecutive_failures("may", "issue#40") == 1
+
+    # Reset the hold-trip counter between attempts (as a retry ruling would)
+    # so this test isolates the run-log memory the breaker actually reads,
+    # rather than the separate hold_for_ruling trip count that already
+    # catches a second occurrence in the ordinary case.
+    fresh_db.update_item("may", "issue", 40, status="approved", breaker_trips=0)
+    asyncio.run(pipeline.fix_item(may, item))
+
+    assert fresh_db.consecutive_failures("may", "issue#40") == 2
+    assert pipeline._breaker_tripped(may, item) is True
+
+
+def test_a_declined_run_counts_towards_consecutive_failures(
+        fresh_db, may, monkeypatch, tmp_path):
+    """A deliberate decline is an honest answer, but it moves the item no
+    further than a crash does — so it counts towards the breaker too."""
+    import asyncio
+    from harness import agents, gh, pipeline, repo
+
+    monkeypatch.setattr(gh, "issue_detail",
+                        lambda repo_, number: {"number": 41, "title": "t",
+                                               "body": "b"})
+    monkeypatch.setattr(repo, "add_worktree",
+                        lambda project, branch, resuming=False: (tmp_path, ""))
+    monkeypatch.setattr(agents, "fix_issue", _no_effect_fix(
+        fresh_db, 41,
+        {"success": False, "summary": "had a look", "docs_updated": False,
+         "notes": "the spec is too unclear to act on", "commit_message": ""}))
+
+    fresh_db.upsert_item("may", "issue", 41, "unclear", "a", "open", "x")
+    fresh_db.update_item("may", "issue", 41, status="approved", plan="do it")
+    item = fresh_db.get_item("may", "issue", 41)
+
+    asyncio.run(pipeline.fix_item(may, item))
+    assert fresh_db.consecutive_failures("may", "issue#41") == 1
+
+    fresh_db.update_item("may", "issue", 41, status="approved", breaker_trips=0)
+    asyncio.run(pipeline.fix_item(may, item))
+
+    assert fresh_db.consecutive_failures("may", "issue#41") == 2
+    assert pipeline._breaker_tripped(may, item) is True
+
+
+def test_a_run_that_did_land_work_stays_a_healthy_run(fresh_db, may):
+    """mark_no_effect only touches ok and summary, and only a finished run:
+    the breaker's existing behaviour (orphan skipping, the reset window)
+    reads started_at/finished_at, which must come through untouched."""
+    rid = fresh_db.start_run("may", "ic", "issue#42", "fix", "m", "Malcolm")
+    fresh_db.finish_run(rid, True, 0.3, 4, "fixed it")
+    before = dict(fresh_db.recent_runs(1, "may")[0])
+
+    fresh_db.mark_no_effect(rid, "Malcolm changed nothing")
+    after = dict(fresh_db.recent_runs(1, "may")[0])
+
+    assert after["ok"] == 0
+    assert after["summary"] == "Malcolm changed nothing"
+    assert after["started_at"] == before["started_at"]
+    assert after["finished_at"] == before["finished_at"]
+    assert (after["cost_usd"], after["turns"]) == (0.3, 4)
+
+
 def test_dead_session_resumes_fresh_in_the_same_run(fresh_db, may, monkeypatch, tmp_path):
     """A resume against a session that didn't survive a container restart
     ('No conversation found ...') must fall back to a fresh attempt in the

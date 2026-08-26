@@ -136,7 +136,11 @@ told to behave.
   in flight — says so under the box and changes nothing.
 - **Mid-run control** — live transcripts for every agent run, a Stop
   button, and a circuit breaker that holds any item after two consecutive
-  failures instead of burning retries. A held item goes to Harry, not to
+  failures instead of burning retries. A run counts as a failure when it
+  left the item no further forward, which includes the two ways an agent
+  can come back clean and empty-handed — declining the work, or reporting
+  success while changing nothing — so a run that achieved nothing shows in
+  the run list as the failure it was. A held item goes to Harry, not to
   you: he sees both failures and rules — one fresh attempt, or the work
   sent back to the team lead to be broken up (two runs out of turns means
   the item is too big, not broken), or an escalation, which is the only one
