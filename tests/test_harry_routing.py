@@ -540,3 +540,18 @@ def test_digest_does_not_call_the_operators_items_harrys_blockers(fresh_db, may)
     assert f"with {config.OPERATOR} (their call, not a blocker of yours): " \
            "issue#60" in digest
     assert "HELD (yours to rule on) issue#61" in digest
+
+
+def test_a_ruling_is_read_by_its_leading_clause():
+    """Harry writes "Won't fix — close it out, and …", not a bare "Won't
+    fix"; the action must come from the opening words, and prose that does
+    not open with a directive must still say nothing either way."""
+    from harness import db
+    assert db.answer_action("Won't fix — close it out, and to be clear that "
+                            "is \"delivered\", not \"declined\".") == "reject"
+    assert db.answer_action("Fix — but only the mechanical slice") == "proceed"
+    assert db.answer_action("Fix, with the scope cut to one commit") == "proceed"
+    assert db.answer_action("Merge it: the tests pass") == "proceed"
+    assert db.answer_action("No — leave it") == "hold"
+    assert db.answer_action("Fixing this would be wrong") == ""
+    assert db.answer_action("Investigate the checkout first. #3 is frozen") == ""
