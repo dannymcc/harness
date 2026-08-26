@@ -313,7 +313,10 @@ branch from `dev` again: the engineer comes back to its own edits. Only a
 fresh attempt (or a resume whose worktree has been deleted) resets the tree
 to `origin/dev`, and then the last attempt's work is parked on
 `harness/issue-N-attempt-M` and named both on the item thread and in the
-engineer's own prompt.
+engineer's own prompt. Housekeeping's three-day sweep of idle worktrees
+leaves alone any worktree whose item is still in play, so an item held for
+days waiting on an answer still comes back to its own edits; the hourly
+summary says how many it kept.
 
 Harness can maintain itself — add this repo as a harness with version file
 `harness/config.py`, version pattern `VERSION\s*=\s*"(?P<version>[^"]+)"`,
