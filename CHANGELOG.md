@@ -4,6 +4,33 @@ All notable changes to Harness are recorded here. The format is
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project
 follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.21.0] - 2026-08-26
+
+### Added
+
+- **A project can now release on a clock rather than on a count.** Releases
+  have always been set off by the two thresholds — so many queued changes, or
+  the oldest queued change turning so many days old — which suits a repo with
+  a steady flow of work and suits a quiet one much less well. A new per-repo
+  policy, `release schedule`, picks the trigger: `changes` is the pair of
+  thresholds and remains the default, so no existing project moves; `daily`,
+  `weekly` or `monthly` cuts at most one release a window instead, carrying
+  everything queued since the last one, with the two thresholds ignored. The
+  window is timed from the last release that actually went out rather than
+  from the oldest queued item, so the cut point does not drift with when work
+  happened to land. A window with nothing in it passes quietly. A window
+  missed because the desk was off, outside its active hours or sitting on red
+  tests gives exactly one catch-up release on the next eligible cycle, not a
+  run of back-dated ones. **Release now** and Harry's own release proposal
+  ignore the cadence and cut immediately either way (issue #69).
+
+- Settings carries the new key with plain-English help and greys out the count
+  and age boxes, saying why, when a time schedule is picked; the project page
+  and the desk digest describe whichever trigger is live rather than always
+  quoting the thresholds. An unrecognised value reads as the default trigger
+  rather than as no trigger at all, so a typo in the policy cannot stop
+  releases dead.
+
 ## [0.20.3] - 2026-08-25
 
 ### Fixed

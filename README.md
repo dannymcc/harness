@@ -61,7 +61,8 @@ told to behave.
   it onto dev in its own clone and runs the suite before landing it, and
   still refuses drafts.
 - **Batched releases** — fixes and merges queue on dev. At a threshold (N
-  changes or age), Colin drafts the release: version bump, CHANGELOG,
+  changes or age), or on a set cadence if you would rather release on a
+  clock, Colin drafts the release: version bump, CHANGELOG,
   README check, credited notes, then a dev → main PR. You approve; it
   merges, tags, and publishes the GitHub Release. If GitHub refuses the
   merge — branch protection, a failing required check, a token without the
