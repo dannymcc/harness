@@ -4,6 +4,21 @@ All notable changes to Harness are recorded here. The format is
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project
 follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.21.2] - 2026-08-26
+
+### Fixed
+
+- **The lead's filing cap now measures backlog rather than filing rate.** The
+  limit on how many tracking issues a team lead may open counted every one the
+  desk had filed in the last 24 hours, whatever had become of it. An issue
+  filed, triaged, fixed and closed before lunch still held its slot for the
+  rest of the day, so a desk that worked through its own queue quickly was
+  penalised exactly as though the queue were untouched. The cap now counts
+  only the lead's filings that are still open and unworked, with no time
+  window at all: work something through and its slot comes back. The ceiling
+  is unchanged at six per desk, and the note in the log when a filing is
+  dropped now gives the real reason.
+
 ## [0.21.1] - 2026-08-26
 
 ### Fixed
