@@ -728,9 +728,23 @@ def _normalise(text: str) -> str:
     return " ".join(_PUNCT.sub(" ", text).split())
 
 
+_LEAD_SPLIT = re.compile(r"\s+[—–-]+\s+|[:;,.!?\n(]")
+
+
 def answer_action(answer: str) -> str:
-    """'proceed' | 'hold' | 'reject', or '' when the wording doesn't say."""
-    return ANSWER_ACTIONS.get(_normalise(answer), "")
+    """'proceed' | 'hold' | 'reject', or '' when the wording doesn't say.
+
+    The whole answer is tried first, then its leading clause — the words
+    before the first dash, colon, full stop or line break. A ruling reads
+    "Won't fix — close it out, and to be clear that is delivered" far more
+    often than a bare "Won't fix", and matching only the bare form sent
+    such rulings back to the asker as "wording says nothing either way",
+    which re-dispatched an item its ruling had just closed."""
+    whole = _normalise(answer)
+    if whole in ANSWER_ACTIONS:
+        return ANSWER_ACTIONS[whole]
+    lead = _normalise(_LEAD_SPLIT.split(answer or "", 1)[0])
+    return ANSWER_ACTIONS.get(lead, "") if lead != whole else ""
 
 
 def _days_ago(days: int) -> str:

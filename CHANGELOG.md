@@ -4,6 +4,19 @@ All notable changes to Harness are recorded here. The format is
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project
 follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.22.7] - 2026-08-26
+
+### Fixed
+
+- **A ruling is read by its leading clause.** Harry rules in sentences —
+  "Won't fix — close it out, and to be clear that is delivered" — and the
+  answer matcher accepted only the bare vocabulary, so such a ruling counted
+  as saying nothing either way, went back to the engineer who asked, and the
+  next no-change run paged the operator with a second trip. The action now
+  comes from the words before the first dash, colon, full stop or line break
+  when the whole text does not match; prose that does not open with a
+  directive still counts as no direction.
+
 ## [0.22.6] - 2026-08-26
 
 ### Fixed
