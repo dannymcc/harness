@@ -459,9 +459,11 @@ TRIAGE_SCHEMA = {
                   "description": "Is this a genuine, reproducible/actionable report?"},
         "fixable": {"type": "boolean",
                     "description": "Could an automated fix be attempted safely?"},
+        "needs_operator": {"type": "boolean",
+                           "description": "Default false. True only when the decision is the maintainer's: product direction, a breaking change, or something outside the codebase. Anything else that is not fixable goes to the team lead and Harry to rule on, not the maintainer."},
         "summary": {"type": "string",
                     "description": "2-3 sentences: what this is and your assessment."},
-        "question_for_human": {"type": "string", "description": "Optional: one question needing the operator's decision, else empty."},
+        "question_for_human": {"type": "string", "description": "Optional: one question needing a decision from Harry (he escalates to the operator only what is genuinely theirs), else empty."},
         "question_options": {"type": "array", "maxItems": 3,
                              "items": {"type": "string"},
                              "description": "Optional: up to 3 short answer choices when the question has discrete options. When the choice is whether the section should work on this item, use the wordings the harness acts on — \"Fix\" (or \"Merge\", for a PR) / \"Skip\" / \"Won't fix\" — so the answer moves the item itself instead of only being read."},
@@ -486,7 +488,7 @@ FIX_SCHEMA = {
                     "description": "True only if the fix is complete and tests pass."},
         "summary": {"type": "string"},
         "question_for_human": {"type": "string",
-                               "description": "Optional: one question needing the operator's decision, else empty."},
+                               "description": "Optional: one question needing a decision from Harry (he escalates to the operator only what is genuinely theirs), else empty."},
         "question_options": {"type": "array", "maxItems": 3,
                              "items": {"type": "string"},
                              "description": "Optional: up to 3 short answer choices when the question has discrete options. When the choice is whether the section should work on this item, use the wordings the harness acts on — \"Fix\" (or \"Merge\", for a PR) / \"Skip\" / \"Won't fix\" — so the answer moves the item itself instead of only being read."},
@@ -511,7 +513,7 @@ REVIEW_SCHEMA = {
                      "description": "Is this a worthwhile addition to the product?"},
         "summary": {"type": "string"},
         "question_for_human": {"type": "string",
-                               "description": "Optional: one question needing the operator's decision, else empty."},
+                               "description": "Optional: one question needing a decision from Harry (he escalates to the operator only what is genuinely theirs), else empty."},
         "question_options": {"type": "array", "maxItems": 3,
                              "items": {"type": "string"},
                              "description": "Optional: up to 3 short answer choices when the question has discrete options. When the choice is whether the section should work on this item, use the wordings the harness acts on — \"Fix\" (or \"Merge\", for a PR) / \"Skip\" / \"Won't fix\" — so the answer moves the item itself instead of only being read."},
@@ -534,7 +536,7 @@ RELEASE_SCHEMA = {
                            "description": "Release notes / changelog markdown."},
         "summary": {"type": "string"},
         "question_for_human": {"type": "string",
-                               "description": "Optional: one question needing the operator's decision, else empty."},
+                               "description": "Optional: one question needing a decision from Harry (he escalates to the operator only what is genuinely theirs), else empty."},
         "question_options": {"type": "array", "maxItems": 3,
                              "items": {"type": "string"},
                              "description": "Optional: up to 3 short answer choices when the question has discrete options. When the choice is whether the section should work on this item, use the wordings the harness acts on — \"Fix\" (or \"Merge\", for a PR) / \"Skip\" / \"Won't fix\" — so the answer moves the item itself instead of only being read."},
@@ -553,7 +555,7 @@ PLAN_SCHEMA = {
         "staffing_request": {"type": "string",
                              "description": "Optional: ask Harry for staffing (e.g. 'one more engineer until the backlog clears'), else empty."},
         "question_for_human": {"type": "string",
-                               "description": "Optional: one question needing the operator's decision, else empty."},
+                               "description": "Optional: one question needing a decision from Harry (he escalates to the operator only what is genuinely theirs), else empty."},
         "question_options": {"type": "array", "maxItems": 3,
                              "items": {"type": "string"},
                              "description": "Optional: up to 3 short answer choices when the question has discrete options. When the choice is whether the section should work on this item, use the wordings the harness acts on — \"Fix\" (or \"Merge\", for a PR) / \"Skip\" / \"Won't fix\" — so the answer moves the item itself instead of only being read."},
@@ -607,11 +609,13 @@ STANDUP_SCHEMA = {
     "type": "object",
     "additionalProperties": False,
     "required": ["standup_markdown", "blockers", "all_clear", "desks",
-                 "summary"],
+                 "summary", "outside_remit_reason"],
     "properties": {
         "summary": {"type": "string"},
         "question_for_human": {"type": "string",
-                               "description": "Optional: one question needing the operator's decision, else empty."},
+                               "description": "Optional: one question that is genuinely the operator's to decide, else empty. If you can make a recommendation it is your decision — issue it as a directive, not a question."},
+        "outside_remit_reason": {"type": "string",
+                                 "description": "Required with question_for_human: why this is the operator's call and not yours (product direction, a breaking change, spend beyond the ordinary, consequences outside the codebase). Empty when there is no question — a question without a reason is dropped."},
         "question_options": {"type": "array", "maxItems": 3,
                              "items": {"type": "string"},
                              "description": "Optional: up to 3 short answer choices when the question has discrete options. When the choice is whether the section should work on this item, use the wordings the harness acts on — \"Fix\" (or \"Merge\", for a PR) / \"Skip\" / \"Won't fix\" — so the answer moves the item itself instead of only being read."},
@@ -771,8 +775,11 @@ Comments:
 
 Assess: is it valid? A bug or a feature request? Could Harness fix it safely
 (small, well-understood change with test coverage)? Feature requests are only
-"fixable" when they are small, clearly specified, and an obvious product fit —
-otherwise leave them for the maintainer. Write a draft reply for the issue
+"fixable" when they are small, clearly specified, and an obvious product fit.
+Anything not fixable goes to the team lead and Harry to rule on — they decide
+whether the section takes it on, parks it or closes it. Set needs_operator
+only when the call is genuinely the maintainer's: product direction, a
+breaking change, or consequences outside the codebase. Write a draft reply for the issue
 where a reply would help (asking for missing info, explaining a
 misunderstanding, or confirming the plan). Do not modify any files.
 
@@ -920,7 +927,7 @@ NOTES_SCHEMA = {
                            "description": "The updated rolling desk notes."},
         "summary": {"type": "string"},
         "question_for_human": {"type": "string",
-                               "description": "Optional: one question needing the operator's decision, else empty."},
+                               "description": "Optional: one question needing a decision from Harry (he escalates to the operator only what is genuinely theirs), else empty."},
         "question_options": {"type": "array", "maxItems": 3,
                              "items": {"type": "string"},
                              "description": "Optional: up to 3 short answer choices when the question has discrete options. When the choice is whether the section should work on this item, use the wordings the harness acts on — \"Fix\" (or \"Merge\", for a PR) / \"Skip\" / \"Won't fix\" — so the answer moves the item itself instead of only being read."},
@@ -976,7 +983,7 @@ SECURITY_SCHEMA = {
     "properties": {
         "summary": {"type": "string"},
         "question_for_human": {"type": "string",
-                               "description": "Optional: one question needing the operator's decision, else empty."},
+                               "description": "Optional: one question needing a decision from Harry (he escalates to the operator only what is genuinely theirs), else empty."},
         "question_options": {"type": "array", "maxItems": 3,
                              "items": {"type": "string"},
                              "description": "Optional: up to 3 short answer choices when the question has discrete options. When the choice is whether the section should work on this item, use the wordings the harness acts on — \"Fix\" (or \"Merge\", for a PR) / \"Skip\" / \"Won't fix\" — so the answer moves the item itself instead of only being read."},
@@ -1187,6 +1194,8 @@ RULINGS_SCHEMA = {
                                "enum": ["answer", "escalate"]},
                     "answer": {"type": "string",
                                "description": "Your ruling, in one or two plain sentences the asker can act on (empty when escalating)."},
+                    "outside_remit_reason": {"type": "string",
+                                             "description": "When escalating: why this is the operator's call and not yours (product direction, a breaking change, spend beyond the ordinary, consequences outside the codebase). Empty when answering."},
                     "item_action": {"type": "string",
                                     "enum": ["none", "retry", "split"],
                                     "description": ITEM_ACTION_HINT},
@@ -1211,13 +1220,23 @@ Context on the desks involved:
 Answer yourself whenever the question is within the section's remit:
 engineering judgement, priorities, process, naming, scope of a fix, which
 of two reasonable approaches to take, what to do about branch or repo
-hygiene. Be decisive and concrete — an answer the asker can act on without
-coming back. Where the options given are sensible, pick one. Escalate to
-{config.OPERATOR}, the operator, only what is genuinely theirs: product
-direction, breaking changes, spend beyond the ordinary, anything with
-consequences outside the codebase. If a question shows the asker is stuck
-on something you cannot unblock with an answer, say so in your ruling and
-what they should do instead.
+hygiene, whether the section takes on a piece of work, parks it or closes
+it. Be decisive and concrete — an answer the asker can act on without
+coming back. Where the options given are sensible, pick one. If you can
+make a recommendation, it is your decision: give it as the ruling, not as
+an escalation with your view attached. Escalate to {config.OPERATOR}, the
+operator, only what you genuinely cannot recommend on: product direction,
+breaking changes, spend beyond the ordinary, anything with consequences
+outside the codebase — and say in outside_remit_reason why it is theirs.
+If a question shows the asker is stuck on something you cannot unblock
+with an answer, say so in your ruling and what they should do instead.
+
+Questions with the options Fix (or Merge) / Skip / Won't fix are items held
+for your ruling — a verdict of not fixable, an engineer declining, a run
+that changed nothing, a review that is not an auto-merge. Answer with one
+of those words and the item moves on your say-so: Fix or Merge puts it
+back in the flow, Skip parks it, Won't fix closes it out. You get one such
+ruling per item; if it comes back held afterwards it goes to the operator.
 
 Questions from "harness" are circuit-breaker trips: an item failed twice in
 a row and is held, waiting on you rather than on the operator. Answer with
@@ -1255,12 +1274,24 @@ a reason.
 
 You make the decisions. The digest lists open questions from your people,
 each with an id. Rule on each: answer it yourself when it is within the
-section's remit (engineering judgement, priorities, process). Escalate to
-the operator only what is genuinely theirs — product direction, breaking changes,
-anything with consequences outside the codebase. Your answers reach the
-team automatically. Questions from "harness" are circuit-breaker trips on a
-held item: answer those with an item_action (retry or split) so the item
-moves, or escalate.
+section's remit (engineering judgement, priorities, process, whether the
+section takes work on). Escalate to the operator only what is genuinely
+theirs — product direction, breaking changes, spend beyond the ordinary,
+anything with consequences outside the codebase — and say why in
+outside_remit_reason. Your answers reach the team automatically. Questions
+from "harness" are circuit-breaker trips on a held item: answer those with
+an item_action (retry or split) so the item moves, or escalate. Questions
+offering Fix (or Merge) / Skip / Won't fix are items held for your ruling:
+answer with one of those words and the item moves.
+
+The same rule governs your own question_for_human. If you can make a
+recommendation — which of four waiting features goes first, whether a
+desk drops a piece of work, how a lead should order a backlog — it is your
+decision: issue it as a directive and do not ask. Ask the operator only
+what you genuinely cannot recommend on, and give outside_remit_reason: a
+question without one is dropped, and a question about a thing they have
+ruled on in the last day is not put to them again (their ruling is in
+this digest — act on it).
 
 You also run staffing. The utilisation figures show how busy each desk's
 people are. If a desk has a backlog of fixable work, hire an extra engineer
@@ -1279,8 +1310,10 @@ when it has actually moved.
 
 Run the stand-up: one line per desk on whether it's moving. Then call out
 anything genuinely stuck — an item blocked for a reason nobody is acting on,
-work waiting on the operator for days, repeated failures, unusual spend —
-as blockers, each with a concrete next step. Name a blocker in the same
+an item held for a ruling you have not given, repeated failures, unusual
+spend — as blockers, each with a concrete next step. Items marked as with
+the operator are their call and not a blocker of yours; do not raise them.
+Name a blocker in the same
 words as last time only when it is genuinely the same blocker; that is what
 lets the next stand-up count the repeat. Set all_clear only if there is
 truly nothing needing attention. Be brief; this happens every hour."""

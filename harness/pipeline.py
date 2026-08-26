@@ -53,6 +53,83 @@ def _failure_digest(name: str, key: str) -> str:
     return "\n".join(reversed(lines)) or "- (no run summaries recorded)"
 
 
+def hold_for_ruling(project, item, asked_by: str, reason: str,
+                    question: str, options: list[str]) -> str:
+    """Put an item that cannot go forward on its own with Harry, not the
+    operator. Returns the status it ended up in.
+
+    This is the one road from "the section cannot do this as it stands" to
+    a decision: a triage verdict of not-fixable, an engineer declining, a
+    run that changed nothing, two red test runs, a review that is not an
+    auto-merge, and the circuit breaker all come through here. The item is
+    held with a question on it that Harry answers on the next questions
+    pass, and his answer moves it (route_answers, or apply_breaker_ruling
+    for the breaker's own vocabulary).
+
+    One ruling per item: each hold counts a trip, and the trip after his
+    ruling stops asking and puts the item on the operator's desk instead, so
+    a ruling that leads straight back here cannot loop. The operator's own
+    approve or "fix" forgives the trips — they have looked at the thing.
+    """
+    name = project["name"]
+    kind, number = item["kind"], item["number"]
+    key = f"{kind}#{number}"
+    # Read the trip count fresh: a ruling may have landed since the caller
+    # picked this row up.
+    current = db.get_item(name, kind, number) or item
+    trips = (current["breaker_trips"] or 0) + 1
+    if trips >= MAX_BREAKER_TRIPS:
+        db.update_item(name, kind, number, status="waiting_human",
+                       breaker_trips=trips,
+                       error=f"{reason} again after Harry's ruling — held for "
+                             f"{config.OPERATOR}")
+        db.log_event(f"{key} came back after Harry's ruling ({reason[:80]}) "
+                     f"— {config.OPERATOR}'s decision now", "warn",
+                     project=name)
+        notify.send(f"Held: {key} ({name})",
+                    f"{reason[:120]} — again after Harry's ruling; needs "
+                    "your look.", tags="warning",
+                    click_path=f"/p/{name}/{kind}/{number}")
+        return "waiting_human"
+    db.update_item(name, kind, number, status="held", breaker_trips=trips,
+                   error=f"{reason} — with Harry for a ruling")
+    if db.ask_question(name, asked_by, key, question, options=options) is None:
+        # The very same question was ruled on already and the ruling stands;
+        # an item held with nobody asked is an item nobody moves, so it is
+        # the operator's rather than sitting there.
+        db.update_item(name, kind, number, status="waiting_human",
+                       error=f"{reason} — Harry has already ruled on this "
+                             f"once; held for {config.OPERATOR}")
+        db.log_event(f"{key}: {reason[:80]} — the question was already put "
+                     f"to Harry and his ruling stands, so it is "
+                     f"{config.OPERATOR}'s now", "warn", project=name)
+        return "waiting_human"
+    db.log_event(f"{key} held ({reason[:80]}) — asked Harry for a ruling",
+                 "warn", project=name)
+    return "held"
+
+
+HOLD_OPTIONS = {"issue": ["Fix", "Skip", "Won't fix"],
+                "pr": ["Merge", "Skip", "Won't fix"]}
+
+
+def hold_item(project, item, asked_by: str, reason: str, context: str) -> str:
+    """hold_for_ruling with the vocabulary route_answers acts on: Fix (or
+    Merge) puts the item back in the flow, Skip parks it, Won't fix closes
+    it out. `context` is what Harry needs to rule — the verdict summary,
+    the decline reason, the failing output."""
+    key = f"{item['kind']}#{item['number']}"
+    opts = HOLD_OPTIONS[item["kind"]]
+    question = (f"{key} ({item['title'][:80]}) is held: {reason}.\n"
+                f"{context.strip()[:1200]}\n"
+                f"Rule on it: {opts[0]} (the section gets on with it), "
+                "Skip (parked, nobody works it), or Won't fix (closed out). "
+                "Escalate only if this is genuinely the operator's call — "
+                "product direction, a breaking change, consequences outside "
+                "the codebase.")
+    return hold_for_ruling(project, item, asked_by, reason, question, opts)
+
+
 def _breaker_tripped(project, item) -> bool:
     """Hold items that keep failing instead of burning retries forever.
 
@@ -64,41 +141,20 @@ def _breaker_tripped(project, item) -> bool:
     cannot loop.
     """
     name = project["name"]
-    kind, number = item["kind"], item["number"]
-    key = f"{kind}#{number}"
+    key = f"{item['kind']}#{item['number']}"
     if db.consecutive_failures(name, key) < BREAKER_THRESHOLD:
         return False
-    # Read the trip count fresh: a ruling may have landed since the caller
-    # picked this row up.
-    current = db.get_item(name, kind, number) or item
-    trips = (current["breaker_trips"] or 0) + 1
     digest = _failure_digest(name, key)
-    if trips >= MAX_BREAKER_TRIPS:
-        db.update_item(name, kind, number, status="waiting_human",
-                       breaker_trips=trips,
-                       error=f"circuit breaker: {BREAKER_THRESHOLD} consecutive "
-                             "failed runs again after a ruling — held for "
-                             f"{config.OPERATOR}")
-        db.log_event(f"Circuit breaker held {key} again after a ruling — "
-                     f"{config.OPERATOR}'s decision now", "warn", project=name)
-        notify.send(f"Held: {key} ({name})",
-                    "Failed again after Harry's ruling — needs your look.",
-                    tags="warning", click_path=f"/p/{name}/{kind}/{number}")
-        return True
-    db.update_item(name, kind, number, status="held", breaker_trips=trips,
-                   error=f"circuit breaker: {BREAKER_THRESHOLD} consecutive "
-                         "failed runs — with Harry for a ruling")
-    db.ask_question(
-        name, BREAKER_ASKER, key,
+    hold_for_ruling(
+        project, item, BREAKER_ASKER,
+        f"circuit breaker: {BREAKER_THRESHOLD} consecutive failed runs",
         f"{key} ({item['title'][:80]}) has failed {BREAKER_THRESHOLD} runs in "
         f"a row and is held. The failures:\n{digest}\n"
         "Rule on it: retry (a fresh session on the same item), split (tell "
         "the desk to break the work up — the right call when a run keeps "
         "hitting error_max_turns, which means the item is too big rather "
         "than broken), or escalate if this is genuinely the operator's.",
-        options=BREAKER_OPTIONS)
-    db.log_event(f"Circuit breaker held {key} after repeated failures — "
-                 "asked Harry for a ruling", "warn", project=name)
+        BREAKER_OPTIONS)
     return True
 
 
@@ -159,6 +215,31 @@ def apply_breaker_ruling(q, ruling: str, answer: str, by: str = "Harry") -> None
                     click_path=f"/p/{name}/{kind}/{num}")
 
 
+def held_item_for(q):
+    """The held item a question is about, or None. A ruling on a held item
+    has to move it; a question about an item in any other state is just
+    read by whoever is on it."""
+    if not (q["project"] and q["item_key"]):
+        return None
+    kind, _, num = q["item_key"].partition("#")
+    if kind not in ("issue", "pr") or not num.isdigit():
+        return None
+    item = db.get_item(q["project"], kind, int(num))
+    return item if item and item["status"] == "held" else None
+
+
+def park_held_item(q, note: str) -> None:
+    """Harry has sent a held item's question to the operator: the item goes
+    with it, otherwise it sits held with nobody left to rule on it."""
+    item = held_item_for(q)
+    if not item:
+        return
+    db.update_item(q["project"], item["kind"], item["number"],
+                   status="waiting_human",
+                   error=f"escalated by Harry — {config.OPERATOR}'s call"
+                         + (f": {note[:160]}" if note else ""))
+
+
 # --- answers that move items --------------------------------------------------
 # Where an answer puts the item it is about. The operator answering "fix" is
 # the same act as pressing approve, so it is the sign-off whatever the
@@ -168,10 +249,33 @@ def apply_breaker_ruling(q, ruling: str, answer: str, by: str = "Harry") -> None
 ANSWER_ROUTE = {"proceed": "approved", "hold": "waiting_human",
                 "reject": "rejected"}
 # Statuses an answer may move an item out of. Anything else — new (triage
-# looks at it anyway), held (that is the breaker's own ruling flow),
-# working, approved, queued, released — is already in hand, and the answer
-# reaches it through the item's thread.
-ROUTABLE_STATUSES = ("waiting_human", "triaged", "blocked")
+# looks at it anyway), working, approved, queued, released — is already in
+# hand, and the answer reaches it through the item's thread. A held item is
+# routable by the operator as well as by Harry: their approve button works
+# on it, and so must their answer.
+ROUTABLE_STATUSES = ("waiting_human", "triaged", "blocked", "held")
+
+
+def _proceed_status(project, item, by: str) -> str:
+    """Where a "fix"/"merge" answer sends the item.
+
+    The operator saying so is the sign-off whatever the policy. Harry's
+    ruling is the section's decision, which the policy may say is not
+    enough: under fix_issues: approve an issue nobody has yet signed off,
+    or a PR under merge_prs: approve, is the operator's click by the
+    operator's own setting, so his "fix" puts it on their desk with his
+    recommendation attached rather than starting the work over their gate.
+    """
+    if by != config.CTO_NAME:
+        return "approved"
+    name = project["name"]
+    if item["kind"] == "pr":
+        key = "merge_dependabot" if _is_dependabot(item["author"]) else "merge_prs"
+        gated = db.policy(name, key) != "auto"
+    else:
+        gated = (db.policy(name, "fix_issues") == "approve"
+                 and not (item["session_id"] or item["branch"]))
+    return "waiting_human" if gated else "approved"
 
 
 def _back_to_asker(item) -> str:
@@ -204,18 +308,26 @@ def route_answers(project) -> list[str]:
         kind, _, num = q["item_key"].partition("#")
         if kind not in ("issue", "pr") or not num.isdigit():
             continue
-        # Harry's rulings reach his people through the question record and
-        # the thread; only the operator's answer is a sign-off. Rows from
-        # before answered_by existed are the operator's — that is all there
-        # was then.
-        if (q["answered_by"] or "operator") not in ("operator", config.OPERATOR):
+        # Rows from before answered_by existed are the operator's — that is
+        # all there was then.
+        by = q["answered_by"] or "operator"
+        harrys = by == config.CTO_NAME
+        if not harrys and by not in ("operator", config.OPERATOR):
             continue
         item = db.get_item(name, kind, int(num))
         if not item or item["gh_state"] != "open" \
                 or item["status"] not in ROUTABLE_STATUSES:
             continue
+        # Harry's ruling moves an item that is held for exactly that ruling.
+        # On anything else his answer reaches his people through the
+        # question record and the thread; it is not the operator's sign-off.
+        if harrys and item["status"] != "held":
+            continue
         action = db.answer_action(q["answer"])
-        status = ANSWER_ROUTE.get(action) or _back_to_asker(item)
+        if action == "proceed":
+            status = _proceed_status(project, item, by)
+        else:
+            status = ANSWER_ROUTE.get(action) or _back_to_asker(item)
         fields = {"status": status}
         if status in ("approved", "new"):
             # Going back to an agent, so the reason it stopped goes with it,
@@ -223,16 +335,24 @@ def route_answers(project) -> list[str]:
             # failures hold the item again before the fresh attempt has run,
             # which is exactly what the decision being ignored looks like.
             # On a hold or a reject the error stays — it is the record of
-            # why the item stopped.
-            fields.update(error="", breaker_reset_at=db.now(),
-                          breaker_trips=0)
+            # why the item stopped. Harry's ruling keeps the trip count: the
+            # next hold on this item is the operator's, not another ruling.
+            fields.update(error="", breaker_reset_at=db.now())
+            if not harrys:
+                fields["breaker_trips"] = 0
+        elif harrys and status == "waiting_human":
+            fields["error"] = (f"parked by Harry: {q['answer'][:160]}"
+                               if action == "hold" else
+                               f"Harry recommends {q['answer'][:40]} — the "
+                               f"policy makes this {config.OPERATOR}'s click")
         db.update_item(name, kind, item["number"], **fields)
         why = action or ("wording says nothing either way — back to the "
                          "agent that asked")
+        who = "Harry's ruling" if harrys else f"{config.OPERATOR}'s answer"
         db.thread_append(name, q["item_key"], "harness", "event",
-                         f"{config.OPERATOR}'s answer acted on ({why}): "
+                         f"{who} acted on ({why}): "
                          f"{item['status']} → {status}.")
-        db.log_event(f"{config.OPERATOR}'s answer moved {q['item_key']} from "
+        db.log_event(f"{who} moved {q['item_key']} from "
                      f"{item['status']} to {status}", project=name)
         moved.append(f"{q['item_key']} -> {status}")
     return moved
@@ -333,6 +453,14 @@ async def triage_item(project, item) -> None:
     db.thread_append(name, key, "Ruth", "finding",
                      f"Verdict: {out['verdict']} (valid={out['valid']}, "
                      f"fixable={out['fixable']})\n{out['summary']}")
+    if not fixable and not out.get("needs_operator"):
+        # Not something the section does on its own — but that is Harry's
+        # call before it is the operator's. Only Ruth flagging it as the
+        # maintainer's (product direction, a breaking change, outside the
+        # codebase) leaves it on their desk.
+        hold_item(project, db.get_item(name, "issue", item["number"]), "Ruth",
+                  f"Ruth's verdict is {out['verdict']}, not fixable as it "
+                  "stands", f"Ruth: {out['summary']}")
     if out.get("plan"):
         db.thread_append(name, key, "Ruth", "plan", out["plan"])
     if repro:
@@ -422,12 +550,16 @@ async def fix_item(project, item, persona: str = "Malcolm") -> None:
                            status="waiting_human", error=msg)
         elif res["ok"] and res["output"] and not res["output"]["success"]:
             # The engineer deliberately declined (too risky, unclear spec).
-            # Retrying repeats the same honest refusal at full cost.
-            db.update_item(name, "issue", item["number"],
-                           status="waiting_human", error=msg)
+            # Retrying repeats the same honest refusal at full cost, so it
+            # is held for Harry's ruling — and a second refusal after his
+            # ruling is the operator's (hold_for_ruling's trip count), not
+            # another round with the same engineer.
             db.log_event(f"{persona} declined issue #{item['number']}: "
-                         f"{msg[:120]} — needs a human call", "warn",
+                         f"{msg[:120]} — held for a ruling", "warn",
                          project=name)
+            hold_item(project, db.get_item(name, "issue", item["number"]),
+                      persona, f"{persona} declined the work",
+                      f"{persona}: {msg[:600]}")
         else:
             # Mechanical failure (crash, timeout, transport): retry next
             # cycle; the circuit breaker holds it after two in a row.
@@ -443,9 +575,9 @@ async def fix_item(project, item, persona: str = "Malcolm") -> None:
                      out["summary"] + (f"\nNotes: {out['notes']}" if out.get("notes") else ""))
 
     if not repo.wt_has_changes(project, wt):
-        db.update_item(name, "issue", item["number"], status="waiting_human",
-                       error="agent reported success but made no changes — "
-                             "needs a human look")
+        hold_item(project, db.get_item(name, "issue", item["number"]), persona,
+                  f"{persona} reported success but changed nothing",
+                  f"{persona}: {out['summary'][:600]}")
         return
 
     # The deterministic gate: harness runs the tests itself, in the worktree.
@@ -455,17 +587,20 @@ async def fix_item(project, item, persona: str = "Malcolm") -> None:
         # One retry (the engineer resumes their session with the failure in
         # front of them); a second red run is a human's call, not a loop.
         again = (item["error"] or "").startswith("tests failed after fix")
-        db.update_item(name, "issue", item["number"],
-                       status="waiting_human" if again else "approved",
+        db.update_item(name, "issue", item["number"], status="approved",
                        error="tests failed after fix:\n" + test_out[-1500:])
         db.thread_append(name, key, "harness", "test",
                          "Tests FAILED after the fix — not pushed"
-                         + (" — held for a human after two red runs." if again
+                         + (" — held for a ruling after two red runs." if again
                             else "; the engineer retries with this in front of them.")
                          + "\n" + test_out[-1200:])
         db.log_event(f"Issue #{item['number']}: tests failed — fix not pushed"
-                     + (", held for a human after two red runs" if again
+                     + (", held for a ruling after two red runs" if again
                         else ", retrying next cycle"), "warn", project=name)
+        if again:
+            hold_item(project, db.get_item(name, "issue", item["number"]),
+                      persona, "tests failed after the fix twice running",
+                      f"Second red run:\n{test_out[-800:]}")
         return
 
     msg = out["commit_message"].strip() or f"fix: issue #{item['number']}"
@@ -494,7 +629,8 @@ async def fix_item(project, item, persona: str = "Malcolm") -> None:
     db.update_item(
         name, "issue", item["number"],
         status="queued", queued_at=db.now(), diff=diff,
-        commits=msg, verdict_summary=out["summary"], error="")
+        commits=msg, verdict_summary=out["summary"], error="",
+        breaker_trips=0)
     db.thread_append(name, key, "harness", "event",
                      f"Tests passed; landed on {project['dev_branch']} as "
                      f"\"{msg.splitlines()[0][:100]}\"\n{stat[-800:]}")
@@ -571,11 +707,19 @@ async def review_item(project, item) -> None:
         await merge_pr_item(project, db.get_item(name, "pr", item["number"]),
                             validate=False)
     else:
-        db.update_item(name, "pr", item["number"], status="waiting_human")
         if verdict in ("needs_work", "reject") and out["draft_review"] and \
                 db.policy(name, "post_comments") == "auto":
             gh.comment_pr(project["repo"], item["number"], out["draft_review"])
             db.log_event(f"Posted review on PR #{item['number']}", project=name)
+        # Not an auto-merge: Harry rules on it (merge, park, close out)
+        # before the operator hears of it. Under merge_prs: approve his
+        # "merge" lands it on their desk as a recommendation — the policy
+        # makes the press theirs.
+        hold_item(project, db.get_item(name, "pr", item["number"]), "Ruth",
+                  f"Ruth's review verdict is {verdict}"
+                  + ("" if passed else " (tests failed)"),
+                  f"Ruth: {out['summary']}"
+                  + (f"\nRisks: {out['risks']}" if out.get("risks") else ""))
 
 
 async def _pr_merges_clean_and_passes(project, item) -> bool:
@@ -1343,6 +1487,8 @@ async def _process_questions_locked(project_name: str | None = None) -> None:
             if is_breaker_question(q):
                 # The item cannot sit held with nobody ruling on it.
                 apply_breaker_ruling(q, "escalate", "no ruling after two passes")
+            else:
+                park_held_item(q, "no ruling after two passes")
             db.escalate_question(q["id"])
             _undecided.pop(q["id"], None)
             db.log_event(f"Harry left {q['asked_by']}'s question undecided "
@@ -1518,6 +1664,16 @@ def _standup_digest() -> str:
             + (f" (options: {' / '.join(db.question_options(q))})"
                if q['options'] else "")
             for q in inbox))
+    ruled = db.operator_rulings_since(_hours_ago(STANDUP_ASK_WINDOW_H))
+    if ruled:
+        sections.append(
+            f"{config.OPERATOR}'s answers to your own questions in the last "
+            f"{STANDUP_ASK_WINDOW_H}h (binding — act on them, do not ask "
+            "again):\n" + "\n".join(
+                f"- [{q['project'] or 'section'}"
+                f"{' ' + q['item_key'] if q['item_key'] else ''}] "
+                f"Q: {q['question'][:160]}\n  A ({q['answered_at']}): "
+                f"{q['answer'][:200]}" for q in ruled))
     if db.paused_until():
         sections.append(f"NOTE: agent work is paused for API limits until "
                         f"{db.paused_until()}.")
@@ -1541,10 +1697,18 @@ def _standup_digest() -> str:
                              f"{it['number']} ({age_days(it['updated_at'])}): "
                              f"{it['error'][:200]}")
         for it in db.items_by_status(name, "waiting_human"):
-            if it["gh_state"] == "open":
-                lines.append(f"waiting on operator {it['kind']}#{it['number']} "
-                             f"for {age_days(it['updated_at'])}: "
-                             f"{it['verdict']} — {it['title'][:80]}")
+            if it["gh_state"] != "open":
+                continue
+            err = it["error"] or ""
+            if err.startswith("parked by Harry"):
+                who = "parked by your own ruling"
+            else:
+                who = (f"with {config.OPERATOR} (their call, not a blocker "
+                       "of yours)")
+            lines.append(f"{who}: {it['kind']}#{it['number']} "
+                         f"for {age_days(it['updated_at'])}: "
+                         f"{it['verdict']} — {it['title'][:80]}"
+                         + (f" — {err[:120]}" if err else ""))
         fix_policy = db.policy(name, "fix_issues")
         for it in db.items_by_status(name, "triaged"):
             if it["kind"] == "issue" and it["gh_state"] == "open":
@@ -1585,6 +1749,84 @@ def _standup_digest() -> str:
     return "\n\n".join(sections) or "No harnesses configured."
 
 
+STANDUP_ASK_WINDOW_H = 24   # Harry asks the operator about a thing once a day
+
+
+def _hours_ago(hours: float) -> str:
+    return (datetime.now(timezone.utc) - __import__("datetime")
+            .timedelta(hours=hours)).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+
+def _mentioned_projects(text: str) -> list[str]:
+    import re
+    return [p["name"] for p in db.all_projects(enabled_only=True)
+            if re.search(r"(?<![a-z0-9])" + re.escape(p["name"].lower())
+                         + r"(?![a-z0-9])", text.lower())]
+
+
+def standup_question_target(text: str) -> tuple[str, str, list[str]]:
+    """(project, item_key, other item keys) a stand-up question is about.
+
+    Harry writes as he speaks — "roan has four features waiting", "#302 on
+    may" — so the project is taken from the desk he names, and the items
+    from the numbers he gives on that desk (or on any desk when he names
+    none). One project and one item key go on the record, so the answer
+    routes and the next stand-up's dedupe matches; the rest ride in the
+    text."""
+    named = _mentioned_projects(text)
+    keys = []
+    for pname in named or [p["name"] for p in db.all_projects(enabled_only=True)]:
+        for key in _blocker_items(pname, text):
+            keys.append((pname, key))
+    if keys:
+        project = keys[0][0]
+        mine = [k for p, k in keys if p == project]
+        return project, mine[0], mine[1:]
+    return (named[0] if named else ""), "", []
+
+
+def file_standup_question(out: dict) -> int | None:
+    """File what Harry could not decide at stand-up — to the operator, on the
+    record of the item or desk it is about, and once.
+
+    Dropped when he gives no reason it is outside his remit: a question he
+    could have answered is a directive he did not issue, not an escalation.
+    Dropped as well when the same item (or the same desk, for a question
+    naming no item) is already in front of the operator, or was ruled on
+    within STANDUP_ASK_WINDOW_H — the digest carries that ruling back to
+    him, and an event says so, rather than the operator hearing the same
+    question in new words every hour."""
+    text = (out.get("question_for_human") or "").strip()
+    if not text:
+        return None
+    reason = (out.get("outside_remit_reason") or "").strip()
+    if not reason:
+        db.log_event("Stand-up: Harry raised a question without saying why "
+                     "it is the operator's rather than his — dropped; a call "
+                     f"he can make is a directive: {text[:120]}", "warn")
+        return None
+    project, key, rest = standup_question_target(text)
+    prior = db.harry_prior_question(project, key,
+                                    _hours_ago(STANDUP_ASK_WINDOW_H))
+    about = key or (project and f"the {project} desk") or "the section"
+    if prior is not None and prior["status"] in ("open", "escalated"):
+        db.log_event(f"Stand-up: Harry's question about {about} is already "
+                     f"with {config.OPERATOR} (asked {prior['created_at']}) — "
+                     "not filed again", project=project)
+        return None
+    if prior is not None:
+        db.log_event(f"Stand-up: {config.OPERATOR} already ruled on {about} "
+                     f"at {prior['answered_at']}: {prior['answer'][:160]} — "
+                     "Harry's question not filed again; the ruling stands",
+                     project=project)
+        return None
+    if rest:
+        text += "\nAlso concerns: " + ", ".join(rest) + "."
+    text += f"\nWhy this is yours: {reason}"
+    return db.ask_question(project, config.CTO_NAME, key, text,
+                           options=out.get("question_options"))
+
+
 def standup_due() -> bool:
     from datetime import datetime, timezone
     last = db.get_setting("last_standup_at")
@@ -1610,7 +1852,7 @@ async def run_standup(force: bool = False) -> None:
         db.log_event(f"Stand-up failed: {res['error']}", "warn")
         return
     out = res["output"]
-    _file_question("", "Harry", "", out)
+    file_standup_question(out)
     db.save_report("cto", "", out["standup_markdown"])
     for desk in out.get("desks", []):
         if db.get_project(desk["project"]):
@@ -1654,11 +1896,23 @@ def _apply_decisions(decisions: list) -> None:
                 # A held item needs the ruling carried out, not just recorded.
                 apply_breaker_ruling(q, d.get("item_action", ""),
                                      d["answer"].strip())
+            elif held_item_for(q):
+                # Same for an item held for a Fix/Skip/Won't fix ruling: it
+                # moves now, on the ruling, not on the next sync.
+                project = db.get_project(q["project"])
+                if project:
+                    route_answers(project)
         elif d["action"] == "escalate":
+            reason = (d.get("outside_remit_reason") or "").strip()
             if is_breaker_question(q):
                 apply_breaker_ruling(q, "escalate", d.get("answer", "").strip())
+            else:
+                park_held_item(q, reason or d.get("answer", "").strip())
             db.escalate_question(q["id"])
-            db.log_event(f"Harry escalated {q['asked_by']}'s question to {config.OPERATOR}",
+            db.log_event(f"Harry escalated {q['asked_by']}'s question to "
+                         f"{config.OPERATOR}"
+                         + (f": {reason[:150]}" if reason else
+                            " without saying why it is theirs"),
                          "warn", project=q["project"])
             from urllib.parse import urlencode
             opts = db.question_options(q)

@@ -40,7 +40,7 @@ CREATE TABLE IF NOT EXISTS items (
     gh_updated_at TEXT NOT NULL DEFAULT '',
     status TEXT NOT NULL DEFAULT 'new',
     -- new -> triaged -> approved -> working -> queued -> released
-    --                -> held (with Harry) -> approved | waiting_human
+    --                -> held (with Harry) -> approved | waiting_human | rejected
     --                -> waiting_human | blocked | rejected | closed
     verdict TEXT NOT NULL DEFAULT '',
     verdict_summary TEXT NOT NULL DEFAULT '',
@@ -848,6 +848,34 @@ def escalated_questions(project: str | None = None):
             return c.execute(q).fetchall()
         return c.execute(q.replace("WHERE", "WHERE project = ? AND"),
                          (project,)).fetchall()
+
+
+def harry_prior_question(project: str, item_key: str, since: str):
+    """Harry's own question about this item (or, for an item-less one, this
+    desk) that is still with the operator, or that they answered after
+    `since` — whatever its wording. None when he has a clean slate.
+
+    ask_question's own dedupe is on the text, and Harry rephrases every
+    hour; the stand-up asks about a thing, so the thing is the key."""
+    with conn() as c:
+        return c.execute(
+            "SELECT * FROM questions WHERE project = ? AND item_key = ? "
+            "AND asked_by = ? AND (status IN ('open', 'escalated') OR "
+            "(status = 'answered' AND COALESCE(answered_at, '') >= ?)) "
+            "ORDER BY status = 'answered', id DESC LIMIT 1",
+            (project, item_key, config.CTO_NAME, since)).fetchone()
+
+
+def operator_rulings_since(since: str):
+    """The operator's answers to Harry's own questions since `since`, across
+    every desk — what the stand-up digest carries back so he acts on a
+    ruling instead of asking for it again."""
+    with conn() as c:
+        return c.execute(
+            "SELECT * FROM questions WHERE asked_by = ? AND status = 'answered' "
+            "AND answered_by != ? AND COALESCE(answered_at, '') >= ? "
+            "ORDER BY answered_at DESC LIMIT 12",
+            (config.CTO_NAME, config.CTO_NAME, since)).fetchall()
 
 
 def recent_answers(project: str, limit: int = 8):
