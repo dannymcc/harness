@@ -492,7 +492,7 @@ def test_dead_session_resumes_fresh_in_the_same_run(fresh_db, may, monkeypatch, 
                         lambda repo_, number: {"number": 30, "title": "t",
                                                "body": "b"})
     monkeypatch.setattr(repo, "add_worktree",
-                        lambda project, branch: (tmp_path, ""))
+                        lambda project, branch, resuming=False: (tmp_path, ""))
     monkeypatch.setattr(repo, "wt_has_changes", lambda project, wt: True)
     monkeypatch.setattr(repo, "run_tests",
                         lambda project, cwd=None, setup=True, scratch=None:
@@ -508,7 +508,8 @@ def test_dead_session_resumes_fresh_in_the_same_run(fresh_db, may, monkeypatch, 
     resumes_seen = []
 
     async def fake_fix_issue(project, issue, plan, cwd, resume=None,
-                             persona="Malcolm", repro_path=""):
+                             persona="Malcolm", repro_path="",
+                             worktree_note=""):
         resumes_seen.append(resume)
         rid = fresh_db.start_run("may", "ic", "issue#30", "fix", "m", persona)
         if resume:
@@ -552,13 +553,14 @@ def test_dead_session_retries_once_and_only_for_that_error(fresh_db, may,
                         lambda repo_, number: {"number": number, "title": "t",
                                                "body": "b"})
     monkeypatch.setattr(repo, "add_worktree",
-                        lambda project, branch: (tmp_path, ""))
+                        lambda project, branch, resuming=False: (tmp_path, ""))
 
     calls = []
 
     def failing(error):
         async def fake_fix_issue(project, issue, plan, cwd, resume=None,
-                                 persona="Malcolm", repro_path=""):
+                                 persona="Malcolm", repro_path="",
+                                 worktree_note=""):
             calls.append(resume)
             return {"ok": False, "output": None, "session_id": "", "error": error}
         return fake_fix_issue
@@ -1217,7 +1219,7 @@ def test_a_stranded_fix_gets_its_own_warn_event(fresh_db, may, monkeypatch,
                         lambda repo_, number: {"number": 64, "title": "t",
                                                "body": "b"})
     monkeypatch.setattr(repo, "add_worktree",
-                        lambda project, branch: (tmp_path, ""))
+                        lambda project, branch, resuming=False: (tmp_path, ""))
     monkeypatch.setattr(repo, "wt_has_changes", lambda project, wt: True)
     monkeypatch.setattr(repo, "run_tests",
                         lambda project, cwd=None, setup=True, scratch=None:
@@ -1237,7 +1239,8 @@ def test_a_stranded_fix_gets_its_own_warn_event(fresh_db, may, monkeypatch,
                    "the fix exists only in the worktree on this box"))
 
     async def fake_fix_issue(project, issue, plan, cwd, resume=None,
-                             persona="Malcolm", repro_path=""):
+                             persona="Malcolm", repro_path="",
+                             worktree_note=""):
         rid = fresh_db.start_run("may", "ic", "issue#64", "fix", "m", persona)
         fresh_db.finish_run(rid, True, 0.1, 1, "fixed it")
         return {"ok": True, "error": "", "session_id": "s",
@@ -1277,7 +1280,7 @@ def test_salvaged_work_from_a_previous_attempt_is_named_on_the_thread(
                                                "body": "b"})
     monkeypatch.setattr(
         repo, "add_worktree",
-        lambda project, branch: (
+        lambda project, branch, resuming=False: (
             tmp_path, "The previous attempt's commits were preserved on "
                       "harness/issue-63-attempt-1 (abc12345)."))
     monkeypatch.setattr(repo, "wt_has_changes", lambda project, wt: True)
@@ -1293,7 +1296,8 @@ def test_salvaged_work_from_a_previous_attempt_is_named_on_the_thread(
                         lambda project, wt, branch: (True, ""))
 
     async def fake_fix_issue(project, issue, plan, cwd, resume=None,
-                             persona="Malcolm", repro_path=""):
+                             persona="Malcolm", repro_path="",
+                             worktree_note=""):
         rid = fresh_db.start_run("may", "ic", "issue#63", "fix", "m", persona)
         fresh_db.finish_run(rid, True, 0.1, 1, "fixed it")
         return {"ok": True, "error": "", "session_id": "s",

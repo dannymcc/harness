@@ -115,10 +115,11 @@ def test_fix_item_parks_for_retry_instead_of_crashing(fresh_db, may,
                         lambda repo_, number: {"number": 40, "title": "t",
                                                "body": "b"})
     monkeypatch.setattr(repo, "add_worktree",
-                        lambda project, branch: (tmp_path, ""))
+                        lambda project, branch, resuming=False: (tmp_path, ""))
 
     async def fake_fix_issue(project, issue, plan, cwd, resume=None,
-                             persona="Malcolm", repro_path=""):
+                             persona="Malcolm", repro_path="",
+                             worktree_note=""):
         return {"ok": False, "output": None, "session_id": "",
                 "error": "session ended without structured output"}
 

@@ -46,10 +46,12 @@ told to behave.
   if dev moved). If it cannot land — the rebase conflicts, the rebased code
   goes red, or dev keeps moving — the commit is pushed to `harness/issue-N`
   on your remote and the item says where it went, so work that already
-  passed the tests is never left only on the harness box. A retry starts
-  from a fresh dev again, but anything the last attempt left behind is kept
-  first, on a local `harness/issue-N-attempt-<n>` branch named on the item
-  thread. Everything else gets a drafted reply and waits for you.
+  passed the tests is never left only on the harness box. A retry that
+  resumes the engineer's session comes back to the worktree it left; one
+  that starts fresh cuts from dev again, and anything the last attempt left
+  behind is kept first, on a local `harness/issue-N-attempt-<n>` branch
+  named on the item thread. Everything else gets a drafted reply and waits
+  for you.
 - **Pull requests** — merged onto dev locally, tested, then reviewed for
   value and quality. A PR's tests are the contributor's code, so they run in
   a throwaway clone with their own virtualenv and no credentials in the
@@ -294,6 +296,13 @@ restart resumes its session rather than starting over. It sits inside the
 existing `./data` mount, so no extra volume is needed. Deleting it only
 costs in-flight sessions their memory — the next attempt starts fresh. On a
 development machine an existing `~/.claude` is left alone.
+
+A resumed fix keeps the worktree it left behind rather than cutting the
+branch from `dev` again: the engineer comes back to its own edits. Only a
+fresh attempt (or a resume whose worktree has been deleted) resets the tree
+to `origin/dev`, and then the last attempt's work is parked on
+`harness/issue-N-attempt-M` and named both on the item thread and in the
+engineer's own prompt.
 
 Harness can maintain itself — add this repo as a harness with version file
 `harness/config.py`, version pattern `VERSION\s*=\s*"(?P<version>[^"]+)"`,

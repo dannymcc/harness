@@ -52,7 +52,7 @@ def _fake_engineer(monkeypatch, tmp_path, number, *, success=True,
     monkeypatch.setattr(gh, "issue_detail",
                         lambda repo_, n: {"number": n, "title": "t", "body": "b"})
     monkeypatch.setattr(repo, "add_worktree",
-                        lambda project, branch: (tmp_path, ""))
+                        lambda project, branch, resuming=False: (tmp_path, ""))
     monkeypatch.setattr(repo, "wt_has_changes", lambda project, wt: changes)
     monkeypatch.setattr(repo, "run_tests",
                         lambda project, cwd=None, setup=True, scratch=None:
@@ -64,7 +64,8 @@ def _fake_engineer(monkeypatch, tmp_path, number, *, success=True,
                         lambda project, wt, branch: (True, ""))
 
     async def fake_fix_issue(project, issue, plan, cwd, resume=None,
-                             persona="Malcolm", repro_path=""):
+                             persona="Malcolm", repro_path="",
+                             worktree_note=""):
         from harness import db
         seen.append(resume)
         rid = db.start_run("may", "ic", f"issue#{number}", "fix", "m", persona)

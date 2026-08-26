@@ -1,9 +1,11 @@
 """A retried fix must not throw away the previous attempt.
 
-add_worktree recreates the fix branch from origin/<dev> on every dispatch,
-and a fix that fails to land goes back to "approved" for another go — so the
-reset has to preserve anything the last attempt left behind. Real git here:
-the whole defect lived in what the git commands actually do.
+add_worktree recreates the fix branch from origin/<dev> whenever a fresh
+attempt starts, and a fix that fails to land goes back to "approved" for
+another go — so the reset has to preserve anything the last attempt left
+behind. A resume is the exception: it keeps the tree the engineer left, and
+when it cannot, it says so. Real git here: the whole defect lived in what
+the git commands actually do.
 """
 import subprocess
 from pathlib import Path
@@ -139,6 +141,157 @@ def test_a_retry_that_added_nothing_reuses_the_existing_ref(project):
     with pytest.raises(Exception):
         tip(project, "harness/issue-1-attempt-2")
     assert note == ""
+
+
+def test_a_resumed_session_is_not_handed_an_empty_tree(project, fresh_db,
+                                                        monkeypatch):
+    """Issue #82: fix_item calls add_worktree on every dispatch, including a
+    resume. That wipes the working tree back to origin/dev before the
+    resumed engineer's session is continued, so it starts from nothing while
+    believing (from its own transcript) that its edits are still there.
+
+    The previous attempt's work is preserved on a `-attempt-N` branch, but
+    nothing restores it into the fresh worktree or leaves it in place — so
+    the second dispatch must not hand the resumed session an empty tree."""
+    import asyncio
+
+    from harness import agents, gh, pipeline, repo
+
+    fresh_db.upsert_item("may", "issue", 82, "t", "a", "open", "x")
+    fresh_db.update_item("may", "issue", 82, status="approved", plan="do it")
+
+    monkeypatch.setattr(gh, "issue_detail",
+                        lambda repo_, number: {"number": 82, "title": "t",
+                                               "body": "b"})
+    monkeypatch.setattr(repo, "run_tests",
+                        lambda project, cwd=None, setup=True, scratch=None:
+                        (False, "tests still red"))
+
+    calls = []
+
+    async def fake_fix_issue(project, issue, plan, cwd, resume=None,
+                             persona="Malcolm", repro_path="",
+                             worktree_note=""):
+        calls.append(resume)
+        if len(calls) == 1:
+            # First attempt: the engineer leaves its edit uncommitted, as
+            # instructed ("leave changes in the working tree").
+            (Path(cwd) / "fix.txt").write_text("first attempt's work\n")
+            rid = fresh_db.start_run("may", "ic", "issue#82", "fix", "m",
+                                     persona)
+            fresh_db.finish_run(rid, True, 0.1, 1, "attempted a fix")
+            return {"ok": True, "error": "", "session_id": "sess-1",
+                    "output": {"success": True, "summary": "attempted a fix",
+                               "docs_updated": False, "notes": "",
+                               "commit_message": "fix: issue #82 (#82)"}}
+        # Second attempt: a resume of the same session. The file the first
+        # attempt wrote must still be here — either left in place or
+        # restored from the preserved attempt branch — not wiped silently.
+        assert (Path(cwd) / "fix.txt").exists(), (
+            "resumed session was handed a worktree reset to origin/dev, "
+            "with no trace of the previous attempt's work")
+        rid = fresh_db.start_run("may", "ic", "issue#82", "fix", "m", persona)
+        fresh_db.finish_run(rid, True, 0.1, 1, "gave up")
+        return {"ok": True, "error": "", "session_id": "sess-1",
+                "output": {"success": False, "summary": "gave up",
+                           "docs_updated": False, "notes": "",
+                           "commit_message": ""}}
+
+    monkeypatch.setattr(agents, "fix_issue", fake_fix_issue)
+
+    asyncio.run(pipeline.fix_item(project, fresh_db.get_item("may", "issue",
+                                                              82)))
+    first = fresh_db.get_item("may", "issue", 82)
+    assert first["session_id"] == "sess-1"
+
+    asyncio.run(pipeline.fix_item(project, first))
+
+    assert len(calls) == 2 and calls[1] == "sess-1"  # it really was a resume
+
+
+def test_a_resume_leaves_the_worktree_exactly_as_it_was(project):
+    """resuming=True is the engineer coming back to its own tree: nothing is
+    removed, so there is nothing to preserve and nothing to say."""
+    from harness import repo
+    wt, _ = repo.add_worktree(project, "harness/issue-1")
+    committed = commit_in(wt, "half a fix")
+    (Path(wt) / "wip.txt").write_text("and some uncommitted work")
+
+    wt2, note = repo.add_worktree(project, "harness/issue-1", resuming=True)
+
+    assert wt2 == wt
+    assert note == ""
+    assert git(wt2, "rev-parse", "HEAD").strip() == committed
+    assert (Path(wt2) / "fix.txt").read_text() == "half a fix"
+    assert (Path(wt2) / "wip.txt").exists()
+    assert git(repo.repo_dir(project), "branch", "--list",
+               "harness/issue-1-attempt-*").strip() == ""
+
+
+def test_a_resume_with_no_worktree_left_says_so_and_keeps_the_work(project):
+    """The fallback: the data dir was wiped under the session, so the tree
+    has to be recreated after all. The note must say plainly that it was
+    reset and name the branch the earlier work was parked on."""
+    from harness import repo
+    wt, _ = repo.add_worktree(project, "harness/issue-1")
+    lost = commit_in(wt, "half a fix")
+    subprocess.run(["rm", "-rf", str(wt)], check=True)
+
+    wt2, note = repo.add_worktree(project, "harness/issue-1", resuming=True)
+
+    assert note.startswith(repo.RESUMED_INTO_RESET)
+    assert "origin/dev" in note and "harness/issue-1-attempt-1" in note
+    assert tip(project, "harness/issue-1-attempt-1") == lost
+    assert (Path(wt2) / "fix.txt").exists() is False
+
+
+def test_a_resumed_engineer_is_told_when_its_tree_was_reset(project, fresh_db,
+                                                            monkeypatch):
+    """And the reset reaches the engineer itself, not just the thread: a
+    resumed session reads its own transcript, so the prompt has to say the
+    edits are gone."""
+    import asyncio
+
+    from harness import agents, gh, pipeline, repo
+
+    fresh_db.upsert_item("may", "issue", 82, "t", "a", "open", "x")
+    fresh_db.update_item("may", "issue", 82, status="approved", plan="do it",
+                         session_id="sess-1")
+
+    monkeypatch.setattr(gh, "issue_detail",
+                        lambda repo_, number: {"number": 82, "title": "t",
+                                               "body": "b"})
+    monkeypatch.setattr(repo, "run_tests",
+                        lambda project, cwd=None, setup=True, scratch=None:
+                        (False, "tests still red"))
+    # The worktree the saved session worked in is gone (a wiped data dir).
+    wt, _ = repo.add_worktree(project, "harness/issue-82")
+    commit_in(wt, "half a fix")
+    subprocess.run(["rm", "-rf", str(wt)], check=True)
+
+    seen = {}
+
+    async def fake_fix_issue(project, issue, plan, cwd, resume=None,
+                             persona="Malcolm", repro_path="",
+                             worktree_note=""):
+        seen["note"] = worktree_note
+        rid = fresh_db.start_run("may", "ic", "issue#82", "fix", "m", persona)
+        fresh_db.finish_run(rid, True, 0.1, 1, "gave up")
+        return {"ok": True, "error": "", "session_id": "sess-1",
+                "output": {"success": False, "summary": "gave up",
+                           "docs_updated": False, "notes": "",
+                           "commit_message": ""}}
+
+    monkeypatch.setattr(agents, "fix_issue", fake_fix_issue)
+    asyncio.run(pipeline.fix_item(project,
+                                  fresh_db.get_item("may", "issue", 82)))
+
+    assert seen["note"].startswith(repo.RESUMED_INTO_RESET)
+    assert "harness/issue-82-attempt-1" in seen["note"]
+    assert "git status" in seen["note"]
+    # ...and the same sentence is on the thread for a human to find.
+    assert any("harness/issue-82-attempt-1" in r["text"]
+               for r in fresh_db.thread("may", "issue#82"))
 
 
 def test_the_recovery_ref_survives_a_removed_worktree_directory(project):

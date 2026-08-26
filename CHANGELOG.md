@@ -4,6 +4,26 @@ All notable changes to Harness are recorded here. The format is
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project
 follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.22.3] - 2026-08-26
+
+### Fixed
+
+- **A resumed fix keeps its worktree instead of being handed an empty one**
+  (#82). The worktree for an item was recreated from `origin/dev` on every
+  dispatch, including a dispatch that resumed the engineer's saved session.
+  The engineer came back believing — from its own transcript — that its
+  edits were on disk, when the tree had just been reset under it; at best it
+  redid the work, at worst it wrote a fix on top of assumptions that no
+  longer held. A resume now keeps a live worktree with the item's branch
+  checked out exactly as the engineer left it. The branch belongs to that
+  one item, so nothing about the isolation between engineers changes. When
+  no usable worktree survives — a wiped data directory, a broken
+  registration — the resume still falls back to a fresh tree, and the reset
+  is put at the top of the engineer's own prompt as well as on the item
+  thread, telling it to check `git status` before trusting its transcript. A
+  repro test from triage is no longer written over a copy the engineer has
+  already worked on.
+
 ## [0.22.2] - 2026-08-26
 
 ### Fixed
