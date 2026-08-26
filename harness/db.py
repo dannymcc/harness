@@ -108,7 +108,8 @@ CREATE TABLE IF NOT EXISTS questions (
     status TEXT NOT NULL DEFAULT 'open',   -- open | answered | dismissed
     answer TEXT NOT NULL DEFAULT '',
     created_at TEXT NOT NULL,
-    answered_at TEXT
+    answered_at TEXT,
+    ruling_passes INTEGER NOT NULL DEFAULT 0  -- ruling passes left undecided
 );
 CREATE TABLE IF NOT EXISTS settings (
     key TEXT PRIMARY KEY,
@@ -150,6 +151,7 @@ MIGRATIONS = [
     "ALTER TABLE items ADD COLUMN breaker_trips INTEGER NOT NULL DEFAULT 0",
     "ALTER TABLE releases ADD COLUMN error TEXT NOT NULL DEFAULT ''",
     "ALTER TABLE questions ADD COLUMN routed_at TEXT NOT NULL DEFAULT ''",
+    "ALTER TABLE questions ADD COLUMN ruling_passes INTEGER NOT NULL DEFAULT 0",
     "CREATE INDEX IF NOT EXISTS reports_scope ON reports(scope, project, id)",
 ]
 
@@ -805,6 +807,23 @@ def answers_since(project: str, since: str = ""):
             "SELECT * FROM questions WHERE project = ? AND status = 'answered' "
             "AND answered_by != ? AND COALESCE(answered_at, '') > ? "
             "ORDER BY id", (project, config.CTO_NAME, since)).fetchall()
+
+
+def bump_ruling_passes(qid: int) -> int:
+    """Count one ruling pass that left this question open, and return the new
+    total.
+
+    The count lives on the row rather than in process memory: the harness
+    restarts on every release, and a counter that resets with the process
+    would let a question nobody rules on cycle for ever instead of reaching
+    the operator. Rows written before the column existed read as 0, so the
+    worst an upgrade costs a pending question is one more pass."""
+    with conn() as c:
+        c.execute("UPDATE questions SET ruling_passes = ruling_passes + 1 "
+                  "WHERE id = ?", (qid,))
+        row = c.execute("SELECT ruling_passes FROM questions WHERE id = ?",
+                        (qid,)).fetchone()
+    return row["ruling_passes"] if row else 0
 
 
 def escalate_question(qid: int) -> None:

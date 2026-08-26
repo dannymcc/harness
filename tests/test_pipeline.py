@@ -1395,3 +1395,84 @@ def test_closed_lead_items_do_not_count_toward_filing_cap(fresh_db, may,
     assert len(created) == 1   # still just the one filed above
     events = fresh_db.recent_events(5, "may")
     assert any("Should be dropped" in e["message"] for e in events)
+
+
+def test_undecided_count_survives_restart(fresh_db, may, monkeypatch):
+    """A question left undecided, then a process restart (which wipes any
+    in-memory pass counter), then left undecided again, must still escalate
+    after only two ruling passes — the restart shouldn't buy it a free pass."""
+    import asyncio
+    import importlib
+    from harness import pipeline, agents
+    fresh_db.ask_question("may", "Ruth", "", "Dodged")
+    async def dodge(inbox, ctx):
+        return {"ok": True, "error": "", "output": {"summary": "", "decisions": []}}
+    monkeypatch.setattr(agents, "rule_questions", dodge)
+    monkeypatch.setattr(pipeline.notify, "send", lambda *a, **k: None)
+    asyncio.run(pipeline.process_questions("may"))
+    assert len(fresh_db.harry_inbox("may")) == 1
+    # Simulate an unattended restart (deploy/watchtower/crash): process
+    # memory is wiped, but the question is still open in the db.
+    importlib.reload(pipeline)
+    asyncio.run(pipeline.process_questions("may"))
+    assert fresh_db.harry_inbox("may") == []
+    assert len(fresh_db.escalated_questions("may")) == 1
+
+
+def test_undecided_held_item_is_parked_across_a_restart(fresh_db, may,
+                                                        monkeypatch):
+    """Both escalation branches survive a restart: a breaker question takes
+    its held item through apply_breaker_ruling, an ordinary question about a
+    held item through park_held_item. Either way the item stops being held
+    with nobody left to rule on it."""
+    import asyncio
+    import importlib
+    from harness import pipeline, agents
+    for num in (7, 8):
+        fresh_db.upsert_item("may", "issue", num, f"stuck {num}", "a", "open",
+                             fresh_db.now())
+        fresh_db.update_item("may", "issue", num, status="held")
+    fresh_db.ask_question("may", pipeline.BREAKER_ASKER, "issue#7",
+                          "Held after two failures — rule on it",
+                          options=pipeline.BREAKER_OPTIONS)
+    fresh_db.ask_question("may", "Malcolm", "issue#8", "Which way on this?")
+
+    async def dodge(inbox, ctx):
+        return {"ok": True, "error": "", "output": {"summary": "", "decisions": []}}
+    monkeypatch.setattr(agents, "rule_questions", dodge)
+    monkeypatch.setattr(pipeline.notify, "send", lambda *a, **k: None)
+    asyncio.run(pipeline.process_questions("may"))
+    assert len(fresh_db.harry_inbox("may")) == 2
+    assert fresh_db.get_item("may", "issue", 7)["status"] == "held"
+    assert fresh_db.get_item("may", "issue", 8)["status"] == "held"
+
+    importlib.reload(pipeline)
+    monkeypatch.setattr(pipeline.notify, "send", lambda *a, **k: None)
+    asyncio.run(pipeline.process_questions("may"))
+    assert fresh_db.harry_inbox("may") == []
+    assert len(fresh_db.escalated_questions("may")) == 2
+    for num in (7, 8):
+        item = fresh_db.get_item("may", "issue", num)
+        assert item["status"] == "waiting_human"
+
+
+def test_ruling_passes_are_not_carried_by_a_closed_question(fresh_db, may,
+                                                            monkeypatch):
+    """A question answered outside process_questions leaves nothing behind:
+    the count is on its own row, so the next question starts from zero."""
+    import asyncio
+    from harness import pipeline, agents
+    qid = fresh_db.ask_question("may", "Ruth", "", "First")
+    async def dodge(inbox, ctx):
+        return {"ok": True, "error": "", "output": {"summary": "", "decisions": []}}
+    monkeypatch.setattr(agents, "rule_questions", dodge)
+    monkeypatch.setattr(pipeline.notify, "send", lambda *a, **k: None)
+    asyncio.run(pipeline.process_questions("may"))
+    assert fresh_db.question(qid)["ruling_passes"] == 1
+    fresh_db.answer_question(qid, "Do the first thing")
+    fresh_db.ask_question("may", "Ruth", "", "Second")
+    asyncio.run(pipeline.process_questions("may"))
+    # The answered question is untouched and the new one is only one pass in.
+    assert fresh_db.question(qid)["status"] == "answered"
+    assert len(fresh_db.harry_inbox("may")) == 1
+    assert fresh_db.escalated_questions("may") == []
