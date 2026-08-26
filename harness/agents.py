@@ -799,11 +799,18 @@ genuinely cannot be captured in a test.
 
 async def fix_issue(project, issue: dict, plan: str, cwd: str,
                     resume: str | None = None,
-                    persona: str = "Malcolm", repro_path: str = "") -> dict:
+                    persona: str = "Malcolm", repro_path: str = "",
+                    worktree_note: str = "") -> dict:
     repro = (f"\nA reproduction test from triage is at {repro_path}; it fails "
              "on the current code. Make it pass without weakening it — it is "
              "part of the suite now.\n" if repro_path else "")
-    prompt = f"""You are {persona}, one of the section's engineers.
+    # First thing in the message, resumed session or not: on a resume the
+    # engineer would otherwise trust its own transcript about what is on disk.
+    state = (f"""IMPORTANT — the state of your worktree, before anything else:
+{worktree_note}
+
+""" if worktree_note else "")
+    prompt = f"""{state}You are {persona}, one of the section's engineers.
 Fix this issue in {project['repo']}. You are on a work branch
 off {project['dev_branch']} in harness's checkout. The triage plan is below —
 verify it against the code before following it.

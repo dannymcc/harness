@@ -178,12 +178,50 @@ def _preserve_previous_attempt(project, d: Path, branch: str,
                    f"{dev}.").strip()
 
 
-def add_worktree(project, branch: str) -> tuple[Path, str]:
+def _worktree_is_live(d: Path, wt: Path, branch: str) -> bool:
+    """True when wt is a working worktree of clone d with <branch> on HEAD.
+
+    Anything else — no directory, a stale .git pointing at a wiped clone, a
+    different branch checked out — is not something a session can be resumed
+    into, so the caller recreates it instead.
+    """
+    if not (wt / ".git").exists():
+        return False
+    head = run(["git", "rev-parse", "--abbrev-ref", "HEAD"], cwd=wt,
+               check=False).strip()
+    if head != branch:
+        return False
+    listed = run(["git", "worktree", "list", "--porcelain"], cwd=d,
+                 check=False)
+    here = os.path.realpath(wt)
+    return any(os.path.realpath(line[len("worktree "):]) == here
+               for line in listed.splitlines()
+               if line.startswith("worktree "))
+
+
+# Opening words of the note add_worktree returns when a resume had to be
+# given a fresh worktree after all. pipeline.py matches on it to put the
+# same warning in front of the engineer as well as on the item thread —
+# keep the two in step.
+RESUMED_INTO_RESET = "The worktree for this item was gone, so it was recreated"
+
+
+def add_worktree(project, branch: str,
+                 resuming: bool = False) -> tuple[Path, str]:
     """Create (or recreate) an isolated worktree for one fix branch.
 
     Holds the clone lock only for the brief git bookkeeping; afterwards the
     worktree is independent and agents can work there without contending
     for the main checkout.
+
+    Pass resuming=True when an engineer's saved session is about to be
+    continued in this tree. Recreating it would hand that session an empty
+    checkout while its own transcript still says the edits are there, so a
+    live worktree with <branch> checked out is left exactly as the engineer
+    left it — the branch belongs to this one item, so isolation is unchanged.
+    Only when no usable worktree survives (a wiped data dir, a broken
+    registration) does a resume fall back to a fresh one, and the note then
+    says so in as many words — see RESUMED_INTO_RESET.
 
     Returns (worktree, note): the note is a sentence about work an earlier
     attempt left behind and where it was saved, empty when there was none.
@@ -192,6 +230,8 @@ def add_worktree(project, branch: str) -> tuple[Path, str]:
         d = ensure_clone(project)
         run(["git", "fetch", "origin", "--prune"], cwd=d)
         wt = worktrees_dir(project) / branch.replace("/", "-")
+        if resuming and _worktree_is_live(d, wt, branch):
+            return wt, ""
         note = _preserve_previous_attempt(project, d, branch, wt)
         if wt.exists():
             run(["git", "worktree", "remove", "--force", str(wt)], cwd=d,
@@ -202,6 +242,10 @@ def add_worktree(project, branch: str) -> tuple[Path, str]:
         wt.parent.mkdir(parents=True, exist_ok=True)
         run(["git", "worktree", "add", "-B", branch, str(wt),
              f"origin/{project['dev_branch']}"], cwd=d)
+        if resuming:
+            note = (f"{RESUMED_INTO_RESET} from origin/"
+                    f"{project['dev_branch']}: every edit the earlier attempt "
+                    f"left in it is gone. " + note).strip()
         return wt, note
 
 

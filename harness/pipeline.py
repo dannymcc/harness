@@ -489,13 +489,24 @@ async def fix_item(project, item, persona: str = "Malcolm") -> None:
     key = f"issue#{item['number']}"
     detail = gh.issue_detail(project["repo"], item["number"])
     branch = f"harness/issue-{item['number']}"
-    wt, salvage = repo.add_worktree(project, branch)
+    resuming = bool(item["session_id"])
+    wt, salvage = repo.add_worktree(project, branch, resuming=resuming)
     db.update_item(name, "issue", item["number"], status="working",
                    branch=branch)
     if salvage:
-        # The branch is cut fresh from dev on every dispatch, so a retry has
-        # to say where the last attempt's work went.
+        # The branch is cut fresh from dev whenever there is no session to
+        # resume into an existing tree, so say where the last attempt's work
+        # went.
         db.thread_append(name, key, "harness", "event", salvage)
+    # A resume whose worktree could not be kept starts from an empty tree,
+    # and the engineer's own transcript will tell it otherwise: put the reset
+    # in front of it rather than leave it buried in the thread.
+    worktree_note = ""
+    if salvage.startswith(repo.RESUMED_INTO_RESET):
+        worktree_note = (salvage + " Do not trust your earlier transcript "
+                         "about what is on disk: check `git status` and "
+                         "`git diff` first, and re-apply the work from "
+                         "scratch.")
     repro_path = ""
     if item["repro_test"]:
         try:
@@ -503,7 +514,10 @@ async def fix_item(project, item, persona: str = "Malcolm") -> None:
             target = (wt / rt["path"]).resolve()
             if str(target).startswith(str(wt.resolve())):
                 target.parent.mkdir(parents=True, exist_ok=True)
-                target.write_text(rt["content"])
+                # On a resume the tree is the engineer's own; don't overwrite
+                # a repro test it has already worked on.
+                if not (resuming and target.exists()):
+                    target.write_text(rt["content"])
                 repro_path = rt["path"]
         except (ValueError, KeyError, OSError) as e:
             db.thread_append(name, key, "harness", "test",
@@ -523,7 +537,8 @@ async def fix_item(project, item, persona: str = "Malcolm") -> None:
                      + (" (resuming earlier session)" if item["session_id"] else ""))
     res = await agents.fix_issue(project, detail, item["plan"], str(wt),
                                  resume=item["session_id"] or None,
-                                 persona=persona, repro_path=repro_path)
+                                 persona=persona, repro_path=repro_path,
+                                 worktree_note=worktree_note)
     if (not res["ok"] and item["session_id"]
             and "no conversation found" in (res["error"] or "").lower()):
         # The saved session did not survive whatever restarted the container.
@@ -533,9 +548,15 @@ async def fix_item(project, item, persona: str = "Malcolm") -> None:
                          "No saved session for that id (likely lost in a "
                          "restart) — starting fresh in this run instead of "
                          "losing a cycle.")
-        res = await agents.fix_issue(project, detail, item["plan"], str(wt),
-                                     resume=None, persona=persona,
-                                     repro_path=repro_path)
+        res = await agents.fix_issue(
+            project, detail, item["plan"], str(wt), resume=None,
+            persona=persona, repro_path=repro_path,
+            worktree_note=(worktree_note or
+                           "This worktree was kept from an earlier attempt on "
+                           "this item and may still hold its uncommitted work. "
+                           "Check `git status` and `git diff` before you start, "
+                           "and build on what is there or clear it "
+                           "deliberately."))
     db.update_item(name, "issue", item["number"],
                    session_id=res.get("session_id", ""))
     if not res["ok"] or not res["output"]["success"]:
