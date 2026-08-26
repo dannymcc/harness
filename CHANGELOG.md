@@ -4,6 +4,36 @@ All notable changes to Harness are recorded here. The format is
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project
 follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.23.2] - 2026-08-26
+
+### Fixed
+
+- **A run swept up by housekeeping is no longer reported as "interrupted by
+  a restart"** (#97). Two places close a run nobody finished:
+  `worker.recover_after_restart`, once the process is back up, and
+  housekeeping's hourly sweep, for a run that has sat three hours with no
+  result while the process stayed up. They wrote different summaries — one
+  from `db.ORPHANED_SUMMARY`, the other a literal in the sweep's SQL — but
+  the dashboard matched both on `startswith("orphaned")` and told the
+  operator a restart had interrupted the run and the item had been
+  requeued. For the sweep's runs that was not what happened, and it dressed
+  up what may well be an agent hung on that item. The sweep now writes
+  `db.HOUSEKEEPING_ORPHAN_SUMMARY`, bound as a parameter rather than spelled
+  out a second time, and the dashboard matches the two constants
+  separately: a restart orphan reads as before, and a swept run says "no
+  result recorded after 3h" and takes an amber chip rather than the flat red
+  of a run that failed and gave a reason.
+
+- The circuit breaker's differing treatment of the two is unchanged, and now
+  says why. A restart orphan is proof the process died and says nothing
+  about the item, so it is skipped; a run that produced nothing for three
+  hours with the process still up is ambiguous and is counted — exempting it
+  too would let hang, sweep, requeue, hang loop for ever without ever paging
+  anyone, which is the one thing the breaker exists to prevent. That the
+  sweep's runs count was reported as the bug in #97; it is deliberate, and
+  `tests/test_housekeeping.py` now pins it alongside the restart case so the
+  two summaries cannot quietly become one string again.
+
 ## [0.23.1] - 2026-08-26
 
 ### Fixed
