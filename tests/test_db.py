@@ -1,3 +1,65 @@
+import sqlite3
+
+
+class _CountingConnection(sqlite3.Connection):
+    """Connection that records schema and migration statements it is asked
+    to run. sqlite3.Connection is an immutable C type, so its methods can't
+    be monkeypatched — a factory subclass is the way to count them."""
+
+    schema_runs = 0
+    migration_runs = 0
+
+    def executescript(self, sql):
+        type(self).schema_runs += 1
+        return super().executescript(sql)
+
+    def execute(self, sql, *args, **kwargs):
+        if sql.lstrip().upper().startswith("ALTER TABLE"):
+            type(self).migration_runs += 1
+        return super().execute(sql, *args, **kwargs)
+
+
+def test_conn_runs_schema_and_migrations_once_per_db_path(fresh_db,
+                                                          monkeypatch):
+    """db.conn() must not replay the full schema + migration list on every
+    call — only the first conn() against a given DB path should pay that
+    cost (issue #73)."""
+    real_connect = sqlite3.connect
+    monkeypatch.setattr(sqlite3, "connect", lambda *a, **kw: real_connect(
+        *a, factory=_CountingConnection, **kw))
+    _CountingConnection.schema_runs = 0
+    _CountingConnection.migration_runs = 0
+
+    for _ in range(5):
+        with fresh_db.conn() as c:
+            c.execute("SELECT 1")
+
+    assert _CountingConnection.schema_runs == 1, (
+        f"schema executescript ran {_CountingConnection.schema_runs} times "
+        "over 5 conn() calls against the same DB path; expected 1"
+    )
+    assert _CountingConnection.migration_runs == len(fresh_db.MIGRATIONS), (
+        f"migrations ran {_CountingConnection.migration_runs} times over 5 "
+        f"conn() calls; expected one pass of {len(fresh_db.MIGRATIONS)}"
+    )
+
+
+def test_conn_migrates_each_distinct_db_path(fresh_db, monkeypatch, tmp_path):
+    """A cache keyed only on 'has anything ever been migrated this process'
+    (e.g. a bare module-level boolean) would leave a second, distinct DB
+    path unmigrated. The cache must be keyed on the resolved config.DB_PATH
+    so tests/conftest.py's per-test fresh_db fixture stays isolated."""
+    from harness import config
+
+    monkeypatch.setattr(config, "DB_PATH", tmp_path / "a.db")
+    with fresh_db.conn() as c:
+        c.execute("SELECT 1 FROM items")  # schema must exist for path a
+
+    monkeypatch.setattr(config, "DB_PATH", tmp_path / "b.db")
+    with fresh_db.conn() as c:
+        c.execute("SELECT 1 FROM items")  # schema must also exist for path b
+
+
 def test_policies_defaults_and_override(fresh_db, may):
     assert fresh_db.policy("may", "merge_prs") == "approve"
     fresh_db.set_policy("may", "merge_prs", "auto")

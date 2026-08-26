@@ -149,6 +149,11 @@ MIGRATIONS = [
     "ALTER TABLE questions ADD COLUMN routed_at TEXT NOT NULL DEFAULT ''",
 ]
 
+# DB paths this process has already created the schema on and walked the
+# migration list for. Keyed on the path, not a bare flag, so the tests'
+# per-test DB (conftest monkeypatches config.DB_PATH) is still migrated.
+_migrated_paths: set[str] = set()
+
 
 @contextmanager
 def conn():
@@ -157,13 +162,18 @@ def conn():
     c.row_factory = sqlite3.Row
     # Desk cycles run concurrently; WAL lets readers proceed under a writer
     # instead of stacking "database is locked" retries on the 30s timeout.
+    # Per-connection, so it stays outside the once-per-path guard below.
     c.execute("PRAGMA journal_mode=WAL")
-    c.executescript(SCHEMA)
-    for mig in MIGRATIONS:
-        try:
-            c.execute(mig)
-        except sqlite3.OperationalError:
-            pass  # already applied
+    key = str(config.DB_PATH)
+    if key not in _migrated_paths:
+        c.executescript(SCHEMA)
+        for mig in MIGRATIONS:
+            try:
+                c.execute(mig)
+            except sqlite3.OperationalError:
+                pass  # already applied
+        # Only after a clean pass: a real failure retries on the next conn().
+        _migrated_paths.add(key)
     try:
         yield c
         c.commit()
