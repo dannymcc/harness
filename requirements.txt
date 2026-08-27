@@ -4,3 +4,6 @@ uvicorn>=0.30
 jinja2>=3.1
 python-multipart>=0.0.9
 pytest>=8
+# Drives the headless Chromium that harness/render.py opens the managed
+# project's pages in. The browser itself is installed in the Dockerfile.
+playwright>=1.47

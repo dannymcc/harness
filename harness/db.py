@@ -25,6 +25,7 @@ CREATE TABLE IF NOT EXISTS projects (
     version_pattern TEXT NOT NULL,
     test_command TEXT NOT NULL,
     setup_command TEXT NOT NULL DEFAULT '',
+    preview_command TEXT NOT NULL DEFAULT '',
     lead_name TEXT NOT NULL DEFAULT 'Tom',
     enabled INTEGER NOT NULL DEFAULT 1,
     created_at TEXT NOT NULL
@@ -158,6 +159,7 @@ MIGRATIONS = [
     "ALTER TABLE questions ADD COLUMN ruling_passes INTEGER NOT NULL DEFAULT 0",
     "CREATE INDEX IF NOT EXISTS reports_scope ON reports(scope, project, id)",
     "ALTER TABLE releases ADD COLUMN ci_status TEXT NOT NULL DEFAULT ''",
+    "ALTER TABLE projects ADD COLUMN preview_command TEXT NOT NULL DEFAULT ''",
 ]
 
 # DB paths this process has already prepared: data directory made, journal
@@ -217,11 +219,12 @@ def create_project(name: str, repo: str, **overrides) -> None:
         c.execute(
             """INSERT INTO projects (name, repo, dev_branch, main_branch,
                  version_file, version_pattern, test_command, setup_command,
-                 lead_name, created_at)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                 preview_command, lead_name, created_at)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
             (name, repo, vals["dev_branch"], vals["main_branch"],
              vals["version_file"], vals["version_pattern"],
-             vals["test_command"], vals["setup_command"], lead, now()),
+             vals["test_command"], vals["setup_command"],
+             vals["preview_command"], lead, now()),
         )
 
 

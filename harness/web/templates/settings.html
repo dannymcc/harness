@@ -57,6 +57,24 @@
 </section>
 
 <section class="card">
+  <h2>Preview</h2>
+  <p class="hint">The command that starts this project's app so its pages can
+  be rendered. Set it and an engineer changing templates or stylesheets opens
+  the routes in a real browser at phone and desktop widths, saves screenshots
+  and reads back what the CSS cannot tell them — a page wider than the
+  viewport, elements past the right edge, console errors. Leave it empty if
+  the project has no UI: nothing is rendered and nobody is asked to. It must
+  leave the app answering on <code>http://127.0.0.1:8000</code> with demo
+  data and no login in the way.</p>
+  <form method="post" action="/p/{{ p.name }}/preview-command" class="policy-row">
+    <label>Preview command</label>
+    <input name="value" value="{{ p.preview_command }}"
+           placeholder="DEMO_MODE=true python app.py">
+    <button>set</button>
+  </form>
+</section>
+
+<section class="card">
   <h2>Staffing (managed by Harry)</h2>
   <p>Extra engineers: {{ staff.extra|join(', ') if staff.extra else 'none' }}</p>
   <p>Stood down: {{ staff.benched|join(', ') if staff.benched else 'nobody' }}</p>

@@ -4,6 +4,53 @@ All notable changes to Harness are recorded here. The format is
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project
 follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.27.0] - 2026-08-27
+
+### Added
+
+- **UI work is no longer done blind** (#114). An engineer writing templates
+  or stylesheets had no way of looking at the result: a layout was "verified"
+  by reading the diff, and a stylesheet containing the right strings can
+  still render a page you cannot use on a phone.
+
+- New `harness/render.py` starts the project under its preview command,
+  opens each route in headless Chromium at each viewport, saves a PNG per
+  route per width alongside a `report.json`, and reports the three things a
+  diff reads clean on: a page wider than its viewport, elements past the
+  right edge outside any declared scroll box, and console errors. It exits 0
+  when clean, 2 when it rendered and found something (a verdict, not a
+  crash), and 1 when the app never came up. It imports nothing from harness,
+  so it can be run by hand from a checkout.
+
+- New per-project **preview command**, on the add form and — unlike the other
+  build commands — editable in Settings afterwards, since a project grows a
+  UI long after it is set up. It is set on the harness rather than read from
+  the repository, so a pull request cannot choose what gets started. Empty is
+  the default and means the project has no UI to look at: nothing is
+  rendered and nobody is asked for screenshots. New `projects.preview_command`
+  column, migrated in.
+
+- Where a preview command is set, the engineer's prompt carries the exact
+  invocation and the standing instruction that a change touching templates or
+  static assets is not finished until the routes the issue names have been
+  rendered at both widths and the PNGs opened.
+
+- Screenshots land in `.harness/screenshots` in the worktree and their paths
+  are posted to the item thread, so a reviewer or the operator can open the
+  evidence with `Read`. They are kept out of the commit twice over — an entry
+  in the clone's own `info/exclude`, and a `git reset` before the commit — so
+  a run that only rendered never reads as a run that changed something, and
+  the PNGs never reach your repository.
+
+- Rendering is the fix role's alone and is deliberately not extended to the
+  triage and review roles: a browser is a general-purpose network client, and
+  those roles read text from the internet. The reviewer reads the engineer's
+  PNGs instead. See [SECURITY.md](SECURITY.md).
+
+- Playwright is now a dependency and the harness image installs Chromium at
+  build time. From a checkout, `pip install playwright && playwright install
+  chromium`.
+
 ## [0.26.0] - 2026-08-27
 
 ### Added

@@ -12,7 +12,7 @@ from pathlib import Path
 # The single source of truth for the number: the release process bumps this
 # line (version file `harness/config.py`, pattern `VERSION\s*=\s*"..."`) and
 # tags the commit. Don't edit it by hand.
-VERSION = "0.26.0"
+VERSION = "0.27.0"
 
 _SHA_RE = re.compile(r"^[0-9a-f]{7,40}$")
 _STAMP_FILE = Path(__file__).resolve().parent / "_build_sha"
@@ -171,6 +171,13 @@ PROJECT_DEFAULTS = {
     "version_pattern": r"APP_VERSION\s*=\s*'(?P<version>[^']+)'",
     "test_command": "python -m pytest -x -q",
     "setup_command": "",              # e.g. "pip install -r requirements.txt"
+    # Starts the app so its pages can be rendered and screenshotted — see
+    # harness/render.py. Empty means the project has no UI to look at and the
+    # engineer is told nothing about screenshots. Whatever it is, it must
+    # leave the app answering on http://127.0.0.1:8000 (or wherever the
+    # engineer points --base-url) with demo data and no login in the way,
+    # e.g. "DEMO_MODE=true SEED_DEMO=true python app.py".
+    "preview_command": "",
 }
 
 POLICY_DEFAULTS = {

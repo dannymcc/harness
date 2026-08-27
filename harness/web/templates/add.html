@@ -11,6 +11,7 @@
   <label>Version pattern <input name="version_pattern" placeholder="{{ defaults.version_pattern }}"></label>
   <label>Test command <input name="test_command" placeholder="{{ defaults.test_command }}"></label>
   <label>Setup command <input name="setup_command" placeholder="pip install -r requirements.txt (auto-detected if empty)"></label>
+  <label>Preview command <input name="preview_command" placeholder="DEMO_MODE=true python app.py (leave empty if there is no UI)"></label>
   <button class="primary">Add harness</button>
   <p class="hint">Harness clones the repo itself, triages issues, reviews PRs,
   fixes what it safely can on the dev branch, and batches releases. New

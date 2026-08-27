@@ -45,7 +45,13 @@ Shell access depends on the role, because the roles differ in what they read:
   installs and test suites. This is accepted residual risk. What contains
   them is not the tool policy but the disposable worktree they work in, the
   harness re-running the tests itself, and the approval gates on anything
-  that leaves the machine.
+  that leaves the machine. The fix role is also the only one that renders
+  the app (`harness/render.py`, which starts the project under its
+  `preview_command` and drives headless Chromium): that is a shell command
+  like any other, and it is deliberately not extended to the reviewing
+  roles — a browser is a general-purpose network client, and their whole
+  containment is that they have no way to run one. The reviewer reads the
+  PNGs the engineer left behind with `Read` instead.
 
 No session inherits the GitHub token: `GH_TOKEN` and `GITHUB_TOKEN` are
 blanked for every agent session, including the fix role. All real GitHub

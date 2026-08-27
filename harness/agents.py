@@ -801,6 +801,44 @@ genuinely cannot be captured in a test.
         bash_rules=_bash_rules(project), model=config.TRIAGE_MODEL)
 
 
+def _render_note(project) -> str:
+    """How this project's engineer looks at the app, if it has one to look at.
+
+    A stylesheet that contains the right strings still renders a page you
+    cannot use on a phone, and reading the diff will never say so. Where the
+    project has a preview command, the engineer gets the exact invocation and
+    is told that UI work is not finished until it has been run and the PNGs
+    looked at. Where it has none, this is empty and nobody is asked for
+    screenshots that cannot exist.
+    """
+    from . import repo  # late import: repo pulls in gh, which nothing here needs
+    cmd = repo.render_command(project)
+    if not cmd:
+        return ""
+    return f"""
+Seeing the app, not just the diff:
+- This project can be rendered. Run it from your worktree:
+
+    {cmd} --routes / --viewport 412x915 --viewport 1280x800
+
+  Give --routes every path the issue is about, and add
+  --base-url http://127.0.0.1:<port> if the app answers anywhere other than
+  port 8000. It starts the app, opens each
+  route in headless Chromium at each viewport, writes the PNGs and a
+  report.json to {repo.SCREENSHOT_DIR}, and prints what a stylesheet cannot
+  show you: a page wider than its viewport, elements past the right edge
+  outside any declared scroll box, and console errors. Exit 0 is clean, 2 is
+  "it rendered and found something" (a verdict, not a crash), 1 is "the app
+  never came up" — its output names the reason.
+- If your change touches templates or static assets, this is not optional:
+  render the routes the issue names at both viewports, open the PNGs with
+  Read, and only then decide the layout is right. Say in your summary which
+  routes and widths you rendered.
+- {repo.SCREENSHOT_DIR} is excluded from the commit, so the screenshots stay
+  as evidence for this run without landing in the repository.
+"""
+
+
 async def fix_issue(project, issue: dict, plan: str, cwd: str,
                     resume: str | None = None,
                     persona: str = "Malcolm", repro_path: str = "",
@@ -838,7 +876,7 @@ Requirements:
 - Do NOT commit, push, or touch git config — leave changes in the working tree.
 - If the fix is riskier or larger than the plan suggested, stop and report
   success=false with an explanation rather than forcing it.
-{_item_context(project["name"], f"issue#{issue['number']}")}{_desk_memory(project["name"], "engineering")}"""
+{_render_note(project)}{_item_context(project["name"], f"issue#{issue['number']}")}{_desk_memory(project["name"], "engineering")}"""
     return await run_agent(
         project_name=project["name"], role="ic",
         item_key=f"issue#{issue['number']}", task="fix",
