@@ -35,6 +35,13 @@ WORKDIR /app
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
+# Headless Chromium for harness/render.py: without it the engineers write
+# CSS and "verify" it by reading the diff. Installed to a path outside any
+# HOME, because agent sessions and project commands run with a scratch one.
+ENV PLAYWRIGHT_BROWSERS_PATH=/ms-playwright
+RUN python -m playwright install --with-deps chromium \
+    && rm -rf /var/lib/apt/lists/*
+
 # Set by CI; overrides the stamp below when present.
 ARG GIT_SHA=""
 ENV HARNESS_GIT_SHA=$GIT_SHA

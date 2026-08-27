@@ -424,6 +424,23 @@ def _file_question(project_name: str, asked_by: str, item_key: str,
         db.append_memory(project_name, key, out["memory_note"])
 
 
+def _note_screenshots(project_name: str, item_key: str, wt) -> None:
+    """Put the run's screenshots on the item thread, by path.
+
+    They are excluded from the commit on purpose, so the diff will never
+    mention them: without this the evidence exists and nobody knows. Anyone
+    reading the item — Ruth, Harry, the operator — opens them with Read.
+    """
+    try:
+        shots = sorted((wt / repo.SCREENSHOT_DIR).glob("*.png"))
+    except OSError:
+        return
+    if shots:
+        db.thread_append(project_name, item_key, "harness", "note",
+                         "Screenshots from this run (open them with Read):\n"
+                         + "\n".join(f"- {s}" for s in shots[:20]))
+
+
 def _login(author) -> str:
     if isinstance(author, dict):
         return author.get("login", "")
@@ -593,6 +610,11 @@ async def fix_item(project, item, persona: str = "Malcolm") -> None:
                           "not reproduce the bug. Engineer: treat the plan with "
                           "care and fix or replace the test.")
                          + (f"\n{out[-600:]}" if not passed else ""))
+    if repo.render_command(project):
+        # Make the directory the engineer's render command writes into, and
+        # keep it out of `git status` — otherwise a run that only rendered
+        # reads as a run that changed something.
+        await asyncio.to_thread(repo.ensure_screenshot_dir, project, wt)
     db.thread_append(name, key, persona, "event",
                      f"Starting the fix on branch {branch}"
                      + (" (resuming earlier session)" if item["session_id"] else ""))
@@ -656,6 +678,7 @@ async def fix_item(project, item, persona: str = "Malcolm") -> None:
     _file_question(name, persona, key, out)
     db.thread_append(name, key, persona, "note",
                      out["summary"] + (f"\nNotes: {out['notes']}" if out.get("notes") else ""))
+    _note_screenshots(name, key, wt)
 
     if not await asyncio.to_thread(repo.wt_has_changes, project, wt):
         _record_no_effect(res, f"{persona} {NO_CHANGE_REASON}: "

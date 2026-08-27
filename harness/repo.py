@@ -7,7 +7,9 @@ import asyncio
 import fcntl
 import os
 import re
+import shlex
 import shutil
+import sys
 import time
 import venv
 from contextlib import asynccontextmanager, contextmanager
@@ -324,8 +326,23 @@ def remove_worktree(project, wt: Path) -> None:
             check=False)
 
 
+def _is_screenshot(status_line: str) -> bool:
+    """Is this `git status --porcelain` line one of the run's screenshots?
+
+    Normally there is nothing to filter — ensure_screenshot_dir excludes them
+    and git never mentions them. This is for the run where that failed: a
+    directory of PNGs must not make an engineer who changed nothing look like
+    one who did. Git collapses an untracked directory to `?? .harness/`, so
+    that spelling counts too.
+    """
+    path = status_line[3:].strip().strip('"')
+    return path.startswith(SCREENSHOT_DIR) or path == _EXCLUDE_LINE
+
+
 def wt_has_changes(project, wt: Path) -> bool:
-    unstaged = run(["git", "status", "--porcelain"], cwd=wt).strip()
+    unstaged = [line for line in
+                run(["git", "status", "--porcelain"], cwd=wt).splitlines()
+                if line.strip() and not _is_screenshot(line)]
     ahead = run(["git", "rev-list", "--count",
                  f"origin/{project['dev_branch']}..HEAD"], cwd=wt).strip()
     return bool(unstaged) or ahead != "0"
@@ -333,6 +350,11 @@ def wt_has_changes(project, wt: Path) -> bool:
 
 def wt_commit_all(project, wt: Path, message: str) -> None:
     run(["git", "add", "-A"], cwd=wt)
+    # The screenshots an engineer renders are evidence for the run, not files
+    # the project asked for. ensure_screenshot_dir excludes them so they never
+    # reach the index; this is the braces to that belt, because `git add -A`
+    # would otherwise push a directory of PNGs to dev the one time it fails.
+    run(["git", "reset", "-q", "--", SCREENSHOT_DIR], cwd=wt, check=False)
     run(["git", "commit", "-m", message], cwd=wt)
 
 
@@ -570,9 +592,14 @@ def ensure_test_env(project) -> None:
 
 
 
+def venv_dir(project) -> Path:
+    """Where a project's virtualenv lives. Naming it, not building it."""
+    return config.DATA_DIR / "venvs" / project["name"]
+
+
 def _venv_python(project, vdir: Path | None = None) -> Path:
     """A per-project virtualenv so test deps don't pollute harness's own env."""
-    vdir = vdir or config.DATA_DIR / "venvs" / project["name"]
+    vdir = vdir or venv_dir(project)
     py = vdir / "bin" / "python"
     if not py.exists():
         vdir.parent.mkdir(parents=True, exist_ok=True)
@@ -651,6 +678,73 @@ def _failure_output(e) -> tuple[str, str]:
         return combined, (f"\n--- the command timed out after {e.timeout}s; "
                           "any output above is partial ---")
     return combined, ""
+
+
+# --- preview ----------------------------------------------------------------
+
+# Where render.py writes: a fixed path in the worktree, so the engineer, the
+# thread and a human all know where to look. Kept out of the commit, because
+# wt_commit_all is `git add -A` and a screenshot is evidence for the run, not
+# a file the project asked for.
+SCREENSHOT_DIR = ".harness/screenshots"
+_EXCLUDE_LINE = ".harness/"
+RENDER_SCRIPT = Path(__file__).resolve().parent / "render.py"
+
+
+def _project_field(project, key: str) -> str:
+    """A project column that may not be there: an old row, or a test's dict."""
+    try:
+        return (project[key] or "").strip() if project else ""
+    except (KeyError, IndexError, TypeError):
+        return ""
+
+
+def ensure_screenshot_dir(project, wt: Path) -> Path | None:
+    """Make the worktree's screenshot directory, excluded from commits.
+
+    The exclusion is written to the clone's own info/exclude — harness's
+    clone, never the user's working copy — so the project's .gitignore is
+    left alone and untracked PNGs never show up in `git status`, where they
+    would read as work the engineer did. Returns None if that could not be
+    written; the commit itself is guarded separately (wt_commit_all), so a
+    failure here costs an honest `git status`, not a clean repository.
+    """
+    wt = Path(wt)
+    try:
+        common = run(["git", "rev-parse", "--git-common-dir"], cwd=wt).strip()
+        base = Path(common) if Path(common).is_absolute() else wt / common
+        info = base / "info"
+        info.mkdir(parents=True, exist_ok=True)
+        exclude = info / "exclude"
+        existing = exclude.read_text() if exclude.exists() else ""
+        if _EXCLUDE_LINE not in existing.split():
+            with exclude.open("a") as fh:
+                fh.write(f"\n# harness: render.py screenshots\n"
+                         f"{_EXCLUDE_LINE}\n")
+        d = wt / SCREENSHOT_DIR
+        d.mkdir(parents=True, exist_ok=True)
+        return d
+    except (CmdError, OSError) as e:
+        _say(f"Could not hide {SCREENSHOT_DIR} from git status ({e}); the "
+             "commit drops it anyway", "warn", _project_field(project, "name"))
+        return None
+
+
+def render_command(project) -> str:
+    """The command that renders this project's pages, or '' if it has no UI.
+
+    An empty preview_command means there is nothing to render, and the
+    engineer is told nothing about screenshots. The interpreter is harness's
+    own, because that is the one with Playwright; the project's venv goes
+    first on PATH so the app itself starts with its own dependencies.
+    """
+    preview = _project_field(project, "preview_command")
+    if not preview:
+        return ""
+    return (f"{shlex.quote(sys.executable)} {shlex.quote(str(RENDER_SCRIPT))}"
+            f" --command {shlex.quote(preview)}"
+            f" --path-prefix {shlex.quote(str(venv_dir(project) / 'bin'))}"
+            f" --out {SCREENSHOT_DIR}")
 
 
 # --- version ----------------------------------------------------------------

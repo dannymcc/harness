@@ -171,6 +171,13 @@ PROJECT_DEFAULTS = {
     "version_pattern": r"APP_VERSION\s*=\s*'(?P<version>[^']+)'",
     "test_command": "python -m pytest -x -q",
     "setup_command": "",              # e.g. "pip install -r requirements.txt"
+    # Starts the app so its pages can be rendered and screenshotted — see
+    # harness/render.py. Empty means the project has no UI to look at and the
+    # engineer is told nothing about screenshots. Whatever it is, it must
+    # leave the app answering on http://127.0.0.1:8000 (or wherever the
+    # engineer points --base-url) with demo data and no login in the way,
+    # e.g. "DEMO_MODE=true SEED_DEMO=true python app.py".
+    "preview_command": "",
 }
 
 POLICY_DEFAULTS = {

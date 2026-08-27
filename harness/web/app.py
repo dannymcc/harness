@@ -602,6 +602,21 @@ def set_policy(name: str, key: str, value: str = Form(...)):
     return RedirectResponse(f"/p/{name}/settings", status_code=303)
 
 
+@app.post("/p/{name}/preview-command")
+def set_preview_command(name: str, value: str = Form("")):
+    """The one build command editable after the project is added.
+
+    It decides whether the engineer renders the app before calling UI work
+    done, and a project grows a UI long after it is set up — leaving it to
+    the add form only would mean deleting the harness to change it.
+    """
+    if db.get_project(name):
+        db.update_project(name, preview_command=value.strip())
+        db.log_event(f"Preview command -> {value.strip() or '(none)'}",
+                     project=name)
+    return RedirectResponse(f"/p/{name}/settings", status_code=303)
+
+
 @app.post("/p/{name}/question/{qid}/answer")
 def answer_question(name: str, qid: int, answer: str = Form(...),
                     via: str = ""):
@@ -919,6 +934,7 @@ def add_project(
     dev_branch: str = Form(""), main_branch: str = Form(""),
     version_file: str = Form(""), version_pattern: str = Form(""),
     test_command: str = Form(""), setup_command: str = Form(""),
+    preview_command: str = Form(""),
 ):
     slug = "".join(ch for ch in name.lower().replace(" ", "-")
                    if ch.isalnum() or ch == "-")
@@ -929,7 +945,8 @@ def add_project(
                           version_file=version_file.strip(),
                           version_pattern=version_pattern.strip(),
                           test_command=test_command.strip(),
-                          setup_command=setup_command.strip())
+                          setup_command=setup_command.strip(),
+                          preview_command=preview_command.strip())
         db.log_event(f"Project {slug} added ({gh_repo})", project=slug)
         worker.trigger(slug)
     return RedirectResponse(f"/p/{slug}" if slug else "/", status_code=303)

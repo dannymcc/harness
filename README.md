@@ -285,6 +285,32 @@ one command the triage and review agents are allowed to run — they read text
 from the internet, so their shell is an allowlist of that command plus
 read-only `git` (see [SECURITY.md](SECURITY.md)).
 
+**Seeing the app.** A stylesheet that contains the right strings still renders
+a page you cannot use on a phone, and no amount of reading the diff will say
+so. Give a harness a **preview command** — on the add form, or in Settings
+afterwards — and the engineer gets a way to look:
+
+```sh
+python harness/render.py --command 'DEMO_MODE=true python app.py' \
+    --routes / /projects --viewport 412x915 --viewport 1280x800 \
+    --out .harness/screenshots
+```
+
+It starts the app, opens each route in headless Chromium at each viewport,
+saves a PNG per route per width, and reports what the CSS text cannot: a page
+wider than its viewport, elements past the right edge outside any declared
+scroll box, and console errors. Anyone changing templates or static assets is
+told to run it on the routes the issue names and to open the screenshots
+before calling the work done. They land in `.harness/screenshots` in the
+worktree, excluded from the commit, so they are evidence for the run rather
+than files pushed to your repo. Leave the preview command empty — the default
+— and none of this applies: nothing is rendered and nobody is asked for
+screenshots. The command is yours, not the repository's: it is set on the
+harness, so a pull request cannot choose what gets started. It should leave
+the app answering on `http://127.0.0.1:8000` with demo data and no login in
+the way. Playwright and Chromium ship in the harness image; from a checkout,
+`pip install playwright && playwright install chromium`.
+
 Costs shown in the GUI are the SDK's API-equivalent estimates (`≈US$`) — on
 a subscription plan nothing is billed per token; read them as a burn meter.
 
