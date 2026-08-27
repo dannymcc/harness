@@ -32,6 +32,29 @@ def _no_outward_notifications(monkeypatch):
     monkeypatch.setattr(config, "NTFY_TOPIC", "")
 
 
+@pytest.fixture(autouse=True)
+def fake_home(tmp_path, monkeypatch):
+    """Every test gets a throwaway home directory.
+
+    housekeeping._prune_sdk_sessions unlinks session transcripts under
+    Path.home()/".claude"/"projects", which resolves through $HOME — the one
+    sweep in the harness that reaches outside DATA_DIR. fresh_db redirects
+    config, and config has no say in where home is, so anything calling
+    prune() would otherwise walk the real ~/.claude of whoever ran the suite.
+    Nothing there matches the encoded prefixes of a per-test data directory
+    today, so this is a guard rather than a fix — but it is the scoping
+    itself that the tests are pinning, and a test suite is a poor place to
+    find out that the scoping regressed. Autouse for the same reason
+    _no_outward_notifications is: opting in is the step that gets forgotten.
+    """
+    # Not tmp_path/"home": test_boot.py builds its own home there to
+    # exercise run.persist_claude_home, and would find it already made.
+    home = tmp_path / "fake-home"
+    home.mkdir()
+    monkeypatch.setenv("HOME", str(home))
+    return home
+
+
 @pytest.fixture()
 def fresh_db(monkeypatch):
     """Each test gets an isolated data dir (and therefore SQLite DB)."""
