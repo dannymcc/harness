@@ -4,6 +4,36 @@ All notable changes to Harness are recorded here. The format is
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project
 follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.24.2] - 2026-08-27
+
+### Fixed
+
+- **One desk waiting on the clone lock no longer stalls all of them**
+  (#103). The lock is an `flock` and the git behind it is blocking, but both
+  were being taken on the worker's event loop thread: while one desk waited
+  — for another engineer's worktree bookkeeping, a push, a salvage script
+  attached over `docker exec` — every other desk, the attendant and the
+  heartbeat waited with it. Triage, fixes, PR reviews, the security review
+  and the release draft now take the lock and run their git through
+  `asyncio.to_thread`, so the loop keeps turning while the clone is busy.
+
+- Where a coroutine still has to hold the lock across an `await` — a PR
+  review, which owns the clone for its whole run, and the release draft,
+  which version-bumps and pushes the shared checkout — there is now
+  `repo.clone_lock_async`, which moves only the waiting off the loop thread
+  and leaves the locked scope alone. Everything else puts its whole locked
+  block in a plain function and hands that to a worker thread.
+
+- Triage and the security review now hold the lock over the checkout only,
+  rather than over the agent session that follows it. Both only read the
+  tree once they have it, and holding the clone for the minutes a session
+  takes had every other holder queuing behind a read.
+
+- A wait for the clone lock that drags on past five seconds now says so on
+  the board, and says when it was granted. A holder stuck outside harness
+  used to be indistinguishable from a stuck harness; ordinary contention
+  still passes without comment.
+
 ## [0.24.1] - 2026-08-27
 
 ### Fixed

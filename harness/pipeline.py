@@ -463,14 +463,28 @@ def sync(project) -> None:
 
 # --- issue flow -------------------------------------------------------------
 
+def _locked_checkout(project, branch: str) -> str:
+    """Reset the shared clone to origin/<branch>, holding the clone lock.
+
+    Blocking git behind a blocking flock, so coroutines call it through
+    asyncio.to_thread rather than run it on the loop thread (#103).
+    """
+    with repo.clone_lock(project):
+        return str(repo.clean_checkout(project, branch))
+
+
 async def triage_item(project, item) -> None:
     name = project["name"]
     if _breaker_tripped(project, item):
         return
     detail = gh.issue_detail(project["repo"], item["number"])
-    with repo.clone_lock(project):
-        cwd = str(repo.clean_checkout(project, project["dev_branch"]))
-        res = await agents.triage_issue(project, detail, cwd)
+    # The lock covers the checkout and nothing else: triage only reads the
+    # tree afterwards, and holding it across the session (minutes) would have
+    # every other holder — an engineer's worktree, a release, a maintenance
+    # script — queue behind a read.
+    cwd = await asyncio.to_thread(_locked_checkout, project,
+                                  project["dev_branch"])
+    res = await agents.triage_issue(project, detail, cwd)
     if not res["ok"]:
         db.update_item(name, "issue", item["number"], error=res["error"])
         return
@@ -534,7 +548,10 @@ async def fix_item(project, item, persona: str = "Malcolm") -> None:
     detail = gh.issue_detail(project["repo"], item["number"])
     branch = f"harness/issue-{item['number']}"
     resuming = bool(item["session_id"])
-    wt, salvage = repo.add_worktree(project, branch, resuming=resuming)
+    # add_worktree takes the clone lock: off the loop thread, or a wave of
+    # engineers takes it in turns to freeze the worker (#103).
+    wt, salvage = await asyncio.to_thread(repo.add_worktree, project, branch,
+                                          resuming)
     db.update_item(name, "issue", item["number"], status="working",
                    branch=branch)
     if salvage:
@@ -640,7 +657,7 @@ async def fix_item(project, item, persona: str = "Malcolm") -> None:
     db.thread_append(name, key, persona, "note",
                      out["summary"] + (f"\nNotes: {out['notes']}" if out.get("notes") else ""))
 
-    if not repo.wt_has_changes(project, wt):
+    if not await asyncio.to_thread(repo.wt_has_changes, project, wt):
         _record_no_effect(res, f"{persona} {NO_CHANGE_REASON}: "
                                f"{out['summary']}")
         hold_item(project, db.get_item(name, "issue", item["number"]), persona,
@@ -674,8 +691,8 @@ async def fix_item(project, item, persona: str = "Malcolm") -> None:
     msg = out["commit_message"].strip() or f"fix: issue #{item['number']}"
     if f"#{item['number']}" not in msg:
         msg += f" (#{item['number']})"
-    repo.wt_commit_all(project, wt, msg)
-    stat, diff = repo.wt_diff(project, wt)
+    await asyncio.to_thread(repo.wt_commit_all, project, wt, msg)
+    stat, diff = await asyncio.to_thread(repo.wt_diff, project, wt)
     landed, err = await asyncio.to_thread(
         repo.push_worktree_to_dev, project, wt, branch)
     if not landed:
@@ -693,7 +710,7 @@ async def fix_item(project, item, persona: str = "Malcolm") -> None:
                          f"pushed to origin/{branch} either — it exists only "
                          "in the worktree on this box", "warn", project=name)
         return
-    repo.remove_worktree(project, wt)
+    await asyncio.to_thread(repo.remove_worktree, project, wt)
     db.update_item(
         name, "issue", item["number"],
         status="queued", queued_at=db.now(), diff=diff,
@@ -727,7 +744,8 @@ async def review_item(project, item) -> None:
         return
     branch = f"harness/pr-{item['number']}"
     try:
-        cwd = str(repo.fetch_pr_branch(project, item["number"], branch))
+        cwd = str(await asyncio.to_thread(repo.fetch_pr_branch, project,
+                                          item["number"], branch))
         # (lock held by caller for the whole review below)
     except subprocess.TimeoutExpired as e:
         # Nothing to tell the contributor — the checkout hung on our side.
@@ -801,6 +819,18 @@ async def review_item(project, item) -> None:
                   + (f"\nRisks: {out['risks']}" if out.get("risks") else ""))
 
 
+def _locked_pr_check(project, number: int) -> tuple[bool, str]:
+    """Merge PR #number onto dev in the clone and run its suite there.
+
+    One plain function for the whole locked stretch so a coroutine can hand
+    it to asyncio.to_thread: the lock covers the same work it always did,
+    the checkout as well as the run against it.
+    """
+    with repo.clone_lock(project):
+        repo.fetch_pr_branch(project, number, f"harness/pr-{number}")
+        return repo.run_pr_tests(project, number)
+
+
 async def _pr_merges_clean_and_passes(project, item) -> bool:
     """Merge the PR onto dev in harness's clone and run the suite there.
 
@@ -817,10 +847,10 @@ async def _pr_merges_clean_and_passes(project, item) -> bool:
                      project=name)
         return False
     try:
-        with repo.clone_lock(project):
-            repo.fetch_pr_branch(project, number, f"harness/pr-{number}")
-            passed, out = await asyncio.to_thread(repo.run_pr_tests, project,
-                                                  number)
+        # Checkout and test run go to a worker thread together, so the lock
+        # is held over exactly what it was before and the loop waits for
+        # neither (#103).
+        passed, out = await asyncio.to_thread(_locked_pr_check, project, number)
     except (CmdError, subprocess.TimeoutExpired) as e:
         # A hung git is not a dirty merge — say which it was, and block
         # either way rather than take the cycle down with us (#102).
@@ -985,7 +1015,11 @@ def _release_due(project) -> list | None:
 
 async def propose_release(project, queued) -> None:
     name = project["name"]
-    with repo.clone_lock(project):
+    # The whole drafting run holds the lock deliberately: it version-bumps,
+    # commits and pushes the shared checkout, and a release that found the
+    # tree reset under it would ship the wrong thing. Only the waiting moved
+    # off the loop thread (#103).
+    async with repo.clone_lock_async(project):
         rid = await _propose_release_locked(project, queued)
     if rid is None or db.policy(name, "cut_release") != "auto":
         return
@@ -998,16 +1032,36 @@ async def propose_release(project, queued) -> None:
                  f"{release['version']} without waiting for "
                  f"{config.OPERATOR}", project=name)
     # finalize outside the lock: it re-acquires it, and flock is not reentrant
-    finalize_release(project, release)
+    await asyncio.to_thread(finalize_release, project, release)
+
+
+def _release_checkout(project) -> tuple[str, str, str]:
+    """The clone reset to dev, plus the version and log the draft is built on.
+
+    Called with the clone lock already held (propose_release), from a worker
+    thread — the git here is blocking and must not run on the loop.
+    """
+    cwd = str(repo.clean_checkout(project, project["dev_branch"]))
+    log = gh.run(["git", "log", "--oneline",
+                  f"origin/{project['main_branch']}..origin/{project['dev_branch']}"],
+                 cwd=repo.repo_dir(project))
+    return cwd, repo.current_version(project), log
+
+
+def _push_version_bump(project, version: str) -> None:
+    """Commit and push whatever the release agent changed on dev, if anything.
+
+    Also called under the lock, from a worker thread.
+    """
+    if repo.has_changes(project, project["dev_branch"]):
+        repo.commit_all(project, f"chore: bump version to {version}")
+        repo.push_branch_to(project, project["dev_branch"], project["dev_branch"])
 
 
 async def _propose_release_locked(project, queued) -> int | None:
     name = project["name"]
-    cwd = str(repo.clean_checkout(project, project["dev_branch"]))
-    version_before = repo.current_version(project)
-    log = gh.run(["git", "log", "--oneline",
-                  f"origin/{project['main_branch']}..origin/{project['dev_branch']}"],
-                 cwd=repo.repo_dir(project))
+    cwd, version_before, log = await asyncio.to_thread(_release_checkout,
+                                                       project)
     res = await agents.draft_release(project, [dict(q) for q in queued],
                                      version_before, log, cwd)
     if not res["ok"]:
@@ -1022,9 +1076,7 @@ async def _propose_release_locked(project, queued) -> int | None:
         db.log_event("Release blocked: tests failing on dev\n" + test_out[-500:],
                      "warn", project=name)
         return
-    if repo.has_changes(project, project["dev_branch"]):
-        repo.commit_all(project, f"chore: bump version to {version}")
-        repo.push_branch_to(project, project["dev_branch"], project["dev_branch"])
+    await asyncio.to_thread(_push_version_bump, project, version)
     try:
         pr_number = gh.create_pr(
             project["repo"], project["main_branch"], project["dev_branch"],
@@ -1303,7 +1355,7 @@ async def run_cycle(project, force: bool = False) -> None:
         await run_security_review(project)
 
     try:
-        _reconcile_branches(project)
+        await asyncio.to_thread(_reconcile_branches, project)
 
         # An answer the operator has given is an instruction: act on it
         # before any work is chosen, so the item it is about is in the right
@@ -1329,7 +1381,9 @@ async def run_cycle(project, force: bool = False) -> None:
             if item["kind"] == "issue":
                 await triage_item(project, item)
             else:
-                with repo.clone_lock(project):
+                # A review owns the clone for its whole run (see
+                # review_item); the wait for it happens off the loop thread.
+                async with repo.clone_lock_async(project):
                     await review_item(project, item)
             done += 1
         if done:
@@ -1343,7 +1397,10 @@ async def run_cycle(project, force: bool = False) -> None:
         engineers = ["Malcolm"] + staff["extra"]
         fix_policy = db.policy(name, "fix_issues")
         if reasons:
-            cwd = str(repo.clean_checkout(project, project["dev_branch"]))
+            # Lock-free as it always was — the lead only reads the tree —
+            # but the git itself still belongs on a worker thread.
+            cwd = str(await asyncio.to_thread(repo.clean_checkout, project,
+                                              project["dev_branch"]))
             db.set_setting(f"last_plan_at.{name}", db.now())
             db.set_setting(f"plan_backlog.{name}", _backlog_key(
                 [i for i in db.items_by_status(name, "approved")
@@ -2060,8 +2117,8 @@ def _apply_staffing(actions: list) -> None:
 
 async def run_security_review(project) -> None:
     name = project["name"]
-    with repo.clone_lock(project):
-        cwd = str(repo.clean_checkout(project, project["dev_branch"]))
+    cwd = await asyncio.to_thread(_locked_checkout, project,
+                                  project["dev_branch"])
     db.log_event("Security review started (Zaf)", project=name)
     try:
         res = await agents.security_review(project, cwd)

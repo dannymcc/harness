@@ -3,17 +3,60 @@
 The clone under data/repos/<project> belongs to harness: agents edit it, the
 pipeline resets it. It is never the user's own working copy.
 """
+import asyncio
 import fcntl
 import os
 import re
 import shutil
 import subprocess
+import time
 import venv
-from contextlib import contextmanager
+from contextlib import asynccontextmanager, contextmanager
 from pathlib import Path
 
-from . import config
+from . import config, db
 from .gh import run, CmdError
+
+# How long a wait for the clone lock has to drag on before it is worth an
+# event. Short enough that a stuck holder shows up on the board while it is
+# still stuck, long enough that ordinary contention (an engineer's worktree
+# bookkeeping, a push) never says anything.
+LOCK_WAIT_LOG_SECONDS = 5.0
+
+
+def _say(message: str, level: str, name: str) -> None:
+    try:
+        db.log_event(message, level, project=name)
+    except Exception:   # a note about a wait must never break the wait
+        pass
+
+
+def _take_flock(fh, project) -> None:
+    """Block until the exclusive flock is ours, saying so if it takes a while.
+
+    Polling rather than a bare blocking flock() so a wait that is going
+    nowhere is visible: the holder can be another engineer mid-push or a
+    salvage script attached over docker exec, and in the untimed version
+    every such wait was silent — a stuck holder simply looked like a stuck
+    harness.
+    """
+    name = project["name"]
+    started = time.monotonic()
+    told = False
+    while True:
+        try:
+            fcntl.flock(fh, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            break
+        except BlockingIOError:
+            waited = time.monotonic() - started
+            if not told and waited >= LOCK_WAIT_LOG_SECONDS:
+                told = True
+                _say(f"Waiting on the clone lock for {name} — something else "
+                     f"has held it for {int(waited)}s", "warn", name)
+            time.sleep(0.05)
+    if told:
+        _say(f"Took the clone lock for {name} after "
+             f"{int(time.monotonic() - started)}s", "info", name)
 
 
 @contextmanager
@@ -23,15 +66,42 @@ def clone_lock(project):
     Everything that mutates the checkout (pipeline cycles, salvage or other
     maintenance scripts) must hold this. flock, so it works across docker
     exec sessions, not just threads.
+
+    Blocking, and deliberately so — but that means it must never be entered
+    from the worker's event loop thread, where the wait would freeze every
+    other desk, the attendant and the heartbeat with it. Coroutines take it
+    through clone_lock_async, or through a plain function they hand to
+    asyncio.to_thread.
     """
     config.REPOS_DIR.mkdir(parents=True, exist_ok=True)
     lockfile = config.REPOS_DIR / f".{project['name']}.lock"
     with open(lockfile, "w") as fh:
-        fcntl.flock(fh, fcntl.LOCK_EX)
+        _take_flock(fh, project)
         try:
             yield
         finally:
             fcntl.flock(fh, fcntl.LOCK_UN)
+
+
+@asynccontextmanager
+async def clone_lock_async(project):
+    """clone_lock for a coroutine that must hold it across an await.
+
+    The same flock, with the same scope — only the waiting happens on a
+    worker thread, so the loop keeps running while another process (or
+    another engineer) has the clone. For work that does not span an await,
+    prefer putting the whole locked block in a plain function and calling it
+    through asyncio.to_thread.
+    """
+    cm = clone_lock(project)
+    await asyncio.to_thread(cm.__enter__)
+    try:
+        yield
+    finally:
+        # Cancelled mid-wait, the acquiring thread cannot be interrupted: it
+        # finishes, and the lock is dropped when the context manager it left
+        # behind is collected (its finally unlocks, and the fd closes).
+        await asyncio.to_thread(cm.__exit__, None, None, None)
 
 
 def repo_dir(project) -> Path:

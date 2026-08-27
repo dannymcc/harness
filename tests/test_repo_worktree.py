@@ -306,3 +306,178 @@ def test_the_recovery_ref_survives_a_removed_worktree_directory(project):
 
     assert tip(project, "harness/issue-1-attempt-1") == lost
     assert "harness/issue-1-attempt-1" in note
+
+
+def test_fix_item_does_not_block_the_event_loop_while_the_lock_is_held(
+        project, fresh_db, monkeypatch):
+    """Issue #103: repo.add_worktree is called directly inside the fix_item
+    coroutine (pipeline.py:536), and clone_lock (repo.py:20-33) is an
+    untimed fcntl.flock(LOCK_EX) -- a blocking syscall. If the acquisition
+    happens on the worker's event loop thread, one engineer holding the lock
+    (mid push_worktree_to_dev, or a maintenance script run via docker exec)
+    freezes every other coroutine in the process for as long as it is held:
+    other desks' cycles, the attendant's directive poll and the heartbeat
+    all stop, and nothing is logged -- from the GUI the worker just looks
+    wedged.
+
+    This drives fix_item itself, against a real git clone, so it fails on
+    the current code path (add_worktree's flock() wait blocks the only
+    event-loop thread) and will pass however the fix moves the acquisition
+    off that thread (e.g. asyncio.to_thread).
+
+    The clock starts before the coroutines do: the stall lands on the very
+    first heartbeat tick, so a test that only measured the gaps between
+    ticks it managed to record would sit out the whole freeze and pass on
+    the broken code."""
+    import asyncio
+    import threading
+    import time
+
+    from harness import agents, gh, pipeline, repo
+
+    fresh_db.upsert_item("may", "issue", 91, "t", "a", "open", "x")
+    fresh_db.update_item("may", "issue", 91, status="approved", plan="do it")
+
+    monkeypatch.setattr(gh, "issue_detail",
+                        lambda repo_, number: {"number": 91, "title": "t",
+                                               "body": "b"})
+
+    async def fake_fix_issue(project, issue, plan, cwd, resume=None,
+                             persona="Malcolm", repro_path="",
+                             worktree_note=""):
+        # Never meant to run within the timing window: fix_item's very
+        # first piece of real work is repo.add_worktree, before this await.
+        return {"ok": False, "error": "stub", "output": None}
+
+    monkeypatch.setattr(agents, "fix_issue", fake_fix_issue)
+
+    lock_held = threading.Event()
+    release_at = time.monotonic() + 0.6
+
+    def hold_the_lock_from_another_engineer():
+        # Simulates a second engineer mid push_worktree_to_dev (repo.py:340)
+        # or a salvage script attached via docker exec -- both real,
+        # cross-process holders the docstring names.
+        with repo.clone_lock(project):
+            lock_held.set()
+            while time.monotonic() < release_at:
+                time.sleep(0.01)
+
+    async def run():
+        holder = threading.Thread(target=hold_the_lock_from_another_engineer)
+        holder.start()
+        assert lock_held.wait(2), "background thread never took the lock"
+
+        # The first entry is the starting gun, not a tick: without it the
+        # freeze happens before tick one and leaves no gap to measure.
+        ticks = [time.monotonic()]
+
+        async def heartbeat():
+            # Stands in for db.touch_heartbeat / the _Attendant's directive
+            # poll / another desk's cycle -- anything else the worker
+            # should keep doing while one engineer waits on the lock.
+            for _ in range(16):
+                await asyncio.sleep(0.05)
+                ticks.append(time.monotonic())
+
+        await asyncio.gather(
+            heartbeat(),
+            pipeline.fix_item(project, fresh_db.get_item("may", "issue", 91)),
+        )
+        holder.join()
+        return ticks
+
+    ticks = asyncio.run(run())
+
+    gaps = [b - a for a, b in zip(ticks, ticks[1:])]
+    assert max(gaps) < 0.3, (
+        "the heartbeat stalled for as long as the other engineer held the "
+        "clone lock -- fix_item's repo.add_worktree() call is blocking the "
+        "event loop thread instead of waiting on the flock off-thread "
+        f"(gaps between heartbeat ticks: {gaps})"
+    )
+
+
+def test_a_wait_on_the_clone_lock_is_logged_against_the_project(fresh_db, may,
+                                                                monkeypatch):
+    """A holder that never lets go used to be invisible: the untimed flock
+    said nothing, so a wedged git looked like a wedged harness. A wait worth
+    noticing names the project on the event log."""
+    import threading
+    import time
+
+    from harness import repo
+
+    monkeypatch.setattr(repo, "LOCK_WAIT_LOG_SECONDS", 0.1)
+    holding, done, waiter_in = (threading.Event(), threading.Event(),
+                                threading.Event())
+
+    def holder():
+        with repo.clone_lock(may):
+            holding.set()
+            done.wait(3)
+
+    def waiter():
+        with repo.clone_lock(may):   # blocks until the holder lets go
+            waiter_in.set()
+
+    h = threading.Thread(target=holder)
+    h.start()
+    assert holding.wait(2)
+    w = threading.Thread(target=waiter)
+    w.start()
+
+    started = time.monotonic()
+    while not any("clone lock" in e["message"]
+                  for e in fresh_db.recent_events(project="may")):
+        assert time.monotonic() - started < 3, "the wait was never logged"
+        time.sleep(0.05)
+    warned = [e for e in fresh_db.recent_events(project="may")
+              if "clone lock" in e["message"]]
+    assert any(e["level"] == "warn" and "may" in e["message"] for e in warned)
+
+    done.set()
+    h.join()
+    assert waiter_in.wait(3), "the waiter never got the lock"
+    w.join()
+    assert any("Took the clone lock" in e["message"]
+               for e in fresh_db.recent_events(project="may")), \
+        "a wait that was reported must also report its end"
+
+
+def test_the_async_clone_lock_still_lets_only_one_in(fresh_db, may):
+    """Moving the wait off the loop thread must not widen the door: two
+    coroutines taking the lock still take it in turn, and the loop keeps
+    running while one of them waits."""
+    import asyncio
+    import time
+
+    from harness import repo
+
+    inside, overlapped, ticks = [], [], []
+
+    async def holder(tag):
+        async with repo.clone_lock_async(may):
+            inside.append(tag)
+            if len(inside) > 1:
+                overlapped.append(tuple(inside))
+            await asyncio.sleep(0.3)
+            inside.remove(tag)
+
+    async def heartbeat():
+        for _ in range(8):
+            await asyncio.sleep(0.05)
+            ticks.append(time.monotonic())
+
+    async def run():
+        start = time.monotonic()
+        await asyncio.gather(holder("a"), holder("b"), heartbeat())
+        return time.monotonic() - start
+
+    ticks.append(time.monotonic())
+    elapsed = asyncio.run(run())
+
+    assert not overlapped, "both coroutines held the clone lock at once"
+    assert elapsed >= 0.6, "the two holds did not serialise"
+    gaps = [b - a for a, b in zip(ticks, ticks[1:])]
+    assert max(gaps) < 0.2, f"the loop stalled while waiting: {gaps}"
