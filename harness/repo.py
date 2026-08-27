@@ -8,14 +8,13 @@ import fcntl
 import os
 import re
 import shutil
-import subprocess
 import time
 import venv
 from contextlib import asynccontextmanager, contextmanager
 from pathlib import Path
 
 from . import config, db
-from .gh import run, CmdError
+from .gh import run, CmdError, CmdTimeout
 
 # How long a wait for the clone lock has to drag on before it is worth an
 # event. Short enough that a stuck holder shows up on the board while it is
@@ -168,8 +167,7 @@ def dev_ahead_count(project) -> int:
                    f"origin/{project['main_branch']}..origin/{project['dev_branch']}"],
                   cwd=repo_dir(project), timeout=15)
         return int(out.strip() or 0)
-    except (CmdError, ValueError, OSError,
-            subprocess.TimeoutExpired):
+    except (CmdError, ValueError, OSError):
         return 0
 
 
@@ -218,7 +216,7 @@ def _preserve_previous_attempt(project, d: Path, branch: str,
             run(["git", "commit", "-m",
                  f"wip: uncommitted work from an earlier attempt on {branch}"],
                 cwd=wt)
-        except (CmdError, OSError, subprocess.TimeoutExpired) as e:
+        except (CmdError, OSError) as e:
             note = ("Uncommitted changes in the previous worktree could not "
                     f"be committed ({str(e)[:200]}) and went with it. ")
     tip = _ref_tip(d, f"refs/heads/{branch}")
@@ -371,7 +369,7 @@ def _park_on_branch(project, wt: Path, branch: str, reason: str,
             run(["git", "push", "--force", "origin",
                  f"HEAD:refs/heads/{branch}"], cwd=wt)
         where = f"pushed to origin/{branch} for a human to pick up"
-    except (CmdError, OSError, subprocess.TimeoutExpired) as e:
+    except (CmdError, OSError) as e:
         where = (f"{SAFETY_PUSH_FAILED} ({str(e)[:200]}) — the fix exists "
                  "only in the worktree on this box")
     return f"{reason} — {where}" + (f":\n{detail}" if detail else "")
@@ -396,7 +394,7 @@ def _abort_rebase(wt: Path) -> None:
     handler that is already reporting the first hang."""
     try:
         run(["git", "rebase", "--abort"], cwd=wt, check=False)
-    except (CmdError, OSError, subprocess.TimeoutExpired):
+    except (CmdError, OSError):
         pass
 
 
@@ -410,32 +408,34 @@ def push_worktree_to_dev(project, wt: Path,
 
     Every path that gives up parks the commit on origin/<branch> first (see
     _park_on_branch); the returned error names where it went. That includes
-    a git that hangs rather than fails: TimeoutExpired is not a CmdError, so
-    left uncaught it would take the cycle down with the commit still only in
-    the worktree on this box (#102, #108)."""
+    a git that hangs rather than fails, which parks with the hang named as a
+    hang — left to the general handler it would read as a rejected push
+    (#102, #108, #110). Each CmdTimeout clause below therefore has to stay
+    ordered before the CmdError one it sits with: CmdTimeout is a CmdError,
+    so the general clause would otherwise swallow it."""
     dev = project["dev_branch"]
     for _ in range(3):
         try:
             run(["git", "fetch", "origin"], cwd=wt)
             behind = run(["git", "rev-list", "--count",
                           f"HEAD..origin/{dev}"], cwd=wt).strip()
-        except subprocess.TimeoutExpired as e:
+        except CmdTimeout as e:
             return False, _park_on_branch(
                 project, wt, branch,
                 *_hang(e, f"checking whether {dev} had moved"))
         if behind != "0":
             try:
                 run(["git", "rebase", f"origin/{dev}"], cwd=wt)
+            except CmdTimeout as e:      # before CmdError: it is one
+                _abort_rebase(wt)
+                return False, _park_on_branch(
+                    project, wt, branch,
+                    *_hang(e, f"the rebase onto moved {dev}"))
             except CmdError:
                 _abort_rebase(wt)
                 return False, _park_on_branch(
                     project, wt, branch,
                     f"rebase onto moved {dev} conflicted")
-            except subprocess.TimeoutExpired as e:
-                _abort_rebase(wt)
-                return False, _park_on_branch(
-                    project, wt, branch,
-                    *_hang(e, f"the rebase onto moved {dev}"))
             ok, out = run_tests(project, cwd=wt, setup=False)
             if not ok:
                 return False, _park_on_branch(
@@ -446,7 +446,7 @@ def push_worktree_to_dev(project, wt: Path,
             with clone_lock(project):
                 run(["git", "push", "origin", f"HEAD:{dev}"], cwd=wt)
             return True, ""
-        except subprocess.TimeoutExpired as e:
+        except CmdTimeout as e:          # before CmdError: it is one
             # Not a rejection: going around again would only hang again, and
             # a push that never answered may or may not have landed.
             return False, _park_on_branch(
@@ -563,7 +563,7 @@ def ensure_test_env(project) -> None:
         try:
             run(["bash", "-c", f'PATH="{py.parent}:$PATH" {setup_cmd}'],
                 cwd=d, timeout=1200, check=False, env=_sandbox_env(project))
-        except subprocess.TimeoutExpired:
+        except CmdTimeout:
             # check=False already forgives a failed setup; a hung one is no
             # worse. The test runs that follow report the real damage.
             pass
@@ -620,10 +620,12 @@ def run_tests(project, cwd: Path | None = None, setup: bool = True,
         outputs.append(out)
         tail = "\n".join(outputs)[-8000:]
         return True, tail
-    except (CmdError, subprocess.TimeoutExpired) as e:
+    except CmdError as e:
         # A hung suite is a failed suite, not a crashed cycle: every caller
         # (review, release, merge) reads the verdict, and an exception here
-        # takes the whole cycle down instead. See #102.
+        # takes the whole cycle down instead. See #102. A hang arrives here
+        # as CmdTimeout (a CmdError), and stays distinguishable from an
+        # ordinary failure in the output _failure_output builds below.
         full, footer = _failure_output(e)
         # Surface the pytest verdict first: a FAILED line must never be
         # buried under thousands of deprecation warnings.
@@ -638,24 +640,17 @@ def run_tests(project, cwd: Path | None = None, setup: bool = True,
 def _failure_output(e) -> tuple[str, str]:
     """(combined output, footer) for a failed or timed-out command.
 
-    CmdError carries .out/.err; TimeoutExpired carries .output/.stderr —
-    bytes or str, depending on how the command was run — plus the limit it
-    blew. The footer names that limit, and goes last because every caller
-    reads this tail from the end: a note at the top would be the first thing
-    trimmed, and a partial run would then read as a plain failure.
+    Both carry .out/.err; a CmdTimeout also carries the limit it blew, and
+    has to be tested for first because it is a CmdError. The footer names
+    that limit, and goes last because every caller reads this tail from the
+    end: a note at the top would be the first thing trimmed, and a partial
+    run would then read as a plain failure.
     """
-    if isinstance(e, CmdError):
-        return (e.out or "") + "\n" + (e.err or ""), ""
-    parts = [_as_text(e.output), _as_text(e.stderr)]
-    return ("\n".join(p for p in parts if p),
-            f"\n--- the command timed out after {e.timeout}s; any output "
-            "above is partial ---")
-
-
-def _as_text(out) -> str:
-    if out is None:
-        return ""
-    return out.decode("utf-8", "replace") if isinstance(out, bytes) else str(out)
+    combined = (e.out or "") + "\n" + (e.err or "")
+    if isinstance(e, CmdTimeout):
+        return combined, (f"\n--- the command timed out after {e.timeout}s; "
+                          "any output above is partial ---")
+    return combined, ""
 
 
 # --- version ----------------------------------------------------------------

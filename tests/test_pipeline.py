@@ -452,13 +452,12 @@ def test_refused_merge_puts_the_reason_on_the_release(fresh_db, may,
 
 def test_a_hung_release_merge_comes_back_to_proposed_too(fresh_db, may,
                                                          monkeypatch):
-    """A `gh pr merge` that never answers is not a CmdError, so before #108
-    it went straight out of finalize_release — and web.app runs that on a
-    bare thread, so nothing was logged and the release sat at 'merging',
-    button-less, until the restart sweep. It must come back to 'proposed'
-    with the hang named as a hang, exactly like a refused merge. The tag
-    push and the release publish below it get the same treatment."""
-    import subprocess
+    """A `gh pr merge` that never answers used to go straight out of
+    finalize_release — and web.app runs that on a bare thread, so nothing
+    was logged and the release sat at 'merging', button-less, until the
+    restart sweep. It must come back to 'proposed' with the hang named as a
+    hang, exactly like a refused merge. The tag push and the release publish
+    below it get the same treatment."""
     from harness import gh, notify, pipeline, repo
 
     class _NoLock:
@@ -470,8 +469,7 @@ def test_a_hung_release_merge_comes_back_to_proposed_too(fresh_db, may,
     monkeypatch.setattr(repo, "clean_checkout", lambda project, branch: "/tmp")
 
     def _hangs(*a, **k):
-        raise subprocess.TimeoutExpired(cmd=["gh", "pr", "merge", "13"],
-                                        timeout=600)
+        raise gh.CmdTimeout(["gh", "pr", "merge", "13"], 600)
 
     monkeypatch.setattr(gh, "merge_pr", _hangs)
     rid = fresh_db.create_release("may", "3.1.0", "notes", [])
@@ -1098,13 +1096,12 @@ def test_a_hung_contributor_suite_is_a_failed_review_not_a_crashed_cycle(
         fresh_db, may, monkeypatch):
     """A PR whose suite hangs must end somewhere a human can see it.
 
-    Before #102 the TimeoutExpired came out of run_pr_tests, through
-    review_item and out of the cycle: the item stayed 'new', so the next
-    cycle reviewed it again — half an hour a go, forever, with no run
-    record for the breaker to count and no answer for the contributor.
+    Before #102 the hang came out of run_pr_tests, through review_item and
+    out of the cycle: the item stayed 'new', so the next cycle reviewed it
+    again — half an hour a go, forever, with no run record for the breaker
+    to count and no answer for the contributor.
     """
     import asyncio
-    import subprocess
     import sys
     from pathlib import Path
     from harness import agents, gh, pipeline, repo
@@ -1118,8 +1115,7 @@ def test_a_hung_contributor_suite_is_a_failed_review_not_a_crashed_cycle(
                         lambda project, vdir=None: Path(sys.executable))
 
     def _hangs(cmd, cwd=None, check=True, timeout=600, env=None):
-        raise subprocess.TimeoutExpired(cmd=cmd, timeout=timeout,
-                                        output="collected 400 items\n")
+        raise gh.CmdTimeout(cmd, timeout, out="collected 400 items\n")
     monkeypatch.setattr(repo, "run", _hangs)
 
     seen = {}
@@ -1150,7 +1146,6 @@ def test_a_hung_pr_checkout_parks_the_pr_rather_than_the_cycle(fresh_db, may,
     """Same for the checkout before it: a hung git is ours, not the
     contributor's, so it parks without a rebase request in their name."""
     import asyncio
-    import subprocess
     from harness import agents, gh, pipeline, repo
 
     monkeypatch.setattr(gh, "pr_detail",
@@ -1158,7 +1153,7 @@ def test_a_hung_pr_checkout_parks_the_pr_rather_than_the_cycle(fresh_db, may,
     monkeypatch.setattr(repo, "remove_pr_run", lambda p, n: None)
 
     def _hangs(project, number, branch):
-        raise subprocess.TimeoutExpired(cmd=["git", "fetch"], timeout=600)
+        raise gh.CmdTimeout(["git", "fetch"], 600)
     monkeypatch.setattr(repo, "fetch_pr_branch", _hangs)
 
     async def _no_review(*a, **k):
@@ -1498,13 +1493,12 @@ def test_a_stranded_fix_gets_its_own_warn_event(fresh_db, may, monkeypatch,
 def test_a_hung_push_parks_the_fix_and_leaves_the_item_approved(
         fresh_db, may, monkeypatch, tmp_path):
     """A `git push` that hangs rather than fails used to come out of
-    push_worktree_to_dev as a TimeoutExpired — past the `if not landed:`
-    branch and out of the cycle, leaving the item at 'working' and a tested
-    commit alone in a worktree on this box with nobody told (#108). It has
-    to park on origin/<branch> and report the hang like any other failure to
-    land, so the item goes back to 'approved' and the cycle carries on."""
+    push_worktree_to_dev unhandled — past the `if not landed:` branch and
+    out of the cycle, leaving the item at 'working' and a tested commit
+    alone in a worktree on this box with nobody told (#108). It has to park
+    on origin/<branch> and report the hang like any other failure to land,
+    so the item goes back to 'approved' and the cycle carries on."""
     import asyncio
-    import subprocess
     from harness import agents, gh, pipeline, repo
 
     fresh_db.upsert_item("may", "issue", 65, "hangs on push", "a", "open", "x")
@@ -1521,8 +1515,7 @@ def test_a_hung_push_parks_the_fix_and_leaves_the_item_approved(
             if "--force" in cmd:        # the safety push; this one answers
                 pushed.append(cmd[-1])
                 return ""
-            raise subprocess.TimeoutExpired(cmd=cmd, timeout=timeout,
-                                            output="Enumerating objects\n")
+            raise gh.CmdTimeout(cmd, timeout, out="Enumerating objects\n")
         if "rev-list" in cmd:
             return "0\n"                # dev has not moved
         return ""
@@ -1576,7 +1569,6 @@ def test_a_hung_pr_merge_blocks_the_pr_rather_than_the_cycle(fresh_db, may,
     """`gh pr merge` hanging leaves the merge in an unknown state. Block the
     item for a human, saying it hung, instead of raising into the cycle."""
     import asyncio
-    import subprocess
     from harness import gh, pipeline, repo
 
     fresh_db.upsert_item("may", "pr", 43, "A contribution", "outsider",
@@ -1596,8 +1588,7 @@ def test_a_hung_pr_merge_blocks_the_pr_rather_than_the_cycle(fresh_db, may,
         "isDraft": False, "baseRefName": "dev"})
 
     def _hangs(repo_, number, **kw):
-        raise subprocess.TimeoutExpired(cmd=["gh", "pr", "merge", str(number)],
-                                        timeout=600)
+        raise gh.CmdTimeout(["gh", "pr", "merge", str(number)], 600)
 
     monkeypatch.setattr(gh, "merge_pr", _hangs)
     asyncio.run(pipeline.merge_pr_item(may, fresh_db.get_item("may", "pr", 43)))

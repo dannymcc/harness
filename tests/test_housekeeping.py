@@ -99,6 +99,35 @@ def test_the_skip_is_visible_in_the_summary(fresh_db, may, old_worktree):
     assert "1 stale worktrees kept (in play)" in summary
 
 
+def test_the_worktree_prune_cannot_block_forever(fresh_db, may, old_worktree,
+                                                 monkeypatch):
+    """`git worktree prune` used to run with no timeout at all, so a wedged
+    git in one clone held the hourly sweep open indefinitely (#110). It goes
+    through gh.run now: bounded, and a hang comes back as CmdTimeout for the
+    sweep to note and carry on past."""
+    import subprocess
+    from harness import config, housekeeping
+
+    (config.REPOS_DIR / "may" / ".git").mkdir(parents=True)
+    wt = old_worktree("harness/issue-6")
+    seen = {}
+
+    def _wedged(cmd, cwd=None, capture_output=True, text=True, timeout=600,
+                env=None):
+        seen["timeout"] = timeout
+        raise subprocess.TimeoutExpired(cmd=cmd, timeout=timeout)
+
+    monkeypatch.setattr(subprocess, "run", _wedged)
+
+    summary = housekeeping.prune()      # must not raise, must not hang
+
+    assert seen["timeout"] and seen["timeout"] <= 300
+    assert not wt.exists()              # the rest of the sweep still ran
+    assert "1 stale worktrees removed" in summary
+    assert any("worktree prune did not finish" in e["message"]
+               for e in fresh_db.recent_events(20, "may"))
+
+
 def test_a_released_items_worktree_is_pruned_too(fresh_db, may, old_worktree):
     """Terminal-status items (released/closed/rejected) are done for good;
     their worktrees are not protected from the sweep."""

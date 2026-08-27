@@ -7,12 +7,11 @@ merged — an IC claiming success is never taken on trust.
 """
 import asyncio
 import json
-import subprocess
 from datetime import datetime, timezone
 
 from . import agents, config, db, gh, repo, notify
 from .agents import AgentStalled
-from .gh import CmdError
+from .gh import CmdError, CmdTimeout
 
 MAX_AGENT_TASKS_PER_CYCLE = 5
 # Per desk: how many lead-filed tracking issues may sit open and unworked
@@ -747,7 +746,7 @@ async def review_item(project, item) -> None:
         cwd = str(await asyncio.to_thread(repo.fetch_pr_branch, project,
                                           item["number"], branch))
         # (lock held by caller for the whole review below)
-    except subprocess.TimeoutExpired as e:
+    except CmdTimeout as e:     # before CmdError below: it is one
         # Nothing to tell the contributor — the checkout hung on our side.
         # Park it for a human rather than crash the cycle and review it
         # again, and again, on every poll (#102).
@@ -851,11 +850,11 @@ async def _pr_merges_clean_and_passes(project, item) -> bool:
         # is held over exactly what it was before and the loop waits for
         # neither (#103).
         passed, out = await asyncio.to_thread(_locked_pr_check, project, number)
-    except (CmdError, subprocess.TimeoutExpired) as e:
+    except CmdError as e:
         # A hung git is not a dirty merge — say which it was, and block
         # either way rather than take the cycle down with us (#102).
         reason = (f"timed out preparing the merge check: {e}"
-                  if isinstance(e, subprocess.TimeoutExpired) else
+                  if isinstance(e, CmdTimeout) else
                   f"does not merge cleanly onto {project['dev_branch']}: {e}")
         db.update_item(name, "pr", number, status="blocked",
                        error=reason[:2000])
@@ -888,12 +887,12 @@ async def merge_pr_item(project, item, validate: bool = True) -> None:
         if detail.get("baseRefName") != project["dev_branch"]:
             gh.retarget_pr(project["repo"], item["number"], project["dev_branch"])
         gh.merge_pr(project["repo"], item["number"])
-    except (CmdError, subprocess.TimeoutExpired) as e:
+    except CmdError as e:
         # A gh that never answered leaves the merge in an unknown state —
         # block it for a human either way rather than raise into the cycle,
         # and name the hang so nobody reads it as a refused merge (#108).
         reason = (f"timed out: {e}"
-                  if isinstance(e, subprocess.TimeoutExpired) else
+                  if isinstance(e, CmdTimeout) else
                   f"failed: {e}")
         db.update_item(name, "pr", item["number"], status="blocked",
                        error=f"merge {reason}"[:2000])
@@ -1088,11 +1087,11 @@ async def _propose_release_locked(project, queued) -> int | None:
         pr_number = gh.create_pr(
             project["repo"], project["main_branch"], project["dev_branch"],
             f"Release v{version}", out["notes_markdown"])
-    except (CmdError, subprocess.TimeoutExpired) as e:
+    except CmdError as e:
         # A hung `gh pr create` is a release that did not get proposed, not a
         # cycle that should die: log which it was and leave the changes
         # queued for the next attempt (#108).
-        why = (f"timed out: {e}" if isinstance(e, subprocess.TimeoutExpired)
+        why = (f"timed out: {e}" if isinstance(e, CmdTimeout)
                else f"failed: {e}")
         db.log_event(f"Release PR creation {why}", "warn", project=name)
         return
@@ -1120,13 +1119,13 @@ def finalize_release(project, release) -> None:
             gh.run(["git", "tag", "-a", f"v{version}", "-m", f"Release v{version}"],
                    cwd=d)
             gh.run(["git", "push", "origin", f"v{version}"], cwd=d)
-    except (CmdError, subprocess.TimeoutExpired) as e:
+    except CmdError as e:
         # Back to proposed with the reason attached: left at 'merging' the
         # card shows "reload for the result" forever, with no button and no
         # cause, until a restart sweeps it up. A hung merge, tag or push
         # lands in exactly that state — worse, web.app runs this on a bare
         # thread, so the exception would go nowhere at all (#108).
-        why = (f"timed out: {e}" if isinstance(e, subprocess.TimeoutExpired)
+        why = (f"timed out: {e}" if isinstance(e, CmdTimeout)
                else str(e))
         db.update_release(release["id"], status="proposed", error=why[:2000])
         db.log_event(f"Release v{version} failed: {why}", "error", project=name)
@@ -1134,10 +1133,10 @@ def finalize_release(project, release) -> None:
     try:
         gh.publish_release(project["repo"], f"v{version}", f"v{version}",
                            release["notes"])
-    except (CmdError, subprocess.TimeoutExpired) as e:
+    except CmdError as e:
         # The tag is pushed either way, so the release is real: say what
         # happened and carry on rather than undo a shipped version.
-        what = ("timed out" if isinstance(e, subprocess.TimeoutExpired)
+        what = ("timed out" if isinstance(e, CmdTimeout)
                 else "failed")
         db.log_event(f"Tag pushed but GitHub release publish {what}: {e}",
                      "warn", project=name)
@@ -1152,7 +1151,7 @@ def finalize_release(project, release) -> None:
                 try:
                     gh.close_issue(project["repo"], int(number),
                                    f"Fixed in v{version}.")
-                except (CmdError, subprocess.TimeoutExpired):
+                except CmdError:
                     # Cosmetic: the fix shipped whether or not the issue
                     # closed, and the next poll reconciles gh_state.
                     pass
@@ -1525,7 +1524,7 @@ def _reconcile_branches(project) -> None:
     try:
         with repo.clone_lock(project):
             state = repo.reconcile_dev(project)
-    except (CmdError, subprocess.TimeoutExpired) as e:
+    except CmdError as e:
         state = f"failed: {str(e)[:150]}"
     # Warn on a change of state, not every cycle (cycles can be a minute apart).
     key = f"branch_state.{name}"
@@ -1585,6 +1584,9 @@ def _open_tracking_issues(project, new_issues) -> None:
         try:
             num = gh.create_issue(project["repo"], title, body)
         except CmdError as e:
+            # Covers a hung `gh issue create` too (CmdTimeout is a CmdError):
+            # one filing that never answered must not abandon the rest of the
+            # cycle's work through worker.py's broad handler (#110).
             db.log_event(f"Could not open tracking issue '{title[:60]}': "
                          f"{str(e)[:120]}", "warn", project=name)
             continue
@@ -2192,6 +2194,7 @@ def close_item(project, kind: str, number: int, reason: str = "") -> bool:
         except CmdError as e:
             # Local status still moves — the item must leave the queues
             # either way — but the operator needs to know GitHub didn't take.
+            # A close that hung arrives here as CmdTimeout, a CmdError (#110).
             db.log_event(f"Closed {kind}#{number} on the board but the "
                          f"GitHub close failed: {e}", "warn", project=name)
     db.update_item(name, kind, number, **fields)
