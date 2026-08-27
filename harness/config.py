@@ -12,7 +12,7 @@ from pathlib import Path
 # The single source of truth for the number: the release process bumps this
 # line (version file `harness/config.py`, pattern `VERSION\s*=\s*"..."`) and
 # tags the commit. Don't edit it by hand.
-VERSION = "0.24.2"
+VERSION = "0.25.0"
 
 _SHA_RE = re.compile(r"^[0-9a-f]{7,40}$")
 _STAMP_FILE = Path(__file__).resolve().parent / "_build_sha"
