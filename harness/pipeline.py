@@ -7,6 +7,7 @@ merged — an IC claiming success is never taken on trust.
 """
 import asyncio
 import json
+import subprocess
 from datetime import datetime, timezone
 
 from . import agents, config, db, gh, repo, notify
@@ -728,6 +729,17 @@ async def review_item(project, item) -> None:
     try:
         cwd = str(repo.fetch_pr_branch(project, item["number"], branch))
         # (lock held by caller for the whole review below)
+    except subprocess.TimeoutExpired as e:
+        # Nothing to tell the contributor — the checkout hung on our side.
+        # Park it for a human rather than crash the cycle and review it
+        # again, and again, on every poll (#102).
+        repo.remove_pr_run(project, item["number"])
+        db.update_item(
+            name, "pr", item["number"], status="waiting_human",
+            verdict_summary=f"checking out the PR timed out: {e}"[:2000])
+        db.log_event(f"PR #{item['number']} not reviewed: the checkout timed "
+                     "out", "warn", project=name)
+        return
     except CmdError:
         repo.remove_pr_run(project, item["number"])
         db.update_item(
@@ -809,12 +821,15 @@ async def _pr_merges_clean_and_passes(project, item) -> bool:
             repo.fetch_pr_branch(project, number, f"harness/pr-{number}")
             passed, out = await asyncio.to_thread(repo.run_pr_tests, project,
                                                   number)
-    except CmdError as e:
+    except (CmdError, subprocess.TimeoutExpired) as e:
+        # A hung git is not a dirty merge — say which it was, and block
+        # either way rather than take the cycle down with us (#102).
+        reason = (f"timed out preparing the merge check: {e}"
+                  if isinstance(e, subprocess.TimeoutExpired) else
+                  f"does not merge cleanly onto {project['dev_branch']}: {e}")
         db.update_item(name, "pr", number, status="blocked",
-                       error=f"does not merge cleanly onto "
-                             f"{project['dev_branch']}: {e}"[:2000])
-        db.log_event(f"PR #{number} does not merge cleanly onto "
-                     f"{project['dev_branch']}", "warn", project=name)
+                       error=reason[:2000])
+        db.log_event(f"PR #{number} {reason[:200]}", "warn", project=name)
         return False
     finally:
         repo.remove_pr_run(project, number)
@@ -1427,7 +1442,6 @@ def work_ready(project) -> bool:
 
 def _reconcile_branches(project) -> None:
     """Fast-forward a stale dev to main before anyone branches from it."""
-    import subprocess
     name = project["name"]
     try:
         with repo.clone_lock(project):

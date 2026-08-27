@@ -75,6 +75,41 @@ def test_a_normal_run_still_passes_and_reports_output(project):
     assert not passed and "1 failed" in out
 
 
+def test_a_hung_test_command_returns_a_failure_not_a_crash(project, monkeypatch):
+    """subprocess.TimeoutExpired is not a CmdError. run_tests must catch it
+    too, or a hung project suite escapes as an unhandled exception instead of
+    the (False, tail) verdict every caller (review, release, merge) relies on
+    — see #102. The partial output the timeout carries should end up in the
+    tail, and the tail should say plainly that it was a timeout."""
+    from harness import repo
+
+    def _timeout(cmd, cwd=None, check=True, timeout=600, env=None):
+        raise subprocess.TimeoutExpired(cmd=cmd, timeout=timeout,
+                                        output="partial output before it hung\n")
+
+    monkeypatch.setattr(repo, "run", _timeout)
+    project["test_command"] = "this is never actually run — run() is stubbed"
+    passed, out = repo.run_tests(project, setup=False)
+    assert passed is False
+    assert "timeout" in out.lower() or "timed out" in out.lower()
+    assert "partial output before it hung" in out
+
+
+def test_a_hung_setup_command_is_swallowed_like_a_failed_one(project,
+                                                             monkeypatch):
+    """ensure_test_env already runs setup with check=False: a setup that
+    fails is not worth stopping the fix wave for, and one that hangs is no
+    different. The test runs that follow report the real damage."""
+    from harness import repo
+
+    def _timeout(cmd, cwd=None, check=True, timeout=600, env=None):
+        raise subprocess.TimeoutExpired(cmd=cmd, timeout=timeout)
+
+    monkeypatch.setattr(repo, "run", _timeout)
+    project["setup_command"] = "this is never actually run — run() is stubbed"
+    repo.ensure_test_env(project)      # must not raise
+
+
 # --- the throwaway PR checkout ----------------------------------------------
 
 @pytest.fixture(autouse=True)

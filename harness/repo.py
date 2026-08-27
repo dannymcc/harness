@@ -449,8 +449,13 @@ def ensure_test_env(project) -> None:
     if not setup_cmd and (d / "requirements.txt").exists():
         setup_cmd = f"{py} -m pip install -q -r requirements.txt"
     if setup_cmd:
-        run(["bash", "-c", f'PATH="{py.parent}:$PATH" {setup_cmd}'],
-            cwd=d, timeout=1200, check=False, env=_sandbox_env(project))
+        try:
+            run(["bash", "-c", f'PATH="{py.parent}:$PATH" {setup_cmd}'],
+                cwd=d, timeout=1200, check=False, env=_sandbox_env(project))
+        except subprocess.TimeoutExpired:
+            # check=False already forgives a failed setup; a hung one is no
+            # worse. The test runs that follow report the real damage.
+            pass
 
 
 
@@ -504,8 +509,11 @@ def run_tests(project, cwd: Path | None = None, setup: bool = True,
         outputs.append(out)
         tail = "\n".join(outputs)[-8000:]
         return True, tail
-    except CmdError as e:
-        full = (e.out or "") + "\n" + (e.err or "")
+    except (CmdError, subprocess.TimeoutExpired) as e:
+        # A hung suite is a failed suite, not a crashed cycle: every caller
+        # (review, release, merge) reads the verdict, and an exception here
+        # takes the whole cycle down instead. See #102.
+        full, footer = _failure_output(e)
         # Surface the pytest verdict first: a FAILED line must never be
         # buried under thousands of deprecation warnings.
         marker = full.rfind("short test summary info")
@@ -513,7 +521,30 @@ def run_tests(project, cwd: Path | None = None, setup: bool = True,
             tail = full[marker:][:3000] + "\n---\n" + full[-3000:]
         else:
             tail = full[-8000:]
-        return False, tail
+        return False, tail + footer
+
+
+def _failure_output(e) -> tuple[str, str]:
+    """(combined output, footer) for a failed or timed-out command.
+
+    CmdError carries .out/.err; TimeoutExpired carries .output/.stderr —
+    bytes or str, depending on how the command was run — plus the limit it
+    blew. The footer names that limit, and goes last because every caller
+    reads this tail from the end: a note at the top would be the first thing
+    trimmed, and a partial run would then read as a plain failure.
+    """
+    if isinstance(e, CmdError):
+        return (e.out or "") + "\n" + (e.err or ""), ""
+    parts = [_as_text(e.output), _as_text(e.stderr)]
+    return ("\n".join(p for p in parts if p),
+            f"\n--- the command timed out after {e.timeout}s; any output "
+            "above is partial ---")
+
+
+def _as_text(out) -> str:
+    if out is None:
+        return ""
+    return out.decode("utf-8", "replace") if isinstance(out, bytes) else str(out)
 
 
 # --- version ----------------------------------------------------------------

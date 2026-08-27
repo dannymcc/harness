@@ -1046,6 +1046,85 @@ def test_draft_pr_is_never_merged(fresh_db, may, monkeypatch):
     assert fresh_db.get_item("may", "pr", 10)["status"] == "waiting_human"
 
 
+def test_a_hung_contributor_suite_is_a_failed_review_not_a_crashed_cycle(
+        fresh_db, may, monkeypatch):
+    """A PR whose suite hangs must end somewhere a human can see it.
+
+    Before #102 the TimeoutExpired came out of run_pr_tests, through
+    review_item and out of the cycle: the item stayed 'new', so the next
+    cycle reviewed it again — half an hour a go, forever, with no run
+    record for the breaker to count and no answer for the contributor.
+    """
+    import asyncio
+    import subprocess
+    import sys
+    from pathlib import Path
+    from harness import agents, gh, pipeline, repo
+
+    monkeypatch.setattr(gh, "pr_detail",
+                        lambda repo_, n: {"isDraft": False, "number": n})
+    monkeypatch.setattr(gh, "pr_diff", lambda repo_, n: "diff")
+    monkeypatch.setattr(repo, "fetch_pr_branch", lambda p, n, b: "/tmp")
+    monkeypatch.setattr(repo, "remove_pr_run", lambda p, n: None)
+    monkeypatch.setattr(repo, "_venv_python",
+                        lambda project, vdir=None: Path(sys.executable))
+
+    def _hangs(cmd, cwd=None, check=True, timeout=600, env=None):
+        raise subprocess.TimeoutExpired(cmd=cmd, timeout=timeout,
+                                        output="collected 400 items\n")
+    monkeypatch.setattr(repo, "run", _hangs)
+
+    seen = {}
+
+    async def fake_review(project, detail, diff, tests, cwd):
+        seen["tests"] = tests
+        return {"ok": True, "error": "", "output": {
+            "verdict": "needs_work", "valuable": True,
+            "summary": "the suite never finished", "risks": "",
+            "draft_review": ""}}
+    monkeypatch.setattr(agents, "review_pr", fake_review)
+    monkeypatch.setattr(pipeline.notify, "send", lambda *a, **k: None)
+
+    fresh_db.upsert_item("may", "pr", 41, "a pr", "outsider", "open", "x")
+    asyncio.run(pipeline.review_item(may, fresh_db.get_item("may", "pr", 41)))
+
+    # Ruth was told the suite failed, and why.
+    assert seen["tests"].startswith("FAILED")
+    assert "timed out after 1800s" in seen["tests"]
+    assert "collected 400 items" in seen["tests"]
+    after = fresh_db.get_item("may", "pr", 41)
+    assert after["verdict"] == "needs_work"
+    assert after["status"] in ("held", "waiting_human")   # not back on 'new'
+
+
+def test_a_hung_pr_checkout_parks_the_pr_rather_than_the_cycle(fresh_db, may,
+                                                               monkeypatch):
+    """Same for the checkout before it: a hung git is ours, not the
+    contributor's, so it parks without a rebase request in their name."""
+    import asyncio
+    import subprocess
+    from harness import agents, gh, pipeline, repo
+
+    monkeypatch.setattr(gh, "pr_detail",
+                        lambda repo_, n: {"isDraft": False, "number": n})
+    monkeypatch.setattr(repo, "remove_pr_run", lambda p, n: None)
+
+    def _hangs(project, number, branch):
+        raise subprocess.TimeoutExpired(cmd=["git", "fetch"], timeout=600)
+    monkeypatch.setattr(repo, "fetch_pr_branch", _hangs)
+
+    async def _no_review(*a, **k):
+        raise AssertionError("reviewed a PR that was never checked out")
+    monkeypatch.setattr(agents, "review_pr", _no_review)
+
+    fresh_db.upsert_item("may", "pr", 42, "a pr", "outsider", "open", "x")
+    asyncio.run(pipeline.review_item(may, fresh_db.get_item("may", "pr", 42)))
+    after = fresh_db.get_item("may", "pr", 42)
+    assert after["status"] == "waiting_human"
+    assert "timed out" in after["verdict_summary"]
+    assert not after["draft_comment"]
+
+
 def test_lead_plans_only_when_the_backlog_changes(fresh_db, may):
     """Retries, restart requeues and failed attempts bump updated_at on
     approved items; none of that needs the lead. New approved items do."""
