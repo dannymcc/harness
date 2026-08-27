@@ -76,16 +76,18 @@ def test_a_normal_run_still_passes_and_reports_output(project):
 
 
 def test_a_hung_test_command_returns_a_failure_not_a_crash(project, monkeypatch):
-    """subprocess.TimeoutExpired is not a CmdError. run_tests must catch it
-    too, or a hung project suite escapes as an unhandled exception instead of
-    the (False, tail) verdict every caller (review, release, merge) relies on
-    — see #102. The partial output the timeout carries should end up in the
-    tail, and the tail should say plainly that it was a timeout."""
+    """A hung command comes out of gh.run as CmdTimeout, a CmdError, so
+    run_tests catches it with everything else — but the verdict must stay a
+    (False, tail) verdict every caller (review, release, merge) relies on,
+    not an unhandled exception (#102), and the tail must still read as a
+    hang rather than an ordinary failure (#110). The partial output the
+    timeout carries should end up in the tail too."""
     from harness import repo
+    from harness.gh import CmdTimeout
 
     def _timeout(cmd, cwd=None, check=True, timeout=600, env=None):
-        raise subprocess.TimeoutExpired(cmd=cmd, timeout=timeout,
-                                        output="partial output before it hung\n")
+        raise CmdTimeout(cmd, timeout,
+                         out="partial output before it hung\n")
 
     monkeypatch.setattr(repo, "run", _timeout)
     project["test_command"] = "this is never actually run — run() is stubbed"
@@ -101,9 +103,10 @@ def test_a_hung_setup_command_is_swallowed_like_a_failed_one(project,
     fails is not worth stopping the fix wave for, and one that hangs is no
     different. The test runs that follow report the real damage."""
     from harness import repo
+    from harness.gh import CmdTimeout
 
     def _timeout(cmd, cwd=None, check=True, timeout=600, env=None):
-        raise subprocess.TimeoutExpired(cmd=cmd, timeout=timeout)
+        raise CmdTimeout(cmd, timeout)
 
     monkeypatch.setattr(repo, "run", _timeout)
     project["setup_command"] = "this is never actually run — run() is stubbed"
@@ -268,13 +271,15 @@ def test_a_failed_safety_push_is_reported_as_such(project, origin, tmp_path):
 
 def test_a_hung_push_parks_the_fix_like_a_failed_one(project, origin,
                                                      tmp_path, monkeypatch):
-    """A git that hangs is not a CmdError, so before #108 it came out of
-    push_worktree_to_dev instead of parking the commit — the item stayed
-    'working', the cycle died and a tested commit was left only in the
-    worktree on this box (#102, #108). A hang has to park and report like
-    any other failure to land, name itself as a hang, and not go round the
-    retry loop that exists for a push a moved dev rejected."""
+    """A git that hangs used to come out of push_worktree_to_dev instead of
+    parking the commit — the item stayed 'working', the cycle died and a
+    tested commit was left only in the worktree on this box (#102, #108).
+    It now arrives as CmdTimeout, and the clause that handles it has to stay
+    ahead of the general `except CmdError` (#110): a hang parks and reports
+    like any other failure to land, names itself as a hang, and does not go
+    round the retry loop that exists for a push a moved dev rejected."""
     from harness import repo
+    from harness.gh import CmdTimeout
 
     branch = "harness/issue-10"
     wt = tmp_path / "wt"
@@ -293,8 +298,7 @@ def test_a_hung_push_parks_the_fix_like_a_failed_one(project, origin,
                                  env=None):
         if cmd[:2] == ["git", "push"] and "--force" not in cmd:
             attempts.append(cmd)
-            raise subprocess.TimeoutExpired(cmd=cmd, timeout=timeout,
-                                            output="Enumerating objects\n")
+            raise CmdTimeout(cmd, timeout, out="Enumerating objects\n")
         return real_run(cmd, cwd=cwd, check=check, timeout=timeout, env=env)
 
     monkeypatch.setattr(repo, "run", _hang_on_the_push_to_dev)
@@ -314,3 +318,41 @@ def test_a_hung_push_parks_the_fix_like_a_failed_one(project, origin,
         ["git", "rev-parse", f"origin/{branch}"], cwd=wt,
         capture_output=True, text=True).stdout.strip()
     assert remote_head == local_head
+
+
+def test_a_hung_rebase_is_reported_as_a_hang_not_a_conflict(project, origin,
+                                                            tmp_path,
+                                                            monkeypatch):
+    """The sharp edge of #110: `except CmdTimeout` has to sit *before* the
+    `except CmdError` that reports a conflicted rebase, because CmdTimeout
+    is a CmdError. Ordered the other way round the general clause swallows
+    it and the operator is told the rebase conflicted — a claim about the
+    code that nothing actually established."""
+    from harness import repo
+    from harness.gh import CmdTimeout
+
+    branch = "harness/issue-11"
+    wt = tmp_path / "wt"
+    _git("clone", "-q", str(origin), str(wt), cwd=tmp_path)
+    _git("checkout", "-q", "-b", branch, "origin/dev", cwd=wt)
+    (wt / "README.md").write_text("mine\n")
+    _git("add", "-A", cwd=wt)
+    _git("commit", "-qm", "fix: mine", cwd=wt)
+
+    real_run = repo.run
+
+    def _hang_on_the_rebase(cmd, cwd=None, check=True, timeout=600, env=None):
+        if cmd[:2] == ["git", "rebase"] and "--abort" not in cmd:
+            raise CmdTimeout(cmd, timeout, out="First, rewinding head\n")
+        if cmd[:3] == ["git", "rev-list", "--count"] and "HEAD.." in cmd[3]:
+            return "1\n"               # dev moved: take the rebase branch
+        return real_run(cmd, cwd=cwd, check=check, timeout=timeout, env=env)
+
+    monkeypatch.setattr(repo, "run", _hang_on_the_rebase)
+
+    ok, err = repo.push_worktree_to_dev(project, wt, branch)
+
+    assert not ok
+    assert "the rebase onto moved dev timed out after 600s" in err
+    assert "conflicted" not in err
+    assert "First, rewinding head" in err        # the partial output kept

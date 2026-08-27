@@ -165,7 +165,8 @@ def _live_branch_dirs(project: str) -> set[str]:
 
 def _prune_worktrees() -> tuple[int, int]:
     """Returns (removed, kept): kept counts stale worktrees still spoken for."""
-    import shutil, subprocess
+    import shutil
+    from .gh import run, CmdError
     n = kept = 0
     cutoff = time.time() - WORKTREE_KEEP_DAYS * 86400
     for p in db.all_projects():
@@ -185,8 +186,15 @@ def _prune_worktrees() -> tuple[int, int]:
                 pass
         clone = config.REPOS_DIR / p["name"]
         if (clone / ".git").exists():
-            subprocess.run(["git", "worktree", "prune"], cwd=clone,
-                           capture_output=True)
+            try:
+                # Bounded: an hourly sweep must not be able to sit on a
+                # wedged git forever. check=False forgives a failed prune;
+                # a hung one comes back as CmdTimeout, a CmdError (#110).
+                run(["git", "worktree", "prune"], cwd=clone, check=False,
+                    timeout=60)
+            except CmdError as e:
+                db.log_event(f"git worktree prune did not finish: "
+                             f"{str(e)[:150]}", "warn", project=p["name"])
     return n, kept
 
 

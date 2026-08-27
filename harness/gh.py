@@ -12,9 +12,35 @@ from pathlib import Path
 
 
 class CmdError(RuntimeError):
-    def __init__(self, cmd: list[str], code: int, out: str, err: str):
+    def __init__(self, cmd: list[str], code: int | None, out: str, err: str,
+                 message: str | None = None):
         self.cmd, self.code, self.out, self.err = cmd, code, out, err
-        super().__init__(f"{' '.join(cmd)} -> {code}: {err.strip() or out.strip()}")
+        super().__init__(message or
+                         f"{' '.join(cmd)} -> {code}: {err.strip() or out.strip()}")
+
+
+class CmdTimeout(CmdError):
+    """A command that stopped answering, rather than one that failed.
+
+    A subclass of CmdError so that every `except CmdError` covers a hang by
+    default — the safe direction is to park and report, not to take the
+    cycle down at whichever call site forgot the second exception (#110).
+    Callers that word a hang differently test `isinstance(e, CmdTimeout)`
+    and read `.timeout`; `.code` is None because the command never exited.
+    """
+    def __init__(self, cmd: list[str], timeout: int | float,
+                 out: str = "", err: str = ""):
+        self.timeout = timeout
+        super().__init__(cmd, None, out, err,
+                         f"{' '.join(cmd)} -> timed out after {timeout}s")
+
+
+def _text(out) -> str:
+    """Whatever a command left behind, as str: TimeoutExpired carries bytes
+    or str depending on how the command was run."""
+    if out is None:
+        return ""
+    return out.decode("utf-8", "replace") if isinstance(out, bytes) else str(out)
 
 
 def run(cmd: list[str], cwd: Path | None = None, check: bool = True,
@@ -24,9 +50,16 @@ def run(cmd: list[str], cwd: Path | None = None, check: bool = True,
     env=None inherits harness's own environment — right for git and gh, which
     need the token. Pass an explicit env for anything project-supplied: see
     repo._sandbox_env.
+
+    A hang comes back as CmdTimeout, not subprocess.TimeoutExpired: check
+    forgives a non-zero exit, never a command that never answered.
     """
-    p = subprocess.run(cmd, cwd=cwd, capture_output=True, text=True,
-                       timeout=timeout, env=env)
+    try:
+        p = subprocess.run(cmd, cwd=cwd, capture_output=True, text=True,
+                           timeout=timeout, env=env)
+    except subprocess.TimeoutExpired as e:
+        raise CmdTimeout(cmd, e.timeout, _text(e.output),
+                         _text(e.stderr)) from e
     if check and p.returncode != 0:
         raise CmdError(cmd, p.returncode, p.stdout, p.stderr)
     return p.stdout
