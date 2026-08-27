@@ -50,8 +50,11 @@ told to behave.
   resumes the engineer's session comes back to the worktree it left; one
   that starts fresh cuts from dev again, and anything the last attempt left
   behind is kept first, on a local `harness/issue-N-attempt-<n>` branch
-  named on the item thread. Everything else gets a drafted reply and waits
-  for you.
+  named on the item thread. Where you have given the harness a preview
+  command, a change to templates or stylesheets is rendered in a headless
+  browser at phone and desktop widths and the screenshots left on the item
+  (see **Seeing the app** under [Configuration](#configuration)). Everything
+  else gets a drafted reply and waits for you.
 - **Pull requests** — merged onto dev locally, tested, then reviewed for
   value and quality. A PR's tests are the contributor's code, so they run in
   a throwaway clone with their own virtualenv and no credentials in the
@@ -330,7 +333,9 @@ export CLAUDE_CODE_OAUTH_TOKEN=... GH_TOKEN=...
 python run.py            # GUI + worker on :8300
 ```
 
-Run the tests with `python -m pytest -q`. State lives in `data/` (SQLite,
+Run the tests with `python -m pytest -q`. To render a managed project's pages
+from a checkout you also need the browser itself — `playwright install
+chromium`; the harness image already has it. State lives in `data/` (SQLite,
 clones, worktrees, per-run transcripts). Deleting `data/repos`,
 `data/worktrees`, `data/pr-runs` or `data/sandbox` is always safe — they're
 rebuilt; deleting a worktree an item is still working in only costs that
