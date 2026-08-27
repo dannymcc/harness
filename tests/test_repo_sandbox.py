@@ -264,3 +264,53 @@ def test_a_failed_safety_push_is_reported_as_such(project, origin, tmp_path):
     assert subprocess.run(["git", "rev-parse", "--verify", "-q",
                            f"refs/heads/{branch}"], cwd=origin,
                           capture_output=True).returncode != 0
+
+
+def test_a_hung_push_parks_the_fix_like_a_failed_one(project, origin,
+                                                     tmp_path, monkeypatch):
+    """A git that hangs is not a CmdError, so before #108 it came out of
+    push_worktree_to_dev instead of parking the commit — the item stayed
+    'working', the cycle died and a tested commit was left only in the
+    worktree on this box (#102, #108). A hang has to park and report like
+    any other failure to land, name itself as a hang, and not go round the
+    retry loop that exists for a push a moved dev rejected."""
+    from harness import repo
+
+    branch = "harness/issue-10"
+    wt = tmp_path / "wt"
+    _git("clone", "-q", str(origin), str(wt), cwd=tmp_path)
+    _git("checkout", "-q", "-b", branch, "origin/dev", cwd=wt)
+    (wt / "README.md").write_text("mine\n")
+    _git("add", "-A", cwd=wt)
+    _git("commit", "-qm", "fix: mine", cwd=wt)
+    local_head = subprocess.run(
+        ["git", "rev-parse", "HEAD"], cwd=wt,
+        capture_output=True, text=True).stdout.strip()
+
+    real_run, attempts = repo.run, []
+
+    def _hang_on_the_push_to_dev(cmd, cwd=None, check=True, timeout=600,
+                                 env=None):
+        if cmd[:2] == ["git", "push"] and "--force" not in cmd:
+            attempts.append(cmd)
+            raise subprocess.TimeoutExpired(cmd=cmd, timeout=timeout,
+                                            output="Enumerating objects\n")
+        return real_run(cmd, cwd=cwd, check=check, timeout=timeout, env=env)
+
+    monkeypatch.setattr(repo, "run", _hang_on_the_push_to_dev)
+
+    ok, err = repo.push_worktree_to_dev(project, wt, branch)
+
+    assert not ok
+    assert "timed out after 600s" in err          # a hang, said as a hang
+    assert "Enumerating objects" in err           # the partial output kept
+    assert repo.SAFETY_PUSH_FAILED not in err
+    assert len(attempts) == 1                     # not retried as a rejection
+
+    # The commit is on origin/<branch>, where the error says it is.
+    assert branch in err
+    _git("fetch", "-q", "origin", cwd=wt)
+    remote_head = subprocess.run(
+        ["git", "rev-parse", f"origin/{branch}"], cwd=wt,
+        capture_output=True, text=True).stdout.strip()
+    assert remote_head == local_head
