@@ -267,7 +267,13 @@
     {% endif %}
   {% endif %}
   <ul class="events">{% for r in releases if r.status not in ('proposed', 'merging') %}
-    <li><b>v{{ r.version }}</b> {{ r.status }}
+    {# A tag that shipped over a red build is still a release, but the
+       operator should not have to read the event log to find that out. #}
+    <li class="{{ 'error' if r.ci_status not in ('', 'none', 'success')
+                  else '' }}"><b>v{{ r.version }}</b> {{ r.status }}{%
+      if r.ci_status == 'success' %} — CI green{%
+      elif r.ci_status in ('timeout', 'unknown') %} — CI result unknown{%
+      elif r.ci_status not in ('', 'none') %} — CI {{ r.ci_status }}{% endif %}
       <span class="ts">{{ r.released_at or r.created_at }}</span></li>
   {% else %}<li>None yet.</li>{% endfor %}</ul>
 </section>

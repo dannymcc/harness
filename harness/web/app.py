@@ -375,7 +375,8 @@ POLICY_COPY = {
     "file_issues": ("file issues",
                     "Whether team leads may open tracking issues on the "
                     "repo from their plan, capped at six of theirs sitting "
-                    "open and unworked at once."),
+                    "open and unworked at once. Also gates the follow-up "
+                    "issue opened when a release's CI goes red."),
     "merge_prs": ("merge community PRs",
                   "Community PRs are validated and tested locally first "
                   "either way; this decides who presses merge."),

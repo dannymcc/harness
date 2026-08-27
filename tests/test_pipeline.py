@@ -496,6 +496,191 @@ def test_a_hung_release_merge_comes_back_to_proposed_too(fresh_db, may,
     assert rel["status"] == "released" and rel["error"] == ""
 
 
+# --- the release's own CI (#112) --------------------------------------------
+#
+# A tag that ships over a red build is still a tag, but until now every
+# release said "CI is building the images" whether or not the build then
+# went red. Twelve releases in a row went out on roanpms with a red CI leg
+# and the published image never moved.
+
+def _finalize_with_ci(fresh_db, may, monkeypatch, ci, version="4.0.0",
+              sha="deadbee"):
+    """Take one release all the way through finalize_release with a stubbed
+    CI answer, and hand back what the operator was told."""
+    from harness import gh, notify, pipeline, repo
+
+    class _NoLock:
+        def __enter__(self): return None
+        def __exit__(self, *a): return False
+
+    paged = []
+    monkeypatch.setattr(repo, "clone_lock", lambda project: _NoLock())
+    monkeypatch.setattr(repo, "clean_checkout", lambda project, branch: "/tmp")
+    monkeypatch.setattr(notify, "send",
+                        lambda title, message, **k: paged.append(
+                            {"title": title, "message": message, **k}))
+    monkeypatch.setattr(gh, "merge_pr", lambda *a, **k: None)
+    monkeypatch.setattr(gh, "publish_release", lambda *a, **k: None)
+    monkeypatch.setattr(gh, "run", lambda cmd, **k: (
+        sha if "rev-parse" in cmd else ""))
+    monkeypatch.setattr(pipeline, "CI_POLL_SECONDS", 0)
+    if callable(ci):
+        monkeypatch.setattr(gh, "commit_ci", lambda repo_, s: ci(s))
+    else:
+        monkeypatch.setattr(gh, "commit_ci", lambda repo_, s: dict(ci))
+
+    rid = fresh_db.create_release("may", version, "notes", [])
+    fresh_db.update_release(rid, pr_number=7, status="merging")
+    pipeline.finalize_release(may, fresh_db.get_release(rid))
+    return rid, paged
+
+
+def test_a_green_release_says_the_build_is_green(fresh_db, may, monkeypatch):
+    rid, paged = _finalize_with_ci(fresh_db, may, monkeypatch,
+                           {"state": "done", "conclusion": "success",
+                            "url": "https://gh/run/1"})
+    rel = fresh_db.get_release(rid)
+    assert rel["status"] == "released" and rel["ci_status"] == "success"
+    assert len(paged) == 1
+    assert "green" in paged[0]["message"]
+    assert paged[0].get("priority", "default") == "default"
+
+
+def test_a_red_build_is_not_announced_as_a_shipped_image(fresh_db, may,
+                                                         monkeypatch):
+    """The tag is real and stays; what must not survive is the claim that
+    images are on their way. The operator is paged, the run that went red is
+    named, and the failure is filed as work so the desk fixes it."""
+    from harness import gh, pipeline
+    filed = {}
+    monkeypatch.setattr(gh, "create_issue",
+                        lambda repo_, title, body: filed.update(
+                            title=title, body=body) or 55)
+    rid, paged = _finalize_with_ci(fresh_db, may, monkeypatch,
+                           {"state": "done", "conclusion": "failure",
+                            "url": "https://gh/run/33004983752"})
+
+    rel = fresh_db.get_release(rid)
+    assert rel["status"] == "released" and rel["ci_status"] == "failure"
+    assert len(paged) == 1
+    assert paged[0]["priority"] == "high"
+    assert "red" in paged[0]["title"]
+    assert "nothing it publishes" in paged[0]["message"]
+    assert "33004983752" in paged[0]["message"]
+    assert "building the images" not in paged[0]["message"]
+
+    # filed as work, naming the run, and on the board for triage
+    assert "33004983752" in filed["body"]
+    item = fresh_db.get_item("may", "issue", 55)
+    assert item and item["title"].startswith(pipeline.CI_FAILURE_TITLE)
+    events = [e["message"] for e in fresh_db.recent_events(project="may")]
+    assert any("nothing that build publishes has moved" in m for m in events)
+
+
+def test_a_second_red_release_does_not_file_a_second_issue(fresh_db, may,
+                                                           monkeypatch):
+    """The tree is red once, however many releases go out over it: one open
+    follow-up, not one per version (roanpms cut twelve)."""
+    from harness import gh
+    filings = []
+    monkeypatch.setattr(gh, "create_issue",
+                        lambda repo_, title, body: filings.append(title) or (
+                            60 + len(filings)))
+    red = {"state": "done", "conclusion": "failure", "url": "https://gh/r/1"}
+    _finalize_with_ci(fresh_db, may, monkeypatch, red, version="4.1.0")
+    _finalize_with_ci(fresh_db, may, monkeypatch, red, version="4.2.0")
+    assert len(filings) == 1
+
+
+def test_a_red_build_with_file_issues_off_still_pages_the_operator(
+        fresh_db, may, monkeypatch):
+    from harness import gh
+
+    def _refuse(*a, **k):
+        raise AssertionError("filed an issue with file_issues off")
+
+    monkeypatch.setattr(gh, "create_issue", _refuse)
+    fresh_db.set_policy("may", "file_issues", "off")
+    rid, paged = _finalize_with_ci(fresh_db, may, monkeypatch,
+                           {"state": "done", "conclusion": "failure",
+                            "url": "https://gh/r/2"})
+    assert paged[0]["priority"] == "high"
+    assert fresh_db.get_release(rid)["ci_status"] == "failure"
+
+
+def test_ci_still_running_at_the_cap_is_unknown_not_success(fresh_db, may,
+                                                            monkeypatch):
+    """Timing out means we do not know whether the images moved — and the
+    one thing the operator must not be told is that they did."""
+    from harness import pipeline
+    monkeypatch.setattr(pipeline, "CI_WATCH_SECONDS", 0)
+    rid, paged = _finalize_with_ci(fresh_db, may, monkeypatch,
+                           {"state": "pending", "conclusion": "",
+                            "url": "https://gh/r/3"})
+    rel = fresh_db.get_release(rid)
+    assert rel["status"] == "released" and rel["ci_status"] == "timeout"
+    assert "unknown" in paged[0]["title"]
+    assert "https://gh/r/3" in paged[0]["message"]
+
+
+def test_a_pending_build_is_polled_until_it_concludes(fresh_db, may,
+                                                      monkeypatch):
+    answers = [{"state": "pending", "conclusion": "", "url": "u"},
+               {"state": "pending", "conclusion": "", "url": "u"},
+               {"state": "done", "conclusion": "success", "url": "u"}]
+    rid, paged = _finalize_with_ci(fresh_db, may, monkeypatch,
+                           lambda sha: answers.pop(0))
+    assert answers == []
+    assert fresh_db.get_release(rid)["ci_status"] == "success"
+
+
+def test_ci_is_not_read_the_instant_the_tag_goes_up(fresh_db, may,
+                                                    monkeypatch):
+    """GitHub takes a moment to register the run a push starts. Asking
+    immediately can catch the merge's own run, already finished and green,
+    and call a release green before its build exists — so every poll waits
+    first."""
+    from harness import pipeline
+    order = []
+    monkeypatch.setattr(pipeline.time, "sleep",
+                        lambda s: order.append(f"slept {s}"))
+
+    def _ci(sha):
+        order.append("asked")
+        return {"state": "done", "conclusion": "success", "url": "u"}
+
+    _finalize_with_ci(fresh_db, may, monkeypatch, _ci)
+    assert order[0].startswith("slept") and order[1] == "asked"
+
+
+def test_a_commit_with_no_workflow_run_claims_nothing(fresh_db, may,
+                                                      monkeypatch):
+    """Plenty of projects have no CI at all. They get a release notice that
+    says so rather than a red alert or an invented build."""
+    from harness import pipeline
+    monkeypatch.setattr(pipeline, "CI_NO_RUN_SECONDS", 0)
+    rid, paged = _finalize_with_ci(fresh_db, may, monkeypatch,
+                           {"state": "none", "conclusion": "", "url": ""})
+    assert fresh_db.get_release(rid)["ci_status"] == "none"
+    assert paged[0].get("priority", "default") == "default"
+    assert "No CI run" in paged[0]["message"]
+
+
+def test_a_gh_that_cannot_be_asked_leaves_the_release_shipped(fresh_db, may,
+                                                              monkeypatch):
+    """A hung or broken `gh run list` must not undo a shipped version, and
+    must not be read as a pass either."""
+    from harness import gh
+
+    def _hangs(sha):
+        raise gh.CmdTimeout(["gh", "run", "list"], 600)
+
+    rid, paged = _finalize_with_ci(fresh_db, may, monkeypatch, _hangs)
+    rel = fresh_db.get_release(rid)
+    assert rel["status"] == "released" and rel["ci_status"] == "unknown"
+    assert "unknown" in paged[0]["title"]
+
+
 def test_restart_recovery(fresh_db, may):
     from harness import worker
     rid = fresh_db.start_run("may", "ic", "issue#5", "fix", "m", "Malcolm")

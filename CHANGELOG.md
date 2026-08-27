@@ -4,6 +4,42 @@ All notable changes to Harness are recorded here. The format is
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project
 follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.26.0] - 2026-08-27
+
+### Added
+
+- **A release now reports what its build actually did** (#112).
+  `finalize_release` announced "Tagged and published; CI is building the
+  images" whether or not the build for that commit then went red, so a
+  string of releases could go out over a red leg while the published image
+  never moved and nothing said so.
+
+- `gh.commit_ci(repo, sha)` reads `gh run list --commit <sha>` and folds the
+  runs for that commit into a single verdict: no run at all, still pending,
+  or done with GitHub's conclusion and the run URL.
+
+- After the tag is pushed, `finalize_release` records the tagged commit and
+  watches it for a bounded window (five minutes, polled every twenty
+  seconds), then says which of four things happened: green, red, no run
+  covers the commit, or not known yet. A build still running when the check
+  gives up is reported as unknown with the run to look at — a timeout is
+  never read as a pass. The wait is capped on purpose: it holds a worker
+  thread, and waiting indefinitely would be worse than saying so.
+
+- A red build pages you at high priority, names the run that failed, marks
+  the version on the project page's release list, and opens one follow-up
+  issue so the desk fixes the build — one per desk rather than one per
+  release, since the tree is red once however many releases go out over it.
+  That filing sits behind the existing `file issues` policy, as opening an
+  issue on your own repo is an outward action.
+
+- New `releases.ci_status` column, migrated in, carrying that verdict for
+  each release.
+
+Merge and tag are not gated on CI: the harness's own sandboxed test run
+stays the pre-merge gate, and this check reports on a tag that is already
+pushed rather than holding one back.
+
 ## [0.25.2] - 2026-08-27
 
 ### Fixed

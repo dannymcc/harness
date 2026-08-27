@@ -66,7 +66,15 @@ told to behave.
   changes or age), or on a set cadence if you would rather release on a
   clock, Colin drafts the release: version bump, CHANGELOG,
   README check, credited notes, then a dev → main PR. You approve; it
-  merges, tags, and publishes the GitHub Release. If GitHub refuses the
+  merges, tags, and publishes the GitHub Release. Then it watches the build:
+  for a few minutes after the tag is pushed it checks what GitHub Actions
+  made of that commit, and tells you which of three things happened — green,
+  red, or not known yet. A red build is never reported as a shipped image.
+  It pages you, names the run that failed, marks the version on the project
+  page, and opens one follow-up issue so the desk fixes the build (one per
+  desk, not one per release). A build still running when the check gives up
+  is reported as unknown, with the run to look at — never as a pass. A repo
+  with no workflow for the commit is simply told as much. If GitHub refuses the
   merge — branch protection, a failing required check, a token without the
   scope — the release comes back as proposed with the reason on the project
   page, so the button is live again and you can see what to fix. One fix
@@ -256,7 +264,7 @@ Per-repo policies, editable live in Settings:
 | Policy | Default |
 |---|---|
 | fix issues (and land on dev) | auto (also: `lead` — the team lead's plan is the sign-off) |
-| leads open tracking issues from their plan | auto (at most 6 of a desk's own filings open and unworked at once; `off` to disable) |
+| leads open tracking issues from their plan | auto (at most 6 of a desk's own filings open and unworked at once; `off` to disable). Also gates the follow-up issue opened when a release's CI goes red |
 | merge community PRs | approve |
 | merge dependabot PRs | approve |
 | post comments/reviews publicly | approve |
