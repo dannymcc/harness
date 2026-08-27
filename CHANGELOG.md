@@ -4,6 +4,37 @@ All notable changes to Harness are recorded here. The format is
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project
 follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.24.0] - 2026-08-27
+
+### Added
+
+- **The module that owns every destructive operation is now covered by
+  tests** (#98). `harness/housekeeping.py` holds every `DELETE`, `unlink`
+  and `rmtree` in the codebase, and had only the coverage that #96 and #97
+  happened to bring with them. The suite now pins the retention-window
+  boundaries for events, runs and reports; archived cost folding per
+  project; `_trim_finished_items`; `_prune_files` against `LOG_KEEP_DAYS`;
+  `_prune_pr_runs`; the `finished_at IS NULL` and cutoff guards on
+  `_close_orphaned_runs`; and the summary line `prune()` writes when some
+  sweeps find nothing.
+
+- `_prune_sdk_sessions` gets explicit negative tests, being the one sweep
+  that reaches outside `DATA_DIR` into the operator's home: a session
+  directory whose encoded name falls outside `REPOS_DIR` or `pr-runs`, a
+  file that is not `.jsonl`, and anything under a `memory/` path all
+  survive it. The README's promise that an existing `~/.claude` is left
+  alone on a development machine is now something the suite checks rather
+  than something the code merely says.
+
+- Tests get a throwaway home directory. `Path.home()` resolves through
+  `$HOME`, which `fresh_db` has no say in, so anything calling `prune()`
+  walked the real `~/.claude` of whoever ran the suite. Nothing there
+  matches the encoded prefixes of a per-test data directory, so this is a
+  guard rather than a fix — but `tests/conftest.py` now redirects `$HOME`
+  for the whole suite rather than for one module, because `test_db.py`
+  already called `prune()` twice without it and opting in is the step that
+  gets forgotten. No change to the harness's own behaviour.
+
 ## [0.23.2] - 2026-08-26
 
 ### Fixed
