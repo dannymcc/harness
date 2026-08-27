@@ -4,6 +4,41 @@ All notable changes to Harness are recorded here. The format is
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project
 follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.25.0] - 2026-08-27
+
+### Added
+
+- **The module that builds every outward GitHub action is now covered by
+  tests** (#104). `harness/gh.py` turns a comment, a close, a retarget, a
+  squash-merge, a release or a new PR into a list of strings handed to the
+  `gh` CLI, and nothing asserted what was in that list. The rest of the
+  suite stubs the module out, so a regression that dropped a flag or
+  reordered a two-step action would have passed everything and only shown up
+  against a live repo. `tests/test_gh.py` now stubs `subprocess.run` and
+  asserts on the captured argv — no process, no network, no `gh` binary.
+
+- The tests pin the details that go wrong quietly rather than loudly: that
+  every acting function names the repo with `-R`, `gh` falling back to the
+  checkout it runs from being the difference between closing a project's
+  issue and closing one of ours; that `merge_pr` squashes by default; that
+  `close_pr` comments before it closes rather than after; that
+  `publish_release` verifies the tag. `run()`'s contract is covered too —
+  stdout returned, `cwd` and `timeout` forwarded, an explicit `env` passed
+  through untouched, and `CmdError` carrying the command, exit code and both
+  streams that callers put in front of a human.
+
+- `create_issue` and `create_pr` read the item number out of the URL `gh`
+  prints, whose exact shape has moved between versions. Both are now pinned
+  against trailing newlines and slashes, surrounding whitespace and a
+  preamble line, and unparseable output is asserted to raise rather than
+  return a number — a silently wrong one would be stored against the item
+  and every later comment, close or merge would land on whatever PR happened
+  to hold it.
+
+- `CLAUDE.md` notes that the list of actions checked for `-R` is written out
+  by hand, so a new function in `gh.py` needs adding to it. No change to the
+  harness's own behaviour.
+
 ## [0.24.2] - 2026-08-27
 
 ### Fixed

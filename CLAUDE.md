@@ -15,6 +15,10 @@
   never a content decision, never forced), and leads' tracking issues go
   through `file_issues` (auto/off) plus a cap on how many lead-filed issues
   may sit open and unworked at once.
+- A new action in `gh.py` needs a case in `tests/test_gh.py`, which asserts
+  the argv each one builds and enumerates the actions by hand: the list in
+  `test_every_outward_action_names_the_repo` does not discover new functions,
+  so an action left out of it is an action nothing checks names `-R <repo>`.
 - Questions from agents go to Harry first (`pipeline.process_questions`);
   only what he escalates reaches the operator. Don't add UI that puts
   un-escalated questions in front of the operator as if they were theirs.
