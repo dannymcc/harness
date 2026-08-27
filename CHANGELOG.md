@@ -4,6 +4,34 @@ All notable changes to Harness are recorded here. The format is
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project
 follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.25.2] - 2026-08-27
+
+### Fixed
+
+- **A command that stops answering is now an ordinary command failure**
+  (#110). `gh.run` let `subprocess.TimeoutExpired` out raw, so covering a
+  hang meant remembering a second exception at every call site, and two live
+  ones did not: a hung `gh issue create` took the whole cycle down through
+  the worker's broad handler, and a hung `gh issue close` skipped the local
+  status update and left the item stranded in the queues. Both were named as
+  gaps in 0.25.1 and are closed here.
+
+- `gh.run` now re-raises a timeout as `CmdTimeout`, a subclass of
+  `CmdError`, carrying the command, the limit it blew and whatever partial
+  output the run left behind. Every existing `except CmdError` therefore
+  covers a hang by default — the safe direction is to park and report rather
+  than crash at whichever call site forgot. The handlers in `pipeline.py`
+  and `repo.py` drop `TimeoutExpired` from their tuples; the ones that word
+  a hang differently — a blocked merge, a parked branch, a release that did
+  not get proposed — still do, either by testing `isinstance(e, CmdTimeout)`
+  or in a clause kept ahead of the `CmdError` one it sits with, since a
+  timeout is now one.
+
+- `git worktree prune` in the hourly housekeeping sweep ran with no timeout
+  at all — a wedged git could sit on the sweep indefinitely. It is bounded
+  at 60 seconds now and logs a warning rather than blocking the rest of the
+  sweep.
+
 ## [0.25.1] - 2026-08-27
 
 ### Fixed
