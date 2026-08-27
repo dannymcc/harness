@@ -377,6 +377,29 @@ def _park_on_branch(project, wt: Path, branch: str, reason: str,
     return f"{reason} — {where}" + (f":\n{detail}" if detail else "")
 
 
+def _hang(e, what: str) -> tuple[str, str]:
+    """(reason, detail) for a git command that hung, for _park_on_branch.
+
+    A hang is not a failure with a message, so say plainly which command
+    stopped answering and for how long; _failure_output supplies whatever
+    partial output the timeout carried."""
+    full, footer = _failure_output(e)
+    reason = f"{what} timed out after {e.timeout}s"
+    return reason, (full[-800:].strip() + footer) if full.strip() else ""
+
+
+def _abort_rebase(wt: Path) -> None:
+    """Best-effort cleanup after a rebase went wrong.
+
+    check=False forgives a non-zero exit, not a hang: a rebase that timed out
+    can leave a git that hangs its abort too, and that must not escape the
+    handler that is already reporting the first hang."""
+    try:
+        run(["git", "rebase", "--abort"], cwd=wt, check=False)
+    except (CmdError, OSError, subprocess.TimeoutExpired):
+        pass
+
+
 def push_worktree_to_dev(project, wt: Path,
                          branch: str) -> tuple[bool, str]:
     """Land a finished worktree branch on dev, serialised via the clone lock.
@@ -386,20 +409,33 @@ def push_worktree_to_dev(project, wt: Path,
     lands, not what was built.
 
     Every path that gives up parks the commit on origin/<branch> first (see
-    _park_on_branch); the returned error names where it went."""
+    _park_on_branch); the returned error names where it went. That includes
+    a git that hangs rather than fails: TimeoutExpired is not a CmdError, so
+    left uncaught it would take the cycle down with the commit still only in
+    the worktree on this box (#102, #108)."""
     dev = project["dev_branch"]
     for _ in range(3):
-        run(["git", "fetch", "origin"], cwd=wt)
-        behind = run(["git", "rev-list", "--count",
-                      f"HEAD..origin/{dev}"], cwd=wt).strip()
+        try:
+            run(["git", "fetch", "origin"], cwd=wt)
+            behind = run(["git", "rev-list", "--count",
+                          f"HEAD..origin/{dev}"], cwd=wt).strip()
+        except subprocess.TimeoutExpired as e:
+            return False, _park_on_branch(
+                project, wt, branch,
+                *_hang(e, f"checking whether {dev} had moved"))
         if behind != "0":
             try:
                 run(["git", "rebase", f"origin/{dev}"], cwd=wt)
             except CmdError:
-                run(["git", "rebase", "--abort"], cwd=wt, check=False)
+                _abort_rebase(wt)
                 return False, _park_on_branch(
                     project, wt, branch,
                     f"rebase onto moved {dev} conflicted")
+            except subprocess.TimeoutExpired as e:
+                _abort_rebase(wt)
+                return False, _park_on_branch(
+                    project, wt, branch,
+                    *_hang(e, f"the rebase onto moved {dev}"))
             ok, out = run_tests(project, cwd=wt, setup=False)
             if not ok:
                 return False, _park_on_branch(
@@ -410,6 +446,11 @@ def push_worktree_to_dev(project, wt: Path,
             with clone_lock(project):
                 run(["git", "push", "origin", f"HEAD:{dev}"], cwd=wt)
             return True, ""
+        except subprocess.TimeoutExpired as e:
+            # Not a rejection: going around again would only hang again, and
+            # a push that never answered may or may not have landed.
+            return False, _park_on_branch(
+                project, wt, branch, *_hang(e, f"the push to {dev}"))
         except CmdError as e:
             if "rejected" in (e.err or "") or "fetch first" in (e.err or ""):
                 continue  # dev moved again while we were testing; go around

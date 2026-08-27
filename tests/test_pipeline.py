@@ -450,6 +450,54 @@ def test_refused_merge_puts_the_reason_on_the_release(fresh_db, may,
     assert rel["status"] == "released" and rel["error"] == ""
 
 
+def test_a_hung_release_merge_comes_back_to_proposed_too(fresh_db, may,
+                                                         monkeypatch):
+    """A `gh pr merge` that never answers is not a CmdError, so before #108
+    it went straight out of finalize_release — and web.app runs that on a
+    bare thread, so nothing was logged and the release sat at 'merging',
+    button-less, until the restart sweep. It must come back to 'proposed'
+    with the hang named as a hang, exactly like a refused merge. The tag
+    push and the release publish below it get the same treatment."""
+    import subprocess
+    from harness import gh, notify, pipeline, repo
+
+    class _NoLock:
+        def __enter__(self): return None
+        def __exit__(self, *a): return False
+
+    monkeypatch.setattr(repo, "clone_lock", lambda project: _NoLock())
+    monkeypatch.setattr(notify, "send", lambda *a, **k: None)
+    monkeypatch.setattr(repo, "clean_checkout", lambda project, branch: "/tmp")
+
+    def _hangs(*a, **k):
+        raise subprocess.TimeoutExpired(cmd=["gh", "pr", "merge", "13"],
+                                        timeout=600)
+
+    monkeypatch.setattr(gh, "merge_pr", _hangs)
+    rid = fresh_db.create_release("may", "3.1.0", "notes", [])
+    fresh_db.update_release(rid, pr_number=13, status="merging")
+    pipeline.finalize_release(may, fresh_db.get_release(rid))
+
+    rel = fresh_db.get_release(rid)
+    assert rel["status"] == "proposed"          # clickable again, not stuck
+    assert "timed out" in rel["error"] and "600" in rel["error"]
+
+    # A hang on the tag push is the same failure one step later.
+    monkeypatch.setattr(gh, "merge_pr", lambda *a, **k: None)
+    monkeypatch.setattr(gh, "run", _hangs)
+    pipeline.finalize_release(may, fresh_db.get_release(rid))
+    rel = fresh_db.get_release(rid)
+    assert rel["status"] == "proposed" and "timed out" in rel["error"]
+
+    # Publishing the GitHub release is the last step and comes after the tag
+    # is pushed: a hang there must not undo a version that has shipped.
+    monkeypatch.setattr(gh, "run", lambda *a, **k: "")
+    monkeypatch.setattr(gh, "publish_release", _hangs)
+    pipeline.finalize_release(may, fresh_db.get_release(rid))
+    rel = fresh_db.get_release(rid)
+    assert rel["status"] == "released" and rel["error"] == ""
+
+
 def test_restart_recovery(fresh_db, may):
     from harness import worker
     rid = fresh_db.start_run("may", "ic", "issue#5", "fix", "m", "Malcolm")
@@ -1445,6 +1493,120 @@ def test_a_stranded_fix_gets_its_own_warn_event(fresh_db, may, monkeypatch,
                 in e["message"]]
     assert len(stranded) == 1 and stranded[0]["level"] == "warn"
     assert "only in the worktree on this box" in stranded[0]["message"]
+
+
+def test_a_hung_push_parks_the_fix_and_leaves_the_item_approved(
+        fresh_db, may, monkeypatch, tmp_path):
+    """A `git push` that hangs rather than fails used to come out of
+    push_worktree_to_dev as a TimeoutExpired — past the `if not landed:`
+    branch and out of the cycle, leaving the item at 'working' and a tested
+    commit alone in a worktree on this box with nobody told (#108). It has
+    to park on origin/<branch> and report the hang like any other failure to
+    land, so the item goes back to 'approved' and the cycle carries on."""
+    import asyncio
+    import subprocess
+    from harness import agents, gh, pipeline, repo
+
+    fresh_db.upsert_item("may", "issue", 65, "hangs on push", "a", "open", "x")
+    fresh_db.update_item("may", "issue", 65, status="approved", plan="do it")
+
+    class _NoLock:
+        def __enter__(self): return None
+        def __exit__(self, *a): return False
+
+    pushed = []
+
+    def _run(cmd, cwd=None, check=True, timeout=600, env=None):
+        if cmd[:2] == ["git", "push"]:
+            if "--force" in cmd:        # the safety push; this one answers
+                pushed.append(cmd[-1])
+                return ""
+            raise subprocess.TimeoutExpired(cmd=cmd, timeout=timeout,
+                                            output="Enumerating objects\n")
+        if "rev-list" in cmd:
+            return "0\n"                # dev has not moved
+        return ""
+
+    monkeypatch.setattr(repo, "run", _run)
+    monkeypatch.setattr(repo, "clone_lock", lambda project: _NoLock())
+    monkeypatch.setattr(gh, "issue_detail",
+                        lambda repo_, number: {"number": 65, "title": "t",
+                                               "body": "b"})
+    monkeypatch.setattr(repo, "add_worktree",
+                        lambda project, branch, resuming=False: (tmp_path, ""))
+    monkeypatch.setattr(repo, "wt_has_changes", lambda project, wt: True)
+    monkeypatch.setattr(repo, "run_tests",
+                        lambda project, cwd=None, setup=True, scratch=None:
+                        (True, "ok"))
+    monkeypatch.setattr(repo, "wt_diff",
+                        lambda project, wt: ("1 file changed", "diff"))
+    monkeypatch.setattr(repo, "wt_commit_all",
+                        lambda project, wt, message: None)
+    removed = []
+    monkeypatch.setattr(repo, "remove_worktree",
+                        lambda project, wt: removed.append(wt))
+
+    async def fake_fix_issue(project, issue, plan, cwd, resume=None,
+                             persona="Malcolm", repro_path="",
+                             worktree_note=""):
+        rid = fresh_db.start_run("may", "ic", "issue#65", "fix", "m", persona)
+        fresh_db.finish_run(rid, True, 0.1, 1, "fixed it")
+        return {"ok": True, "error": "", "session_id": "s",
+                "output": {"success": True, "summary": "fixed it",
+                           "docs_updated": False, "notes": "",
+                           "commit_message": "fix: issue #65 (#65)"}}
+
+    monkeypatch.setattr(agents, "fix_issue", fake_fix_issue)
+    # No exception out of here is half the point: the cycle stays alive.
+    asyncio.run(pipeline.fix_item(may, fresh_db.get_item("may", "issue", 65)))
+
+    after = fresh_db.get_item("may", "issue", 65)
+    assert after["status"] == "approved"
+    assert "timed out" in after["error"]        # a hang, not a rejection
+    assert "origin/harness/issue-65" in after["error"]
+    assert repo.SAFETY_PUSH_FAILED not in after["error"]
+    assert pushed == ["HEAD:refs/heads/harness/issue-65"]
+    assert removed == []
+    assert any("did not land" in r["text"]
+               for r in fresh_db.thread("may", "issue#65"))
+
+
+def test_a_hung_pr_merge_blocks_the_pr_rather_than_the_cycle(fresh_db, may,
+                                                             monkeypatch):
+    """`gh pr merge` hanging leaves the merge in an unknown state. Block the
+    item for a human, saying it hung, instead of raising into the cycle."""
+    import asyncio
+    import subprocess
+    from harness import gh, pipeline, repo
+
+    fresh_db.upsert_item("may", "pr", 43, "A contribution", "outsider",
+                         "open", "x")
+
+    class _NoLock:
+        def __enter__(self): return None
+        def __exit__(self, *a): return False
+
+    monkeypatch.setattr(repo, "clone_lock", lambda project: _NoLock())
+    monkeypatch.setattr(repo, "fetch_pr_branch",
+                        lambda project, number, branch: "/tmp")
+    monkeypatch.setattr(repo, "remove_pr_run", lambda project, number: None)
+    monkeypatch.setattr(repo, "run_pr_tests",
+                        lambda project, number: (True, "ok"))
+    monkeypatch.setattr(gh, "pr_detail", lambda repo_, number: {
+        "isDraft": False, "baseRefName": "dev"})
+
+    def _hangs(repo_, number, **kw):
+        raise subprocess.TimeoutExpired(cmd=["gh", "pr", "merge", str(number)],
+                                        timeout=600)
+
+    monkeypatch.setattr(gh, "merge_pr", _hangs)
+    asyncio.run(pipeline.merge_pr_item(may, fresh_db.get_item("may", "pr", 43)))
+
+    after = fresh_db.get_item("may", "pr", 43)
+    assert after["status"] == "blocked"
+    assert "timed out" in after["error"]
+    assert any("timed out" in e["message"] and "#43" in e["message"]
+               for e in fresh_db.recent_events(20, "may"))
 
 
 def test_salvaged_work_from_a_previous_attempt_is_named_on_the_thread(

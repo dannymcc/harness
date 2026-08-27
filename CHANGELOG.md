@@ -4,6 +4,44 @@ All notable changes to Harness are recorded here. The format is
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project
 follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.25.1] - 2026-08-27
+
+### Fixed
+
+- **A hung git or `gh` on the write paths no longer takes the cycle down**
+  (#108). #102 covered the paths that read — running the tests, checking a
+  PR out, seeing whether it merged cleanly. The paths that write were left:
+  `repo.push_worktree_to_dev`, the PR merge, the release PR, and the tag,
+  push and publish that finish a release all caught `CmdError` only, so a
+  command that stopped answering escaped as `subprocess.TimeoutExpired`.
+
+- Landing a finished branch on dev now parks the commit when git hangs,
+  as it already did when git failed. A timed-out fetch, rebase or push
+  leaves the work on `origin/<branch>` with a reason that names the command
+  and the limit it blew, rather than only in a worktree on the box that
+  built it. The `rebase --abort` that cleans up after a conflict is
+  best-effort in both directions now: `check=False` forgives a non-zero
+  exit, not a second hang inside the handler already reporting the first.
+
+- A merge that hangs blocks the PR for a human instead of raising, and says
+  it hung — an unanswered `gh pr merge` may or may not have landed, and
+  reading it as a refused merge would be wrong either way. A hung release PR
+  is logged as a release that did not get proposed, with the changes left
+  queued for the next attempt.
+
+- `finalize_release` was the sharpest edge: the web app runs it on a bare
+  thread, so a hang during the merge, tag or push went nowhere at all and
+  left the release stuck at `merging`, showing "reload for the result"
+  forever. It now returns the release to `proposed` with the reason
+  attached, as it already did for a failure. A hang after the tag is pushed
+  is reported but not undone — the version shipped.
+
+Two `gh` calls are still caught by `CmdError` alone: the tracking issues a
+lead opens, and the close of an item found already shipped. A hang in
+either still escapes to the worker's per-cycle handler and is logged as a
+crashed cycle. Neither writes to a repo, so nothing is left half-landed,
+but neither is covered here.
+
 ## [0.25.0] - 2026-08-27
 
 ### Added

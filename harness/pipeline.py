@@ -888,10 +888,17 @@ async def merge_pr_item(project, item, validate: bool = True) -> None:
         if detail.get("baseRefName") != project["dev_branch"]:
             gh.retarget_pr(project["repo"], item["number"], project["dev_branch"])
         gh.merge_pr(project["repo"], item["number"])
-    except CmdError as e:
+    except (CmdError, subprocess.TimeoutExpired) as e:
+        # A gh that never answered leaves the merge in an unknown state —
+        # block it for a human either way rather than raise into the cycle,
+        # and name the hang so nobody reads it as a refused merge (#108).
+        reason = (f"timed out: {e}"
+                  if isinstance(e, subprocess.TimeoutExpired) else
+                  f"failed: {e}")
         db.update_item(name, "pr", item["number"], status="blocked",
-                       error=f"merge failed: {e}"[:2000])
-        db.log_event(f"Merging PR #{item['number']} failed", "warn", project=name)
+                       error=f"merge {reason}"[:2000])
+        db.log_event(f"Merging PR #{item['number']} {reason[:160]}", "warn",
+                     project=name)
         return
     db.update_item(name, "pr", item["number"], status="queued",
                    queued_at=db.now(), gh_state="merged", error="")
@@ -1081,8 +1088,13 @@ async def _propose_release_locked(project, queued) -> int | None:
         pr_number = gh.create_pr(
             project["repo"], project["main_branch"], project["dev_branch"],
             f"Release v{version}", out["notes_markdown"])
-    except CmdError as e:
-        db.log_event(f"Release PR creation failed: {e}", "warn", project=name)
+    except (CmdError, subprocess.TimeoutExpired) as e:
+        # A hung `gh pr create` is a release that did not get proposed, not a
+        # cycle that should die: log which it was and leave the changes
+        # queued for the next attempt (#108).
+        why = (f"timed out: {e}" if isinstance(e, subprocess.TimeoutExpired)
+               else f"failed: {e}")
+        db.log_event(f"Release PR creation {why}", "warn", project=name)
         return
     rid = db.create_release(name, version, out["notes_markdown"],
                             [f"{q['kind']}#{q['number']}" for q in queued])
@@ -1108,18 +1120,26 @@ def finalize_release(project, release) -> None:
             gh.run(["git", "tag", "-a", f"v{version}", "-m", f"Release v{version}"],
                    cwd=d)
             gh.run(["git", "push", "origin", f"v{version}"], cwd=d)
-    except CmdError as e:
+    except (CmdError, subprocess.TimeoutExpired) as e:
         # Back to proposed with the reason attached: left at 'merging' the
         # card shows "reload for the result" forever, with no button and no
-        # cause, until a restart sweeps it up.
-        db.update_release(release["id"], status="proposed", error=str(e)[:2000])
-        db.log_event(f"Release v{version} failed: {e}", "error", project=name)
+        # cause, until a restart sweeps it up. A hung merge, tag or push
+        # lands in exactly that state — worse, web.app runs this on a bare
+        # thread, so the exception would go nowhere at all (#108).
+        why = (f"timed out: {e}" if isinstance(e, subprocess.TimeoutExpired)
+               else str(e))
+        db.update_release(release["id"], status="proposed", error=why[:2000])
+        db.log_event(f"Release v{version} failed: {why}", "error", project=name)
         return
     try:
         gh.publish_release(project["repo"], f"v{version}", f"v{version}",
                            release["notes"])
-    except CmdError as e:
-        db.log_event(f"Tag pushed but GitHub release publish failed: {e}",
+    except (CmdError, subprocess.TimeoutExpired) as e:
+        # The tag is pushed either way, so the release is real: say what
+        # happened and carry on rather than undo a shipped version.
+        what = ("timed out" if isinstance(e, subprocess.TimeoutExpired)
+                else "failed")
+        db.log_event(f"Tag pushed but GitHub release publish {what}: {e}",
                      "warn", project=name)
     db.update_release(release["id"], status="released", released_at=db.now(),
                       error="")
@@ -1132,7 +1152,9 @@ def finalize_release(project, release) -> None:
                 try:
                     gh.close_issue(project["repo"], int(number),
                                    f"Fixed in v{version}.")
-                except CmdError:
+                except (CmdError, subprocess.TimeoutExpired):
+                    # Cosmetic: the fix shipped whether or not the issue
+                    # closed, and the next poll reconciles gh_state.
                     pass
     db.log_event(f"Released v{version} 🎉", project=name)
     notify.send(f"{name} v{version} released", "Tagged and published; CI is "
