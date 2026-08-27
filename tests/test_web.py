@@ -715,6 +715,25 @@ def test_project_page_shows_why_a_merge_was_refused(client, fresh_db):
     assert "required check &#39;test&#39; is failing" in body
 
 
+def test_the_release_list_says_when_a_version_shipped_over_a_red_build(
+        client, fresh_db):
+    """"released" on its own is what let twelve red releases look fine on
+    roanpms (#112). A version whose build went red says so in the list."""
+    rid = fresh_db.create_release("may", "8.8.8", "notes", [])
+    fresh_db.update_release(rid, status="released", released_at=fresh_db.now(),
+                            ci_status="failure")
+    body = client.get("/p/may").text
+    assert "v8.8.8" in body and "CI failure" in body
+
+    fresh_db.update_release(rid, ci_status="success")
+    assert "CI green" in client.get("/p/may").text
+    fresh_db.update_release(rid, ci_status="timeout")
+    assert "CI result unknown" in client.get("/p/may").text
+    # a project with no CI at all is not decorated either way
+    fresh_db.update_release(rid, ci_status="none")
+    assert "CI " not in client.get("/p/may").text.split("v8.8.8")[1][:200]
+
+
 def test_close_button_closes_the_item_and_the_issue(client, fresh_db,
                                                     monkeypatch):
     """Close as done is the terminal press for finished work — reject is for

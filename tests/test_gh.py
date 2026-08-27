@@ -176,6 +176,78 @@ def test_pr_diff_leaves_a_diff_exactly_at_the_limit_alone(fake):
     assert gh.pr_diff("owner/repo", 4, max_chars=100) == "x" * 100
 
 
+# --- reading: CI ------------------------------------------------------------
+#
+# commit_ci is what stops a release being announced as shipped over a red
+# build (#112). It is a read, but a read that lost -R would report the CI of
+# whatever repo harness itself is checked out in — green, always, and about
+# the wrong project.
+
+def test_commit_ci_asks_about_the_commit_in_the_named_repo(fake):
+    from harness import gh
+    fake.stdout = ('[{"databaseId": 1, "name": "ci", "status": "completed", '
+                   '"conclusion": "success", "url": "u"}]')
+    gh.commit_ci("owner/repo", "abc123")
+    assert fake.cmd == ["gh", "run", "list", "--commit", "abc123",
+                        "--limit", "20", "--json",
+                        "databaseId,name,status,conclusion,url",
+                        "-R", "owner/repo"]
+
+
+def test_commit_ci_is_done_and_green_when_every_run_passed(fake):
+    from harness import gh
+    fake.stdout = ('[{"status": "completed", "conclusion": "success", '
+                   '"url": "u1"},'
+                   ' {"status": "completed", "conclusion": "skipped", '
+                   '"url": "u2"}]')
+    assert gh.commit_ci("owner/repo", "abc") == {
+        "state": "done", "conclusion": "success", "url": "u1"}
+
+
+def test_commit_ci_reports_the_run_that_went_red(fake):
+    """The url has to be the failing run's, not the first run's: it is what
+    the operator and the follow-up issue are pointed at."""
+    from harness import gh
+    fake.stdout = ('[{"status": "completed", "conclusion": "success", '
+                   '"url": "green"},'
+                   ' {"status": "completed", "conclusion": "failure", '
+                   '"url": "red"}]')
+    assert gh.commit_ci("owner/repo", "abc") == {
+        "state": "done", "conclusion": "failure", "url": "red"}
+
+
+@pytest.mark.parametrize("conclusion", [
+    "failure", "timed_out", "cancelled", "startup_failure", "action_required",
+])
+def test_commit_ci_treats_anything_but_a_pass_as_red(fake, conclusion):
+    """Only success, skipped and neutral are builds that did what they
+    normally do. A cancelled or timed-out run published nothing either."""
+    from harness import gh
+    fake.stdout = ('[{"status": "completed", "conclusion": "%s", '
+                   '"url": "u"}]' % conclusion)
+    got = gh.commit_ci("owner/repo", "abc")
+    assert got["state"] == "done" and got["conclusion"] == conclusion
+
+
+def test_commit_ci_is_pending_while_any_run_is_unfinished(fake):
+    """An unfinished run has conclusion null — reading that as a verdict
+    would call every release green a second after the tag was pushed."""
+    from harness import gh
+    fake.stdout = ('[{"status": "completed", "conclusion": "success", '
+                   '"url": "u1"},'
+                   ' {"status": "in_progress", "conclusion": null, '
+                   '"url": "u2"}]')
+    assert gh.commit_ci("owner/repo", "abc") == {
+        "state": "pending", "conclusion": "", "url": "u1"}
+
+
+def test_commit_ci_says_none_when_no_run_exists_for_the_commit(fake):
+    from harness import gh
+    fake.stdout = "[]"
+    assert gh.commit_ci("owner/repo", "abc") == {
+        "state": "none", "conclusion": "", "url": ""}
+
+
 # --- acting: argv -----------------------------------------------------------
 
 def test_comment_issue(fake):

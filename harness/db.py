@@ -79,6 +79,10 @@ CREATE TABLE IF NOT EXISTS releases (
     pr_number INTEGER,
     notes TEXT NOT NULL DEFAULT '',
     items_json TEXT NOT NULL DEFAULT '[]',
+    -- what CI made of the tagged commit: '' not looked at, then one of
+    -- success | failure (or whatever conclusion GitHub gave) | none |
+    -- pending | unknown. See pipeline._report_release_ci.
+    ci_status TEXT NOT NULL DEFAULT '',
     created_at TEXT NOT NULL,
     released_at TEXT
 );
@@ -153,6 +157,7 @@ MIGRATIONS = [
     "ALTER TABLE questions ADD COLUMN routed_at TEXT NOT NULL DEFAULT ''",
     "ALTER TABLE questions ADD COLUMN ruling_passes INTEGER NOT NULL DEFAULT 0",
     "CREATE INDEX IF NOT EXISTS reports_scope ON reports(scope, project, id)",
+    "ALTER TABLE releases ADD COLUMN ci_status TEXT NOT NULL DEFAULT ''",
 ]
 
 # DB paths this process has already prepared: data directory made, journal

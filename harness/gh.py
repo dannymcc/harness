@@ -102,6 +102,41 @@ def pr_detail(repo: str, number: int) -> dict:
     ])
 
 
+# Conclusions GitHub reports for a run that did not actually go red.
+# Anything else — failure, timed_out, cancelled, startup_failure,
+# action_required — is a build that did not produce what it usually does.
+CI_OK_CONCLUSIONS = ("success", "skipped", "neutral")
+
+
+def commit_ci(repo: str, sha: str) -> dict:
+    """What GitHub Actions makes of one commit, as a single verdict.
+
+    Returns {"state", "conclusion", "url"} where state is:
+
+    - ``none``    — GitHub has no workflow run for the commit (yet, or at all)
+    - ``pending`` — at least one run is queued or still going
+    - ``done``    — every run has finished; ``conclusion`` is ``success``, or
+      the first non-success conclusion, and ``url`` points at that run.
+
+    Read-only, and wrapped like every other call here: a hang comes back as
+    CmdTimeout, a gh failure as CmdError, so a caller that catches CmdError
+    covers both.
+    """
+    runs = gh_json(repo, ["run", "list", "--commit", sha, "--limit", "20",
+                          "--json", "databaseId,name,status,conclusion,url"])
+    if not runs:
+        return {"state": "none", "conclusion": "", "url": ""}
+    first_url = runs[0].get("url") or ""
+    if any(r.get("status") != "completed" for r in runs):
+        return {"state": "pending", "conclusion": "", "url": first_url}
+    for r in runs:
+        if r.get("conclusion") not in CI_OK_CONCLUSIONS:
+            return {"state": "done",
+                    "conclusion": r.get("conclusion") or "failure",
+                    "url": r.get("url") or ""}
+    return {"state": "done", "conclusion": "success", "url": first_url}
+
+
 def pr_diff(repo: str, number: int, max_chars: int = 200_000) -> str:
     out = run(["gh", "pr", "diff", str(number), "-R", repo])
     if len(out) > max_chars:

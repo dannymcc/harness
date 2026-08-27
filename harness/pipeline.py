@@ -7,6 +7,7 @@ merged — an IC claiming success is never taken on trust.
 """
 import asyncio
 import json
+import time
 from datetime import datetime, timezone
 
 from . import agents, config, db, gh, repo, notify
@@ -1108,10 +1109,149 @@ async def _propose_release_locked(project, queued) -> int | None:
     return rid
 
 
+# How long finalize_release watches the tagged commit's CI before it gives
+# up and says so. Bounded on purpose: this waits on a worker thread that the
+# desk's cycle is holding, and an unbounded wait would be worse than not
+# knowing. A commit with no run at all after CI_NO_RUN_SECONDS is a project
+# whose workflows do not cover this push, not a slow queue.
+CI_WATCH_SECONDS = 300
+CI_POLL_SECONDS = 20
+CI_NO_RUN_SECONDS = 90
+
+# One open follow-up issue per desk is enough: the tree is red once, however
+# many releases go out over it. Matched by title prefix.
+CI_FAILURE_TITLE = "CI is red on the release commit"
+
+
+def _watch_release_ci(project, sha: str) -> dict:
+    """Poll the tagged commit's CI until it concludes, or the cap runs out.
+
+    Returns gh.commit_ci's dict, with two states of our own: ``timeout``
+    (still running when the cap ran out) and ``unknown`` (gh could not be
+    asked). Neither is treated as success anywhere — not knowing whether the
+    images moved is exactly the thing being reported (#112).
+    """
+    name = project["name"]
+    started = time.monotonic()
+    while True:
+        # Ask after a poll interval, never the instant the tag went up:
+        # GitHub takes a moment to register the run a push starts, and a
+        # commit whose runs have not appeared yet reads as 'none'.
+        time.sleep(CI_POLL_SECONDS)
+        try:
+            ci = gh.commit_ci(project["repo"], sha)
+        except CmdError as e:
+            what = "timed out" if isinstance(e, CmdTimeout) else "failed"
+            db.log_event(f"Could not read CI for the release commit "
+                         f"({what}): {str(e)[:200]}", "warn", project=name)
+            return {"state": "unknown", "conclusion": "", "url": ""}
+        waited = time.monotonic() - started
+        if ci["state"] == "done":
+            return ci
+        if ci["state"] == "none" and waited >= CI_NO_RUN_SECONDS:
+            return ci
+        if waited + CI_POLL_SECONDS >= CI_WATCH_SECONDS:
+            return {"state": "timeout", "conclusion": "", "url": ci["url"]}
+
+
+def _open_ci_failure_issue(project, version: str, ci: dict) -> None:
+    """File the red build as work, naming the run that went red.
+
+    Behind the same file_issues gate as the lead's tracking issues: opening
+    an issue on your own repo is an outward action.
+    """
+    name = project["name"]
+    if db.policy(name, "file_issues") != "auto":
+        db.log_event("CI went red on the release commit but file_issues is "
+                     "off — no follow-up issue filed", "warn", project=name)
+        return
+    already = [i for i in db.project_items(name)
+               if i["kind"] == "issue" and i["gh_state"] == "open"
+               and i["title"].startswith(CI_FAILURE_TITLE)]
+    if already:
+        db.log_event(f"CI still red at v{version} — issue "
+                     f"#{already[0]['number']} is already open for it",
+                     "warn", project=name)
+        return
+    title = f"{CI_FAILURE_TITLE} (v{version})"
+    body = (f"The `v{version}` tag is pushed, but the GitHub Actions run for "
+            f"that commit finished `{ci['conclusion']}`. Anything that "
+            "workflow publishes — images, packages, docs — has not moved, "
+            "so the deployed version is still whatever the last green build "
+            "produced.\n\n"
+            f"Failed run: {ci['url'] or '(no run URL reported)'}\n\n"
+            "Every release cut while this is red will ship a tag and no "
+            "build.")
+    try:
+        num = gh.create_issue(project["repo"], title, body)
+    except CmdError as e:
+        # A filing that failed or hung must not lose the release's own
+        # reporting below it: the event and the notification still go out.
+        db.log_event(f"Could not open the CI failure issue: {str(e)[:120]}",
+                     "warn", project=name)
+        return
+    db.upsert_item(name, "issue", num, title, "harness", "open", db.now())
+    db.log_event(f"Opened issue #{num}: {title}", project=name)
+
+
+def _report_release_ci(project, release, sha: str) -> None:
+    """Report what the release's build did, rather than what it usually does.
+
+    The tag is pushed by the time this runs, so none of this undoes a
+    release — it decides what the operator is told about it (#112): green,
+    red (with the failed run named and filed), or honestly unknown.
+    """
+    name, version = project["name"], release["version"]
+    click = f"/p/{name}"
+    ci = (_watch_release_ci(project, sha) if sha else
+          {"state": "unknown", "conclusion": "", "url": ""})
+    stored = ci["conclusion"] if ci["state"] == "done" else ci["state"]
+    db.update_release(release["id"], ci_status=stored)
+    where = f" — {ci['url']}" if ci["url"] else ""
+
+    if ci["state"] == "done" and ci["conclusion"] == "success":
+        db.log_event(f"CI is green on the v{version} commit", project=name)
+        notify.send(f"{name} v{version} released",
+                    "Tagged and published; CI on the release commit is "
+                    "green.", tags="tada", click_path=click)
+        return
+    if ci["state"] == "done":
+        db.log_event(f"v{version} is tagged, but CI on the release commit "
+                     f"finished {ci['conclusion']} — nothing that build "
+                     f"publishes has moved{where}", "error", project=name)
+        _open_ci_failure_issue(project, version, ci)
+        notify.send(f"{name} v{version}: CI is red",
+                    f"The tag is pushed, but the build for it finished "
+                    f"{ci['conclusion']} — nothing it publishes (images, "
+                    "packages, docs) has moved." + where,
+                    priority="high", tags="rotating_light", click_path=click)
+        return
+    if ci["state"] == "none":
+        db.log_event(f"v{version} tagged; no CI run exists for that commit, "
+                     "so there is no build to report", project=name)
+        notify.send(f"{name} v{version} released",
+                    "Tagged and published. No CI run covers the release "
+                    "commit, so nothing was built here.",
+                    tags="tada", click_path=click)
+        return
+    why = ("was still running after "
+           f"{CI_WATCH_SECONDS // 60} minutes" if ci["state"] == "timeout"
+           else "could not be read")
+    db.log_event(f"v{version} tagged, but CI {why} — whether the build "
+                 f"published anything is unconfirmed{where}", "warn",
+                 project=name)
+    notify.send(f"{name} v{version} released — CI result unknown",
+                f"The tag is pushed, but CI {why}, so whether that build "
+                "published anything is unconfirmed." + where,
+                tags="warning", click_path=click)
+
+
 def finalize_release(project, release) -> None:
-    """Merge the release PR into main and push the version tag."""
+    """Merge the release PR into main, push the version tag, then say what
+    CI actually made of it."""
     name = project["name"]
     version = release["version"]
+    sha = ""
     try:
         gh.merge_pr(project["repo"], release["pr_number"], squash=False)
         with repo.clone_lock(project):
@@ -1119,6 +1259,7 @@ def finalize_release(project, release) -> None:
             gh.run(["git", "tag", "-a", f"v{version}", "-m", f"Release v{version}"],
                    cwd=d)
             gh.run(["git", "push", "origin", f"v{version}"], cwd=d)
+            sha = gh.run(["git", "rev-parse", "HEAD"], cwd=d).strip()
     except CmdError as e:
         # Back to proposed with the reason attached: left at 'merging' the
         # card shows "reload for the result" forever, with no button and no
@@ -1156,8 +1297,7 @@ def finalize_release(project, release) -> None:
                     # closed, and the next poll reconciles gh_state.
                     pass
     db.log_event(f"Released v{version} 🎉", project=name)
-    notify.send(f"{name} v{version} released", "Tagged and published; CI is "
-                "building the images.", tags="tada", click_path=f"/p/{name}")
+    _report_release_ci(project, release, sha)
 
 
 # --- cycle ------------------------------------------------------------------
