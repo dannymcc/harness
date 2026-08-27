@@ -4,6 +4,37 @@ All notable changes to Harness are recorded here. The format is
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project
 follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.24.1] - 2026-08-27
+
+### Fixed
+
+- **A hung test command no longer takes the whole cycle down with it**
+  (#102). `subprocess.TimeoutExpired` is not a `CmdError`, so a project
+  suite that stopped responding escaped `repo.run_tests` past handlers that
+  only caught `CmdError`: the cycle crashed, the PR item stayed `new` and
+  was reviewed again on the next poll, and again after that, with no run
+  recorded for the circuit breaker to count and nothing said to the
+  contributor. `run_tests` and `ensure_test_env` now catch a timeout and
+  treat it as the failed suite it is.
+
+- The failure tail from a timed-out command now ends with the limit that
+  was blown — "the command timed out after 1800s; any output above is
+  partial" — so a run that got halfway does not read as a plain test
+  failure. It goes last because every caller reads the tail from the end,
+  where a note at the top would be the first thing trimmed.
+
+- The two other places that ran git for a PR say which of the two things
+  went wrong. `review_item`'s checkout guard parks a PR whose checkout
+  timed out as `waiting_human` with the reason on the item, rather than
+  crashing; `_pr_merges_clean_and_passes` blocks either way, but a hung
+  command is now reported as a hang rather than as a branch that does not
+  merge cleanly.
+
+Note that a `gh` call that hangs is still caught only by the worker's
+per-cycle handler, which logs it as a crashed cycle. That is a narrower
+problem than the one #102 reported — the item is not re-reviewed on a loop —
+but it is not fixed here.
+
 ## [0.24.0] - 2026-08-27
 
 ### Added
