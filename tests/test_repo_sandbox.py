@@ -212,6 +212,42 @@ def test_a_rewritten_pr_head_is_fetched_over_the_stale_one(project, origin,
     repo.remove_pr_run(project, 1)
 
 
+def test_the_pr_branches_go_when_the_run_does(project, origin):
+    """fetch_pr_branch leaves pr-N and harness/pr-N in the shared clone, and
+    each of them pins that PR's objects against gc. remove_pr_run has to take
+    both away, from wherever it is called and however often (#118)."""
+    from harness import repo
+
+    def branches():
+        out = subprocess.run(["git", "branch", "--format=%(refname:short)"],
+                             cwd=repo.repo_dir(project), capture_output=True,
+                             text=True, check=True).stdout
+        return out.split()
+
+    # Called before the clone exists at all — a cleanup path after an early
+    # failure — it must be a quiet no-op.
+    repo.remove_pr_run(project, 1)
+
+    clone = repo.repo_dir(project)
+    subprocess.run(["git", "clone", "-q", str(origin), str(clone)], check=True)
+    repo.fetch_pr_branch(project, 1, "harness/pr-1")
+    assert set(branches()) >= {"pr-1", "harness/pr-1"}
+
+    # HEAD is standing on harness/pr-1 at this point, so the branch cannot be
+    # deleted where it is: the clone goes back to dev first.
+    repo.remove_pr_run(project, 1)
+    assert branches() == [project["dev_branch"]]
+    assert not repo.pr_run_dir(project, 1).exists()
+
+    repo.remove_pr_run(project, 1)      # twice in a row: still fine
+    assert branches() == [project["dev_branch"]]
+
+    # And the clone is still usable afterwards.
+    checkout = repo.fetch_pr_branch(project, 1, "harness/pr-1")
+    assert (checkout / "contributed.txt").read_text() == "from the PR\n"
+    repo.remove_pr_run(project, 1)
+
+
 # --- landing on a moved dev: the failure paths must not strand the fix -----
 
 def test_failed_land_pushes_a_safety_branch_and_says_so(project, origin, tmp_path):
