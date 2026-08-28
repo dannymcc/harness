@@ -183,6 +183,35 @@ def test_pr_code_is_tested_in_a_disposable_clone(project, origin):
     assert not (clone / ".git" / "hooks" / "pre-commit").exists()
 
 
+def test_a_rewritten_pr_head_is_fetched_over_the_stale_one(project, origin,
+                                                           tmp_path):
+    """The local pr-N branch survives between attempts, so a PR that was
+    force-pushed, rebased, amended or squashed has a head that is no longer a
+    descendant of what was fetched last time. The fetch has to overwrite the
+    ref rather than refuse it, or the PR is stuck at that line for ever."""
+    from harness import repo
+    clone = repo.repo_dir(project)
+    subprocess.run(["git", "clone", "-q", str(origin), str(clone)], check=True)
+
+    checkout = repo.fetch_pr_branch(project, 1, "harness/pr-1")
+    assert (checkout / "contributed.txt").read_text() == "from the PR\n"
+
+    # Rewrite the PR head: back to base, different content — not a descendant.
+    work = tmp_path / "rewrite"
+    _git("clone", "-q", str(origin), str(work), cwd=tmp_path)
+    _git("checkout", "-qb", "contrib", "HEAD", cwd=work)
+    (work / "contributed.txt").write_text("from the rewritten PR\n")
+    _git("add", "-A", cwd=work)
+    _git("commit", "-qm", "rewritten contribution", cwd=work)
+    _git("push", "-q", "origin", "contrib:refs/pull/1/head", "--force",
+         cwd=work)
+
+    checkout = repo.fetch_pr_branch(project, 1, "harness/pr-1")
+    assert (checkout / "contributed.txt").read_text() == \
+        "from the rewritten PR\n"
+    repo.remove_pr_run(project, 1)
+
+
 # --- landing on a moved dev: the failure paths must not strand the fix -----
 
 def test_failed_land_pushes_a_safety_branch_and_says_so(project, origin, tmp_path):

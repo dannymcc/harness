@@ -526,7 +526,13 @@ def fetch_pr_branch(project, number: int, branch: str) -> Path:
     Returns the checkout; the caller must remove_pr_run() when done.
     """
     d = clean_checkout(project, project["dev_branch"])
-    run(["git", "fetch", "origin", f"pull/{number}/head:pr-{number}"], cwd=d)
+    # Forced refspec: the local pr-N branch outlives the run, and a PR whose
+    # head was rewritten (force-push, rebase, amend, squash) is no longer a
+    # descendant of what was fetched last time. Unforced, git would refuse the
+    # update as non-fast-forward and the PR would be stuck at this line for
+    # good.
+    run(["git", "fetch", "origin",
+         f"+refs/pull/{number}/head:refs/heads/pr-{number}"], cwd=d)
     run(["git", "checkout", "-B", branch, f"origin/{project['dev_branch']}"], cwd=d)
     run(["git", "merge", "--no-edit", f"pr-{number}"], cwd=d)  # raises on conflict
     remove_pr_run(project, number)
