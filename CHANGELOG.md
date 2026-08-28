@@ -4,6 +4,28 @@ All notable changes to Harness are recorded here. The format is
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project
 follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.27.2] - 2026-08-28
+
+### Fixed
+
+- **Reviewing a pull request no longer leaves branches behind in the shared
+  clone** (#118). `fetch_pr_branch` makes two local branches per PR — `pr-N`
+  for the contributor's head and `harness/pr-N` for that head merged onto dev
+  — and nothing removed either of them. The clone therefore grew by two refs
+  for every pull request ever reviewed, and each ref pinned that PR's objects
+  against garbage collection, so a long-lived harness kept the whole history
+  of every branch it had ever looked at.
+
+- `remove_pr_run` now deletes both branches along with the run directory. It
+  is best effort throughout — a clone that doesn't exist yet, a branch that
+  was never made, a second call after the first tidied up are all quiet
+  no-ops — because it runs on cleanup paths that must not be the thing that
+  raises. Where the clone is standing on one of the branches it is about to
+  delete, it is parked back on dev first. Existing clones shed their
+  accumulated `pr-*` branches as those pull requests come round again; the
+  ones already merged or closed can be cleared by deleting `data/repos`,
+  which is rebuilt.
+
 ## [0.27.1] - 2026-08-28
 
 ### Fixed
