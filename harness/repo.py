@@ -526,16 +526,19 @@ def fetch_pr_branch(project, number: int, branch: str) -> Path:
     Returns the checkout; the caller must remove_pr_run() when done.
     """
     d = clean_checkout(project, project["dev_branch"])
-    # Forced refspec: the local pr-N branch outlives the run, and a PR whose
-    # head was rewritten (force-push, rebase, amend, squash) is no longer a
-    # descendant of what was fetched last time. Unforced, git would refuse the
-    # update as non-fast-forward and the PR would be stuck at this line for
-    # good.
+    # Forced refspec: remove_pr_run drops the local pr-N branch after a clean
+    # run, but a run that died (or a harness killed mid-review) leaves it
+    # behind, and a PR whose head was rewritten (force-push, rebase, amend,
+    # squash) is no longer a descendant of what was fetched last time.
+    # Unforced, git would refuse the update as non-fast-forward and the PR
+    # would be stuck at this line for good.
     run(["git", "fetch", "origin",
          f"+refs/pull/{number}/head:refs/heads/pr-{number}"], cwd=d)
     run(["git", "checkout", "-B", branch, f"origin/{project['dev_branch']}"], cwd=d)
     run(["git", "merge", "--no-edit", f"pr-{number}"], cwd=d)  # raises on conflict
-    remove_pr_run(project, number)
+    # The directory only: both branches are in use here — HEAD is on one, and
+    # the merge that is about to be cloned out came from the other.
+    _remove_pr_run_dir(project, number)
     hooks = pr_run_dir(project, number) / "no-hooks"
     hooks.mkdir(parents=True)
     checkout = pr_run_dir(project, number) / "repo"
@@ -544,9 +547,47 @@ def fetch_pr_branch(project, number: int, branch: str) -> Path:
     return checkout
 
 
-def remove_pr_run(project, number: int) -> None:
-    """Delete a PR's throwaway checkout, venv and scratch home."""
+def _remove_pr_run_dir(project, number: int) -> None:
     shutil.rmtree(pr_run_dir(project, number), ignore_errors=True)
+
+
+def _remove_pr_branches(project, number: int) -> None:
+    """Drop the two local branches a PR review leaves in the shared clone.
+
+    fetch_pr_branch makes pr-N (the contributor's head) and harness/pr-N (that
+    head merged onto dev). Nothing used to remove either, so the clone grew by
+    two refs per PR reviewed and each of them pinned that PR's objects against
+    gc for ever (#118).
+
+    Best effort throughout: this runs on cleanup paths, often in a finally,
+    and must never be the thing that raises there. A clone that is not there
+    yet, a branch that was never made, a second call after the first already
+    tidied up — all no-ops.
+    """
+    d = repo_dir(project)
+    if not (d / ".git").exists():
+        return
+    branches = [f"pr-{number}", f"harness/pr-{number}"]
+    try:
+        head = run(["git", "rev-parse", "--abbrev-ref", "HEAD"], cwd=d,
+                   check=False, timeout=60).strip()
+        if head in branches:
+            # git will not delete the branch it is standing on; park the clone
+            # back on dev, which is where clean_checkout leaves it anyway.
+            run(["git", "checkout", "-f", project["dev_branch"]], cwd=d,
+                check=False, timeout=120)
+        for branch in branches:
+            run(["git", "branch", "-D", branch], cwd=d, check=False,
+                timeout=60)
+    except CmdError:    # covers CmdTimeout: a hung git here is not worth a crash
+        pass
+
+
+def remove_pr_run(project, number: int) -> None:
+    """Delete a PR's throwaway checkout, venv and scratch home, and the local
+    branches its review left behind in harness's clone."""
+    _remove_pr_run_dir(project, number)
+    _remove_pr_branches(project, number)
 
 
 # --- tests ------------------------------------------------------------------
