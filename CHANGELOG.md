@@ -4,6 +4,23 @@ All notable changes to Harness are recorded here. The format is
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project
 follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.27.1] - 2026-08-28
+
+### Fixed
+
+- **A pull request whose head was rewritten is no longer stuck for ever**
+  (#116). `fetch_pr_branch` fetched `pull/N/head` into a local `pr-N` branch
+  with an unforced refspec, so the ref update was fast-forward-only. That
+  branch outlives the attempt and `clean_checkout` never removes it, so once
+  a contributor force-pushed, rebased, amended or squashed their branch the
+  new head was no longer a descendant of what had been fetched before: git
+  refused the update as non-fast-forward and the PR failed at the same line
+  on every cycle, never to be reviewed or merged.
+
+- The fetch now uses `+refs/pull/N/head:refs/heads/pr-N`, which is
+  idempotent whether or not the local ref exists. Any PR already wedged this
+  way recovers on its next pass without intervention.
+
 ## [0.27.0] - 2026-08-27
 
 ### Added
